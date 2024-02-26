@@ -1,0 +1,18 @@
+[package]
+name = "dt-parser"
+edition = "2021"
+description = "Error-resilient Devicetree parser"
+
+version.workspace = true
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+either = "1.10.0"
+winnow = { version = "0.6.2", features = ["unstable-recover"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4.0"

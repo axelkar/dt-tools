@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Axel Karjalainen <axel@axka.fi>"]
+readme = "README.md"
+homepage = "https://git.axka.fi/dt-tools.git/about/"
+repository = "https://github.com/axelkar/dt-tools"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+dt-parser.path = "./crates/dt-parser"
+dt-analyzer.path = "./crates/dt-analyzer"
+dt-lint.path = "./crates/dt-lint"

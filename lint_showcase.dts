@@ -1,0 +1,14 @@
+// This file showcases different lints dt-lint has
+/plugin/;
+/dts-v1/;
+
+/ {
+  My_Label: Foo@0xA4 {
+    MyProp = "";
+  };
+  foo = "bar"
+};
+
+&My_Label {
+  company,prop = "";
+};

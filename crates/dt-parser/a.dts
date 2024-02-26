@@ -1,0 +1,30 @@
+/dts-v1/;
+
+/ {
+  model = "Qualcomm Technologies, Inc. Lagoon MTP Ebba";
+	compatible = "qcom,lagoon-mtp", "qcom,lagoon", "qcom,mtp";
+	qcom,msm-id = <434 0x10000>, <459 0x10000>;
+	interrupt-parent = <0x01>;
+	#address-cells = <0x02>;
+	#size-cells = <0x02>;
+	qcom,board-id = <8 0>;
+	oplus,dtsi_no = <20813>;
+
+	memory {
+		ddr_device_type = <0x07>;
+		device_type = "memory";
+		reg = <0x00 0x80000000 0x00 0x3bb00000 0x01 0x80000000 0x01 0x00 0x00 0xc0000000 0x00 0xc0000000>;
+	};
+
+  a: foo {
+    setting = <2>;
+  };
+
+  bar {
+    ref-to-foo = <&a>;
+    empty;
+  };
+
+  //foo
+  /* bar */
+};

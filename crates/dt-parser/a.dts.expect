@@ -1,0 +1,280 @@
+Document@0..582
+  Directive@0..9
+    Slash@0..1 "/"
+    Ident@1..7
+      Ident@1..7 "dts-v1"
+    Slash@7..8 "/"
+    Semicolon@8..9 ";"
+  Whitespace@9..11 "\n\n"
+  DtNode@11..581
+    Ident@11..12
+      Ident@11..12 "/"
+    Whitespace@12..13 " "
+    LCurly@13..14 "{"
+    Whitespace@14..17 "\n  "
+    DtProperty@17..71
+      Ident@17..22
+        Ident@17..22 "model"
+      Whitespace@22..23 " "
+      Equals@23..24 "="
+      Whitespace@24..25 " "
+      DtString@25..70
+        DoubleQuote@25..26 "\""
+        DtStringContents@26..69 "Qualcomm Technologies, Inc. Lagoon MTP Ebba"
+        DoubleQuote@69..70 "\""
+      Semicolon@70..71 ";"
+    Whitespace@71..73 "\n\t"
+    DtProperty@73..131
+      Ident@73..83
+        Ident@73..83 "compatible"
+      Whitespace@83..84 " "
+      Equals@84..85 "="
+      Whitespace@85..86 " "
+      DtString@86..103
+        DoubleQuote@86..87 "\""
+        DtStringContents@87..102 "qcom,lagoon-mtp"
+        DoubleQuote@102..103 "\""
+      Separator@103..105
+        Comma@103..104 ","
+        Whitespace@104..105 " "
+      DtString@105..118
+        DoubleQuote@105..106 "\""
+        DtStringContents@106..117 "qcom,lagoon"
+        DoubleQuote@117..118 "\""
+      Separator@118..120
+        Comma@118..119 ","
+        Whitespace@119..120 " "
+      DtString@120..130
+        DoubleQuote@120..121 "\""
+        DtStringContents@121..129 "qcom,mtp"
+        DoubleQuote@129..130 "\""
+      Semicolon@130..131 ";"
+    Whitespace@131..133 "\n\t"
+    DtProperty@133..176
+      Ident@133..144
+        Ident@133..144 "qcom,msm-id"
+      Whitespace@144..145 " "
+      Equals@145..146 "="
+      Whitespace@146..147 " "
+      DtCell@147..160
+        LAngle@147..148 "<"
+        DtNumber@148..151 "434"
+        Separator@151..152
+          Whitespace@151..152 " "
+        DtNumber@152..159 "0x10000"
+        RAngle@159..160 ">"
+      Separator@160..162
+        Comma@160..161 ","
+        Whitespace@161..162 " "
+      DtCell@162..175
+        LAngle@162..163 "<"
+        DtNumber@163..166 "459"
+        Separator@166..167
+          Whitespace@166..167 " "
+        DtNumber@167..174 "0x10000"
+        RAngle@174..175 ">"
+      Semicolon@175..176 ";"
+    Whitespace@176..178 "\n\t"
+    DtProperty@178..204
+      Ident@178..194
+        Ident@178..194 "interrupt-parent"
+      Whitespace@194..195 " "
+      Equals@195..196 "="
+      Whitespace@196..197 " "
+      DtCell@197..203
+        LAngle@197..198 "<"
+        DtNumber@198..202 "0x01"
+        RAngle@202..203 ">"
+      Semicolon@203..204 ";"
+    Whitespace@204..206 "\n\t"
+    DtProperty@206..230
+      Ident@206..220
+        Ident@206..220 "#address-cells"
+      Whitespace@220..221 " "
+      Equals@221..222 "="
+      Whitespace@222..223 " "
+      DtCell@223..229
+        LAngle@223..224 "<"
+        DtNumber@224..228 "0x02"
+        RAngle@228..229 ">"
+      Semicolon@229..230 ";"
+    Whitespace@230..232 "\n\t"
+    DtProperty@232..253
+      Ident@232..243
+        Ident@232..243 "#size-cells"
+      Whitespace@243..244 " "
+      Equals@244..245 "="
+      Whitespace@245..246 " "
+      DtCell@246..252
+        LAngle@246..247 "<"
+        DtNumber@247..251 "0x02"
+        RAngle@251..252 ">"
+      Semicolon@252..253 ";"
+    Whitespace@253..255 "\n\t"
+    DtProperty@255..277
+      Ident@255..268
+        Ident@255..268 "qcom,board-id"
+      Whitespace@268..269 " "
+      Equals@269..270 "="
+      Whitespace@270..271 " "
+      DtCell@271..276
+        LAngle@271..272 "<"
+        DtNumber@272..273 "8"
+        Separator@273..274
+          Whitespace@273..274 " "
+        DtNumber@274..275 "0"
+        RAngle@275..276 ">"
+      Semicolon@276..277 ";"
+    Whitespace@277..279 "\n\t"
+    DtProperty@279..303
+      Ident@279..292
+        Ident@279..292 "oplus,dtsi_no"
+      Whitespace@292..293 " "
+      Equals@293..294 "="
+      Whitespace@294..295 " "
+      DtCell@295..302
+        LAngle@295..296 "<"
+        DtNumber@296..301 "20813"
+        RAngle@301..302 ">"
+      Semicolon@302..303 ";"
+    Whitespace@303..306 "\n\n\t"
+    DtNode@306..473
+      Ident@306..312
+        Ident@306..312 "memory"
+      Whitespace@312..313 " "
+      LCurly@313..314 "{"
+      Whitespace@314..317 "\n\t\t"
+      DtProperty@317..342
+        Ident@317..332
+          Ident@317..332 "ddr_device_type"
+        Whitespace@332..333 " "
+        Equals@333..334 "="
+        Whitespace@334..335 " "
+        DtCell@335..341
+          LAngle@335..336 "<"
+          DtNumber@336..340 "0x07"
+          RAngle@340..341 ">"
+        Semicolon@341..342 ";"
+      Whitespace@342..345 "\n\t\t"
+      DtProperty@345..368
+        Ident@345..356
+          Ident@345..356 "device_type"
+        Whitespace@356..357 " "
+        Equals@357..358 "="
+        Whitespace@358..359 " "
+        DtString@359..367
+          DoubleQuote@359..360 "\""
+          DtStringContents@360..366 "memory"
+          DoubleQuote@366..367 "\""
+        Semicolon@367..368 ";"
+      Whitespace@368..371 "\n\t\t"
+      DtProperty@371..469
+        Ident@371..374
+          Ident@371..374 "reg"
+        Whitespace@374..375 " "
+        Equals@375..376 "="
+        Whitespace@376..377 " "
+        DtCell@377..468
+          LAngle@377..378 "<"
+          DtNumber@378..382 "0x00"
+          Separator@382..383
+            Whitespace@382..383 " "
+          DtNumber@383..393 "0x80000000"
+          Separator@393..394
+            Whitespace@393..394 " "
+          DtNumber@394..398 "0x00"
+          Separator@398..399
+            Whitespace@398..399 " "
+          DtNumber@399..409 "0x3bb00000"
+          Separator@409..410
+            Whitespace@409..410 " "
+          DtNumber@410..414 "0x01"
+          Separator@414..415
+            Whitespace@414..415 " "
+          DtNumber@415..425 "0x80000000"
+          Separator@425..426
+            Whitespace@425..426 " "
+          DtNumber@426..430 "0x01"
+          Separator@430..431
+            Whitespace@430..431 " "
+          DtNumber@431..435 "0x00"
+          Separator@435..436
+            Whitespace@435..436 " "
+          DtNumber@436..440 "0x00"
+          Separator@440..441
+            Whitespace@440..441 " "
+          DtNumber@441..451 "0xc0000000"
+          Separator@451..452
+            Whitespace@451..452 " "
+          DtNumber@452..456 "0x00"
+          Separator@456..457
+            Whitespace@456..457 " "
+          DtNumber@457..467 "0xc0000000"
+          RAngle@467..468 ">"
+        Semicolon@468..469 ";"
+      Whitespace@469..471 "\n\t"
+      RCurly@471..472 "}"
+      Semicolon@472..473 ";"
+    Whitespace@473..477 "\n\n  "
+    DtNode@477..509
+      DtLabel@477..480
+        Ident@477..478
+          Ident@477..478 "a"
+        Colon@478..479 ":"
+        Whitespace@479..480 " "
+      Ident@480..483
+        Ident@480..483 "foo"
+      Whitespace@483..484 " "
+      LCurly@484..485 "{"
+      Whitespace@485..490 "\n    "
+      DtProperty@490..504
+        Ident@490..497
+          Ident@490..497 "setting"
+        Whitespace@497..498 " "
+        Equals@498..499 "="
+        Whitespace@499..500 " "
+        DtCell@500..503
+          LAngle@500..501 "<"
+          DtNumber@501..502 "2"
+          RAngle@502..503 ">"
+        Semicolon@503..504 ";"
+      Whitespace@504..507 "\n  "
+      RCurly@507..508 "}"
+      Semicolon@508..509 ";"
+    Whitespace@509..513 "\n\n  "
+    DtNode@513..557
+      Ident@513..516
+        Ident@513..516 "bar"
+      Whitespace@516..517 " "
+      LCurly@517..518 "{"
+      Whitespace@518..523 "\n    "
+      DtProperty@523..541
+        Ident@523..533
+          Ident@523..533 "ref-to-foo"
+        Whitespace@533..534 " "
+        Equals@534..535 "="
+        Whitespace@535..536 " "
+        DtCell@536..540
+          LAngle@536..537 "<"
+          DtPhandle@537..539
+            Ampersand@537..538 "&"
+            Ident@538..539
+              Ident@538..539 "a"
+          RAngle@539..540 ">"
+        Semicolon@540..541 ";"
+      Whitespace@541..546 "\n    "
+      DtProperty@546..552
+        Ident@546..551
+          Ident@546..551 "empty"
+        Semicolon@551..552 ";"
+      Whitespace@552..555 "\n  "
+      RCurly@555..556 "}"
+      Semicolon@556..557 ";"
+    Whitespace@557..561 "\n\n  "
+    Comment@561..566 "//foo"
+    Whitespace@566..569 "\n  "
+    Comment@569..578 "/* bar */"
+    Whitespace@578..579 "\n"
+    RCurly@579..580 "}"
+    Semicolon@580..581 ";"
+  Whitespace@581..582 "\n"

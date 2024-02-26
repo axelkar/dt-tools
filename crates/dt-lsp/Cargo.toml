@@ -1,0 +1,24 @@
+[package]
+name = "dt-lsp"
+edition = "2021"
+description = "Devicetree language server"
+
+version.workspace = true
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+compact_str = "0.7.1"
+dashmap = "5.5.3"
+ropey = "1.6.1"
+smallstr = "0.3.0"
+smallvec = "1.13.1"
+tokio = { version = "1.36.0", features = ["fs", "rt-multi-thread", "macros", "io-std", "net", "io-util"] }
+tower-lsp = "0.20.0"
+winnow = "0.6.2"
+dt-parser.workspace = true
+dt-analyzer.workspace = true
+dt-lint.workspace = true
