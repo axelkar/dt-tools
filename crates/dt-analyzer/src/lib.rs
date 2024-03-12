@@ -5,6 +5,7 @@
 //! # Examples
 //!
 //! ```
+//! use std::collections::HashMap;
 //! use dt_analyzer::{analyze_cst, PropDefinition, Value};
 //! use dt_parser::Span;
 //! let text = "
@@ -22,11 +23,14 @@
 //! };
 //! ";
 //! let cst = dt_parser::parse(text).unwrap();
-//! let hm = analyze_cst(cst, text).unwrap().props;
+//! let hm: HashMap<_, _> = analyze_cst(cst, text).unwrap().tree
+//!     .dfs_iter()
+//!     .map(|(path, value)| (path.join("/"), value))
+//!     .collect();
 //! eprintln!("{hm:#?}");
-//! assert_eq!(hm["a"][0].value, Value::U32(1));
-//! assert_eq!(hm["foo/b"][0].value, Value::U32(2));
-//! assert_eq!(hm["foo/c"][0].value, Value::U32(3));
+//! assert_eq!(hm["a"], Value::U32(1));
+//! assert_eq!(hm["foo/b"], Value::U32(2));
+//! assert_eq!(hm["foo/c"], Value::U32(3));
 //! assert_eq!(hm.len(), 3);
 //! ```
 
@@ -36,10 +40,10 @@ use dt_parser::{
     ast::{self, AstNode as _, HasIdent, HasLabel},
     cst::RedNode,
 };
-use prop::DefinitionTree;
 pub use prop::{
     analyze_node, CustomValue, CustomValueCellItem, PhandleTarget, PropDefinition, Value,
     ValueFromAstError,
+    DefinitionTree, DefinitionTreeNode
 };
 pub use string::StringParseError;
 
@@ -48,7 +52,7 @@ mod string;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDefinition {
-    pub tree: DefinitionTree,
+    pub tree: DefinitionTreeNode,
     pub labels: HashMap<String, Vec<Label>>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]

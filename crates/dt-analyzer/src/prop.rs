@@ -14,7 +14,7 @@ pub struct PropDefinition {
     pub node: ast::DtProperty,
 }
 
-// TODO: make this lazy, i.e. only compute a certain node when referencing it
+// TODO: make this lazy, i.e. only find a certain node from the tree when referencing it
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefinitionTree {
@@ -22,17 +22,57 @@ pub enum DefinitionTree {
         value: Value,
         ast: ast::DtProperty
     },
-    Node {
-        children: HashMap<String, Vec1<DefinitionTree>>,
-    }
+    Node(DefinitionTreeNode)
 }
 impl DefinitionTree {
+    /// Wraps self in a [`DefinitionTree::Node`] until `prefix` returns none
     pub fn prefix(self, mut prefix: impl Iterator<Item = String>) -> Self {
         if let Some(name) = prefix.next() {
-            Self::Node {
+            Self::Node(DefinitionTreeNode {
                 children: {
                     let mut hm = HashMap::new();
                     hm.insert(name, vec1::vec1![self.prefix(prefix)]);
+                    hm
+                }
+            })
+        } else {
+            self
+        }
+    }
+    pub fn into_json(self) -> serde_json::Value {
+        match self {
+            Self::Prop { value, .. } => {
+                serde_json::Value::Array(value.into_custom_value().into_iter().flat_map(|cv| match cv.into_json() {
+                    // flatten cells
+                    serde_json::Value::Array(arr) => Either::Left(arr.into_iter()),
+                    other => Either::Right(std::iter::once(other))
+                }).collect())
+            },
+            Self::Node(node) => {
+                serde_json::Value::Object({
+                    let mut map = serde_json::Map::new();
+                    for (name, definitions) in node.children {
+                        map.insert(name, definitions.last().clone().into_json());
+                    }
+                    map
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefinitionTreeNode {
+    pub children: HashMap<String, Vec1<DefinitionTree>>,
+}
+impl DefinitionTreeNode {
+    /// Wraps self in another node until `prefix` returns none
+    pub fn prefix(self, mut prefix: impl Iterator<Item = String>) -> Self {
+        if let Some(name) = prefix.next() {
+            Self {
+                children: {
+                    let mut hm = HashMap::new();
+                    hm.insert(name, vec1::vec1![DefinitionTree::Node(self.prefix(prefix))]);
                     hm
                 }
             }
@@ -40,35 +80,52 @@ impl DefinitionTree {
             self
         }
     }
-    pub fn merge(&mut self, other: Self) {
-        match self {
-            Self::Prop { .. } => {},
-            Self::Node { children } => match other {
-                Self::Prop { .. } => {},
-                Self::Node { children: other } => {
-                    for (other_name, other_vec) in other {
-                        if let Some(vec) = children.get_mut(&other_name) {
-                            if let first @ DefinitionTree::Node { .. } = vec.first_mut() {
-                                if let other_first @ DefinitionTree::Node { .. } = other_vec.first() {
-                                    first.merge(other_first.clone());
-                                } else {
-                                    vec.extend(other_vec);
-                                }
-                            } else {
-                                vec.extend(other_vec);
-                            }
-                        } else {
-                            children.insert(other_name, other_vec);
-                        }
-                    }
-                }
-            }
-        }
+    pub fn into_json(self) -> serde_json::Value {
+        DefinitionTree::Node(self).into_json()
     }
-    pub fn dfs_iter(self) -> impl Iterator<Item = (String, Value)> {
-        match self {
-            Self::Prop { value, .. } => Either::Left(std::iter::once(value)),
-            Self::Node { children } => Either::Right(children.into_iter().flat_map(|(n, v)| v.into_iter().map(|tree| tree.dfs_iter()).zip(std::iter::repeat(n)))),
+    /// TODO: return Vec<Value> instead of Value
+    /// TODO: create "linked list" type with Arc<str> and efficient pushing to left
+    pub fn dfs_iter(self) -> Box<dyn Iterator<Item = (Vec<String>, Value)>> {
+        Box::new(self.children.into_iter().flat_map(|(parent_n, v)| v.into_iter().flat_map(move |tree| {
+            let parent_n = parent_n.clone();
+            match tree {
+                DefinitionTree::Prop { value, .. } => Either::Left(std::iter::once((vec![parent_n], value))),
+                DefinitionTree::Node(node) => Either::Right(node.dfs_iter().map(move |(n, v)| ({
+                    let mut n = n.clone();
+                    n.insert(0, parent_n.clone());
+                    n
+                }, v))),
+            }
+        })))
+    }
+    pub fn dfs_iter_nodes(self) -> Box<dyn Iterator<Item = (Vec<String>, DefinitionTreeNode)>> {
+        Box::new(self.children.into_iter().flat_map(|(parent_n, v)| v.into_iter().filter_map(|tree| match tree {
+                DefinitionTree::Prop { .. } => None,
+                DefinitionTree::Node(node) => Some(node)
+            }).flat_map(move |node| {
+            let parent_n = parent_n.clone();
+            std::iter::once((vec![], node.clone())).chain(node.dfs_iter_nodes()).map(move |(n, v)| ({
+                let mut n = n.clone();
+                n.insert(0, parent_n.clone());
+                n
+            }, v))
+        })))
+    }
+    pub fn merge(&mut self, other: Self) {
+        for (other_name, other_vec) in other.children {
+            if let Some(vec) = self.children.get_mut(&other_name) {
+                if let DefinitionTree::Node(first) = vec.first_mut() {
+                    if let DefinitionTree::Node(other_first) = other_vec.first() {
+                        first.merge(other_first.clone());
+                    } else {
+                        vec.extend(other_vec);
+                    }
+                } else {
+                    vec.extend(other_vec);
+                }
+            } else {
+                self.children.insert(other_name, other_vec);
+            }
         }
     }
 }
@@ -79,7 +136,7 @@ impl DefinitionTree {
 pub fn analyze_node(
     node: ast::DtNode,
     src: &str,
-) -> Option<DefinitionTree> {
+) -> Option<DefinitionTreeNode> {
     let children = node.properties()
         .flat_map(|prop| {
             Some((
@@ -95,11 +152,12 @@ pub fn analyze_node(
                 .filter(DtNode::is_concrete)
                 .filter_map(|node| {
                     Some((
+                        // TODO: what to do with unit address?, $nodename?
                         node.name(src)?.into_owned(),
-                        analyze_node(
+                        DefinitionTree::Node(analyze_node(
                             node,
                             src,
-                        )?
+                        )?)
                     ))
                 })
         )
@@ -118,7 +176,7 @@ pub fn analyze_node(
     };
 
     Some(
-        DefinitionTree::Node {
+        DefinitionTreeNode {
             children,
         }
     )
@@ -174,7 +232,7 @@ use ValueFromAstError::{CannotFindText, MissingAst};
 impl Value {
     pub fn into_custom_value(self) -> Vec<CustomValue> {
         vec![match self {
-            Self::Empty => CustomValue::Empty,
+            Self::Empty => return Vec::new(),
             Self::U32(value) => CustomValue::Cell(vec![CustomValueCellItem::U32(value)]),
             Self::U64(value) => CustomValue::Cell(vec![
                 CustomValueCellItem::U32((value >> 32) as u32),
@@ -268,13 +326,19 @@ fn common_string(ast: &ast::DtString, src: &str) -> Result<String, ValueFromAstE
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// See [`Value`] documentation
 pub enum CustomValue {
-    Empty,
     String(String),
     Cell(Vec<CustomValueCellItem>),
     Bytestring(Vec<u8>), // TODO: support for bytestrings in parser and AST
                          // TODO: more?
 }
 impl CustomValue {
+    pub fn into_json(self) -> serde_json::Value {
+        match self {
+            Self::String(s) => serde_json::Value::String(s),
+            Self::Cell(cell_items) => serde_json::Value::Array(cell_items.into_iter().map(|ci| ci.into_json()).collect()),
+            Self::Bytestring(_bytes) => todo!(),
+        }
+    }
     fn from_ast(ast: &ast::PropValue, src: &str) -> Result<Self, ValueFromAstError> {
         Ok(match ast {
             ast::PropValue::String(ast) => CustomValue::String(common_string(ast, src)?),
@@ -325,6 +389,14 @@ pub enum CustomValueCellItem {
     ///
     /// e.g. `&UART_1`
     Phandle(PhandleTarget),
+}
+impl CustomValueCellItem {
+    pub fn into_json(self) -> serde_json::Value {
+        match self {
+            Self::U32(n) => serde_json::Value::Number(n.into()),
+            Self::Phandle(_phandle_target) => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

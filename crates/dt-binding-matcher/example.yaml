@@ -25,13 +25,6 @@ description: |
   indentation less than the first line of the literal block. Lines also cannot
   begin with a tab character.
 
-select: false
-  # 'select' is a schema applied to a DT node to determine if this binding
-  # schema should be applied to the node. It is optional and by default the
-  # possible compatible strings are extracted and used to match.
-
-  # In this case, a 'false' schema will never match.
-
 properties:
   # A dictionary of DT properties for this binding schema
   compatible:

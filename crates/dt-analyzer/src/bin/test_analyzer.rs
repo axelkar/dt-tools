@@ -13,10 +13,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("analyze_cst returned None");
         std::process::exit(1);
     };
-    let mut vec: Vec<_> = def.props.into_iter().collect();
+    let mut vec: Vec<_> = def.tree.dfs_iter().collect();
     vec.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, value) in vec {
-        eprintln!("{} -> {:#?}", name, value.last());
+        let name = name.join("/");
+        eprintln!("{} -> {:#?}", name, value);
     }
     Ok(())
 }

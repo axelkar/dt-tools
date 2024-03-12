@@ -351,7 +351,7 @@ impl DtNode {
             .filter_map(DtNode::cast)
             .chain(std::iter::once(self.clone()))
             .filter_map(|node| node.name(src))
-            .filter(|part| part != &"/")
+            .filter(|part| part != "/")
             .collect()
     }
 }
