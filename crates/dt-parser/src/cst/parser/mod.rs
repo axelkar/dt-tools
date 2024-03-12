@@ -248,7 +248,9 @@ fn nullable_ident(input: &mut Stream) -> PResult<GreenItem> {
     .parse_next(input)
 }
 
-fn nullable_node_ident(input: &mut Stream) -> PResult<Either<(GreenItem, Option<GreenItem>), GreenItem>> {
+fn nullable_node_ident(
+    input: &mut Stream,
+) -> PResult<Either<(GreenItem, Option<GreenItem>), GreenItem>> {
     alt((
         (
             node!(
@@ -261,7 +263,10 @@ fn nullable_node_ident(input: &mut Stream) -> PResult<Either<(GreenItem, Option<
                     )
                 )
             ),
-            opt(node!(NodeKind::DtNodeUnitAddress, (T!['@'], nullable_ident))),
+            opt(node!(
+                NodeKind::DtNodeUnitAddress,
+                (T!['@'], nullable_ident)
+            )),
         )
             .map(Either::Left),
         node!(NodeKind::Ident, token!(TokenKind::Error, empty)).map(Either::Right),
@@ -430,8 +435,7 @@ pub(crate) fn generic_parse<'i, O>(
     input: &'i str,
     parser: impl Parser<Stream<'i>, O, ContextError>,
 ) -> (Option<O>, Vec<ContextError>) {
-    let (_, o, e) = terminated(parser, eof)
-        .recoverable_parse(crate::Printer(Located::new(input)));
+    let (_, o, e) = terminated(parser, eof).recoverable_parse(crate::Printer(Located::new(input)));
     (o, e)
 }
 pub fn parse(input: &str) -> (Option<Arc<GreenNode>>, Vec<ContextError>) {

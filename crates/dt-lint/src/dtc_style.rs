@@ -9,9 +9,16 @@ pub struct DtcStyle;
 impl EarlyLintPass for DtcStyle {
     fn check_document(&mut self, cx: &mut crate::EarlyContext<'_>, doc: &ast::Document) {
         // TODO: use ast::Item instead?
-        let first = doc.syntax().children().find_map(|item| item.filter_token(|token| !token.green.kind.is_trivia()));
+        let first = doc
+            .syntax()
+            .children()
+            .find_map(|item| item.filter_token(|token| !token.green.kind.is_trivia()));
         if let Some(first) = first {
-            let directive = first.clone().into_node().and_then(ast::Directive::cast).and_then(|dir| dir.ident()?.text(cx.src));
+            let directive = first
+                .clone()
+                .into_node()
+                .and_then(ast::Directive::cast)
+                .and_then(|dir| dir.ident()?.text(cx.src));
             if directive != Some("dts-v1") {
                 cx.add_lint_from_cst(
                     LintId::DtcStyle,

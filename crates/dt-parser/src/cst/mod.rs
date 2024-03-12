@@ -101,7 +101,10 @@ impl<Node, Token> TreeItem<Node, Token> {
             Self::Token(token) => TreeItem::Token(token),
         }
     }
-    pub fn map_token<NewToken>(self, f: impl FnOnce(Token) -> NewToken) -> TreeItem<Node, NewToken> {
+    pub fn map_token<NewToken>(
+        self,
+        f: impl FnOnce(Token) -> NewToken,
+    ) -> TreeItem<Node, NewToken> {
         match self {
             Self::Node(node) => TreeItem::Node(node),
             Self::Token(token) => TreeItem::Token(f(token)),

@@ -25,7 +25,10 @@ pub(crate) fn dt_cell(input: &mut Stream) -> PResult<GreenItem> {
                 true,
                 false,
                 alt((
-                    token!(TokenKind::DtNumber, preceded(alt(("0x", "0X")), hex_uint::<_, u32, _>)),
+                    token!(
+                        TokenKind::DtNumber,
+                        preceded(alt(("0x", "0X")), hex_uint::<_, u32, _>)
+                    ),
                     token!(TokenKind::Error, alt(("0x", "0X"))),
                     token!(TokenKind::DtNumber, dec_uint::<_, u32, _>),
                     node!(

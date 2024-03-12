@@ -1,7 +1,8 @@
 use std::{borrow::Cow, sync::Arc};
 
 use crate::cst::{
-    kinds::{NodeKind, TokenKind}, GreenToken, RedItem, RedNode, RedToken, TreeItem
+    kinds::{NodeKind, TokenKind},
+    GreenToken, RedItem, RedNode, RedToken, TreeItem,
 };
 
 pub trait AstNode {
@@ -241,13 +242,15 @@ impl AstNode for DtCell {
 impl DtCell {
     /// Get either phandle or token children
     pub fn values(&self) -> impl Iterator<Item = TreeItem<DtPhandle, Arc<RedToken>>> + '_ {
-        self.syntax.children().filter_map(|item| Some(match item {
-            RedItem::Node(node) => TreeItem::Node(DtPhandle::cast(node)?),
-            RedItem::Token(token) if token.green.kind == TokenKind::DtNumber => {
-                TreeItem::Token(token)
-            },
-            _ => return None
-        }))
+        self.syntax.children().filter_map(|item| {
+            Some(match item {
+                RedItem::Node(node) => TreeItem::Node(DtPhandle::cast(node)?),
+                RedItem::Token(token) if token.green.kind == TokenKind::DtNumber => {
+                    TreeItem::Token(token)
+                }
+                _ => return None,
+            })
+        })
     }
 }
 
@@ -317,7 +320,7 @@ impl DtNode {
     pub fn name<'i>(&self, src: &'i str) -> Option<Cow<'i, str>> {
         Some(match self.unit_address() {
             None => Cow::Borrowed(self.ident()?.text(src)?),
-            Some(unit) => Cow::Owned(format!("{}@{}", self.ident()?.text(src)?, unit.text(src)?))
+            Some(unit) => Cow::Owned(format!("{}@{}", self.ident()?.text(src)?, unit.text(src)?)),
         })
     }
 
@@ -382,7 +385,7 @@ impl HasIdent for DtLabel {}
 pub enum Item {
     Node(DtNode),
     Property(DtProperty),
-    Directive(Directive)
+    Directive(Directive),
 }
 impl AstNode for Item {
     fn cast(syntax: Arc<RedNode>) -> Option<Self> {

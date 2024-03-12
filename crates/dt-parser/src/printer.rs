@@ -19,13 +19,7 @@ impl Debug for Printer<'_> {
 
 impl<'i> Offset<<Inner<'i> as Stream>::Checkpoint> for Printer<'i> {
     #[inline(always)]
-    fn offset_from(
-        &self,
-        other: &Checkpoint<
-            Checkpoint<&'i str, &'i str>,
-            Inner<'i>,
-        >,
-    ) -> usize {
+    fn offset_from(&self, other: &Checkpoint<Checkpoint<&'i str, &'i str>, Inner<'i>>) -> usize {
         self.checkpoint().offset_from(other)
     }
 }

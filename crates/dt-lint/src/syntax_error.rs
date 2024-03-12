@@ -19,17 +19,8 @@ impl EarlyLintPass for SyntaxError {
 }
 
 pub fn find_syntax_errors(cx: &mut crate::EarlyContext<'_>, red: &Arc<RedNode>, src: &str) {
-    fn err(
-        cx: &mut crate::EarlyContext<'_>,
-        msg: Cow<'static, str>,
-        span: impl Into<MultiSpan>,
-    ) {
-        cx.add_lint_from_cst(
-            LintId::SyntaxError,
-            msg,
-            LintSeverity::Error,
-            span.into(),
-        );
+    fn err(cx: &mut crate::EarlyContext<'_>, msg: Cow<'static, str>, span: impl Into<MultiSpan>) {
+        cx.add_lint_from_cst(LintId::SyntaxError, msg, LintSeverity::Error, span.into());
     }
     match red.green.kind {
         NodeKind::Error => err(cx, "Syntax error".into(), *red.span()),
@@ -52,7 +43,10 @@ pub fn find_syntax_errors(cx: &mut crate::EarlyContext<'_>, red: &Arc<RedNode>, 
             TokenKind::Error => err(cx, "Syntax error".into(), *token.span()),
             TokenKind::SeparatedMissingFirst => err(cx, "Missing first item".into(), *token.span()),
             TokenKind::MissingPunct('}') => {
-                let unclosed = token.parent.child_tokens().find(|tok| tok.green.kind == TokenKind::LCurly);
+                let unclosed = token
+                    .parent
+                    .child_tokens()
+                    .find(|tok| tok.green.kind == TokenKind::LCurly);
                 err(
                     cx,
                     "Missing punctuation: `}`".into(),
@@ -62,17 +56,15 @@ pub fn find_syntax_errors(cx: &mut crate::EarlyContext<'_>, red: &Arc<RedNode>, 
                             vec![(*unclosed.span(), "Unclosed `{`".into())]
                         } else {
                             Vec::new()
-                        }
-                    }
+                        },
+                    },
                 )
-            },
-            TokenKind::MissingPunct(c) => {
-                err(
-                    cx,
-                    format!("Missing punctuation: `{c}`").into(),
-                    *token.span()
-                )
-            },
+            }
+            TokenKind::MissingPunct(c) => err(
+                cx,
+                format!("Missing punctuation: `{c}`").into(),
+                *token.span(),
+            ),
             TokenKind::UnexpectedWhitespace => {
                 err(cx, "Unexpected whitespace".into(), *token.span())
             }

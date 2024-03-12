@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use jsonschema::{CompilationOptions, JSONSchema};
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
 
 macro_rules! schemas {
     ($($filename:expr),+) => {
@@ -47,7 +47,12 @@ pub static SCHEMA_VALIDATOR: Lazy<JSONSchema> = Lazy::new(|| {
     JSONSchema::options()
         .with_dt_meta_schemas()
         .with_resolver(crate::resolver::DtJsonSchemaResolver)
-        .compile(&serde_yaml::from_str::<serde_json::Value>(include_str!("../dt-schema/dtschema/meta-schemas/core.yaml")).expect("Invalid schema"))
+        .compile(
+            &serde_yaml::from_str::<serde_json::Value>(include_str!(
+                "../dt-schema/dtschema/meta-schemas/core.yaml"
+            ))
+            .expect("Invalid schema"),
+        )
         .expect("Invalid meta-schema")
 });
 
@@ -62,4 +67,3 @@ impl CompilerMetaSchemaExt for CompilationOptions {
         self
     }
 }
-

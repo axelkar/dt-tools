@@ -7,8 +7,8 @@ use metaschemas::{CompilerMetaSchemaExt, SCHEMA_VALIDATOR};
 use serde_yaml::{Mapping, Value};
 
 pub mod fixups;
-mod resolver;
 mod metaschemas;
+mod resolver;
 
 #[derive(Debug)]
 pub struct BindingSchema {

@@ -18,11 +18,8 @@ pub struct PropDefinition {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DefinitionTree {
-    Prop {
-        value: Value,
-        ast: ast::DtProperty
-    },
-    Node(DefinitionTreeNode)
+    Prop { value: Value, ast: ast::DtProperty },
+    Node(DefinitionTreeNode),
 }
 impl DefinitionTree {
     /// Wraps self in a [`DefinitionTree::Node`] until `prefix` returns none
@@ -33,7 +30,7 @@ impl DefinitionTree {
                     let mut hm = HashMap::new();
                     hm.insert(name, vec1::vec1![self.prefix(prefix)]);
                     hm
-                }
+                },
             })
         } else {
             self
@@ -42,21 +39,25 @@ impl DefinitionTree {
     pub fn into_json(self) -> serde_json::Value {
         match self {
             Self::Prop { value, .. } => {
-                serde_json::Value::Array(value.into_custom_value().into_iter().flat_map(|cv| match cv.into_json() {
-                    // flatten cells
-                    serde_json::Value::Array(arr) => Either::Left(arr.into_iter()),
-                    other => Either::Right(std::iter::once(other))
-                }).collect())
-            },
-            Self::Node(node) => {
-                serde_json::Value::Object({
-                    let mut map = serde_json::Map::new();
-                    for (name, definitions) in node.children {
-                        map.insert(name, definitions.last().clone().into_json());
-                    }
-                    map
-                })
+                serde_json::Value::Array(
+                    value
+                        .into_custom_value()
+                        .into_iter()
+                        .flat_map(|cv| match cv.into_json() {
+                            // flatten cells
+                            serde_json::Value::Array(arr) => Either::Left(arr.into_iter()),
+                            other => Either::Right(std::iter::once(other)),
+                        })
+                        .collect(),
+                )
             }
+            Self::Node(node) => serde_json::Value::Object({
+                let mut map = serde_json::Map::new();
+                for (name, definitions) in node.children {
+                    map.insert(name, definitions.last().clone().into_json());
+                }
+                map
+            }),
         }
     }
 }
@@ -74,7 +75,7 @@ impl DefinitionTreeNode {
                     let mut hm = HashMap::new();
                     hm.insert(name, vec1::vec1![DefinitionTree::Node(self.prefix(prefix))]);
                     hm
-                }
+                },
             }
         } else {
             self
@@ -86,30 +87,52 @@ impl DefinitionTreeNode {
     /// TODO: return Vec<Value> instead of Value
     /// TODO: create "linked list" type with Arc<str> and efficient pushing to left
     pub fn dfs_iter(self) -> Box<dyn Iterator<Item = (Vec<String>, Value)>> {
-        Box::new(self.children.into_iter().flat_map(|(parent_n, v)| v.into_iter().flat_map(move |tree| {
-            let parent_n = parent_n.clone();
-            match tree {
-                DefinitionTree::Prop { value, .. } => Either::Left(std::iter::once((vec![parent_n], value))),
-                DefinitionTree::Node(node) => Either::Right(node.dfs_iter().map(move |(n, v)| ({
-                    let mut n = n.clone();
-                    n.insert(0, parent_n.clone());
-                    n
-                }, v))),
-            }
-        })))
+        Box::new(self.children.into_iter().flat_map(|(parent_n, v)| {
+            v.into_iter().flat_map(move |tree| {
+                let parent_n = parent_n.clone();
+                match tree {
+                    DefinitionTree::Prop { value, .. } => {
+                        Either::Left(std::iter::once((vec![parent_n], value)))
+                    }
+                    DefinitionTree::Node(node) => {
+                        Either::Right(node.dfs_iter().map(move |(n, v)| {
+                            (
+                                {
+                                    let mut n = n.clone();
+                                    n.insert(0, parent_n.clone());
+                                    n
+                                },
+                                v,
+                            )
+                        }))
+                    }
+                }
+            })
+        }))
     }
     pub fn dfs_iter_nodes(self) -> Box<dyn Iterator<Item = (Vec<String>, DefinitionTreeNode)>> {
-        Box::new(self.children.into_iter().flat_map(|(parent_n, v)| v.into_iter().filter_map(|tree| match tree {
-                DefinitionTree::Prop { .. } => None,
-                DefinitionTree::Node(node) => Some(node)
-            }).flat_map(move |node| {
-            let parent_n = parent_n.clone();
-            std::iter::once((vec![], node.clone())).chain(node.dfs_iter_nodes()).map(move |(n, v)| ({
-                let mut n = n.clone();
-                n.insert(0, parent_n.clone());
-                n
-            }, v))
-        })))
+        Box::new(self.children.into_iter().flat_map(|(parent_n, v)| {
+            v.into_iter()
+                .filter_map(|tree| match tree {
+                    DefinitionTree::Prop { .. } => None,
+                    DefinitionTree::Node(node) => Some(node),
+                })
+                .flat_map(move |node| {
+                    let parent_n = parent_n.clone();
+                    std::iter::once((vec![], node.clone()))
+                        .chain(node.dfs_iter_nodes())
+                        .map(move |(n, v)| {
+                            (
+                                {
+                                    let mut n = n.clone();
+                                    n.insert(0, parent_n.clone());
+                                    n
+                                },
+                                v,
+                            )
+                        })
+                })
+        }))
     }
     pub fn merge(&mut self, other: Self) {
         for (other_name, other_vec) in other.children {
@@ -133,11 +156,9 @@ impl DefinitionTreeNode {
 /// Analyze and AST node and its subnodes for properties, skipping over errors
 ///
 /// Returns [None] when the node's name cannot be found
-pub fn analyze_node(
-    node: ast::DtNode,
-    src: &str,
-) -> Option<DefinitionTreeNode> {
-    let children = node.properties()
+pub fn analyze_node(node: ast::DtNode, src: &str) -> Option<DefinitionTreeNode> {
+    let children = node
+        .properties()
         .flat_map(|prop| {
             Some((
                 prop.ident()?.text(src)?.to_owned(),
@@ -154,12 +175,9 @@ pub fn analyze_node(
                     Some((
                         // TODO: what to do with unit address?, $nodename?
                         node.name(src)?.into_owned(),
-                        DefinitionTree::Node(analyze_node(
-                            node,
-                            src,
-                        )?)
+                        DefinitionTree::Node(analyze_node(node, src)?),
                     ))
-                })
+                }),
         )
         .collect::<Vec<_>>();
     let children = {
@@ -175,11 +193,7 @@ pub fn analyze_node(
         hm
     };
 
-    Some(
-        DefinitionTreeNode {
-            children,
-        }
-    )
+    Some(DefinitionTreeNode { children })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -240,7 +254,9 @@ impl Value {
             ]),
             Self::String(string) => CustomValue::String(string),
             Self::PropEncodedArray(vec) => return vec,
-            Self::Phandle(phandle) => CustomValue::Cell(vec![CustomValueCellItem::Phandle(phandle)]),
+            Self::Phandle(phandle) => {
+                CustomValue::Cell(vec![CustomValueCellItem::Phandle(phandle)])
+            }
             Self::Stringlist(vec) => return vec.into_iter().map(CustomValue::String).collect(),
         }]
     }
@@ -335,7 +351,9 @@ impl CustomValue {
     pub fn into_json(self) -> serde_json::Value {
         match self {
             Self::String(s) => serde_json::Value::String(s),
-            Self::Cell(cell_items) => serde_json::Value::Array(cell_items.into_iter().map(|ci| ci.into_json()).collect()),
+            Self::Cell(cell_items) => {
+                serde_json::Value::Array(cell_items.into_iter().map(|ci| ci.into_json()).collect())
+            }
             Self::Bytestring(_bytes) => todo!(),
         }
     }

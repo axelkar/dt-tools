@@ -41,9 +41,8 @@ use dt_parser::{
     cst::RedNode,
 };
 pub use prop::{
-    analyze_node, CustomValue, CustomValueCellItem, PhandleTarget, PropDefinition, Value,
-    ValueFromAstError,
-    DefinitionTree, DefinitionTreeNode
+    analyze_node, CustomValue, CustomValueCellItem, DefinitionTree, DefinitionTreeNode,
+    PhandleTarget, PropDefinition, Value, ValueFromAstError,
 };
 pub use string::StringParseError;
 
@@ -92,15 +91,14 @@ pub fn analyze_cst(cst: Arc<RedNode>, src: &str) -> Option<FileDefinition> {
         let label = extension.ident()?.text(src)?;
         let label = labels.get(label)?.last()?; // TODO: error or warn on unknown label
 
-        let Some(ex_tree) = analyze_node(extension, src) else { continue };
+        let Some(ex_tree) = analyze_node(extension, src) else {
+            continue;
+        };
         let ex_tree = ex_tree.prefix(label.node_ast.path(src).into_iter().map(Cow::into_owned));
         tree.merge(ex_tree);
     }
 
-    Some(FileDefinition {
-        tree,
-        labels,
-    })
+    Some(FileDefinition { tree, labels })
 }
 
 pub fn find_labels<'i>(node: &ast::DtNode, src: &'i str) -> Vec<(&'i str, Label)> {

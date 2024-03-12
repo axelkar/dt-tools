@@ -46,10 +46,7 @@ fn red_test() {
 #[test]
 fn test_green_separated() {
     assert_eq!(
-        generic_parse(
-            "",
-            green_separated(true, false, T!['='], T![','])
-        ),
+        generic_parse("", green_separated(true, false, T!['='], T![','])),
         (
             Some(vec![token(TokenKind::SeparatedMissingFirst, 0, 0)]),
             Vec::new()
