@@ -53,20 +53,20 @@
 1. Install [Rust](https://www.rust-lang.org/learn/get-started)
 2. Clone this repo:
    ```sh
-   git clone https://git.axka.fi/dt-tools.git dt-tools
+   git clone --recurse-submodules https://git.axka.fi/dt-tools.git dt-tools
    cd dt-tools
    ```
 3. Run some commands:
    ```sh
+   cargo test # Run unit and integration tests
    # Showcase parser output
    cargo run --bin test_parser ./crates/dt-parser/a.dts
    cargo run --bin test_parser ./syntax_error_showcase.dts
    # Showcase analyzer output
    cargo run --bin test_analyzer ./syntax_error_showcase.dts
-   cargo test # Run unit and integration tests
    ```
 
-### LSP
+## LSP
 
 The language server is currently only packaged for Neovim with the `./crates/dt-lsp/lsp.lua` script. I'd appreciate efforts to make a plugin for VSCode.
 
@@ -76,13 +76,19 @@ nvim -S lsp.lua ../../lint_showcase.dts
 ```
 
 Features:
+
 * Fast and safe parser and linter
 * (TODO) View binding documentation straight from DTS!
 * (TODO) Binding errors integrated into linter
 
 ## Contributing patches
 
-Please first make sure that you have not introduced any regressions by running `cargo clippy` and `cargo test` at the repository root.
+Please first make sure that you have not introduced any regressions and format the code by running the following commands at the repository root.
+```sh
+cargo fmt
+cargo clippy
+cargo test
+```
 
 You can either make a GitHub [pull request](https://github.com/axelkar/dt-tools/pulls) or email me directly:
 
