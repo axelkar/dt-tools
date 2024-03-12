@@ -1,9 +1,11 @@
-use std::num::ParseIntError;
+use std::{collections::HashMap, num::ParseIntError};
 
 use dt_parser::{
-    ast::{self, AstNode as _, DtNode, HasIdent},
-    cst::{kinds::TokenKind, RedItem, TreeItem},
+    ast::{self, DtNode, HasIdent},
+    cst::TreeItem,
 };
+use either::Either;
+use vec1::Vec1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A property definition from a single file
@@ -12,41 +14,113 @@ pub struct PropDefinition {
     pub node: ast::DtProperty,
 }
 
+// TODO: make this lazy, i.e. only compute a certain node when referencing it
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DefinitionTree {
+    Prop {
+        value: Value,
+        ast: ast::DtProperty
+    },
+    Node {
+        children: HashMap<String, Vec1<DefinitionTree>>,
+    }
+}
+impl DefinitionTree {
+    pub fn prefix(self, mut prefix: impl Iterator<Item = String>) -> Self {
+        if let Some(name) = prefix.next() {
+            Self::Node {
+                children: {
+                    let mut hm = HashMap::new();
+                    hm.insert(name, vec1::vec1![self.prefix(prefix)]);
+                    hm
+                }
+            }
+        } else {
+            self
+        }
+    }
+    pub fn merge(&mut self, other: Self) {
+        match self {
+            Self::Prop { .. } => {},
+            Self::Node { children } => match other {
+                Self::Prop { .. } => {},
+                Self::Node { children: other } => {
+                    for (other_name, other_vec) in other {
+                        if let Some(vec) = children.get_mut(&other_name) {
+                            if let first @ DefinitionTree::Node { .. } = vec.first_mut() {
+                                if let other_first @ DefinitionTree::Node { .. } = other_vec.first() {
+                                    first.merge(other_first.clone());
+                                } else {
+                                    vec.extend(other_vec);
+                                }
+                            } else {
+                                vec.extend(other_vec);
+                            }
+                        } else {
+                            children.insert(other_name, other_vec);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    pub fn dfs_iter(self) -> impl Iterator<Item = (String, Value)> {
+        match self {
+            Self::Prop { value, .. } => Either::Left(std::iter::once(value)),
+            Self::Node { children } => Either::Right(children.into_iter().flat_map(|(n, v)| v.into_iter().map(|tree| tree.dfs_iter()).zip(std::iter::repeat(n)))),
+        }
+    }
+}
+
 /// Analyze and AST node and its subnodes for properties, skipping over errors
 ///
 /// Returns [None] when the node's name cannot be found
-///
-/// * `parent_path`: Parent path including a trailing slash
 pub fn analyze_node(
-    parent_path: Option<&str>,
     node: ast::DtNode,
     src: &str,
-) -> Option<Vec<(String, PropDefinition)>> {
-    let parent_path = parent_path.unwrap_or_default();
-    Some(
-        node.properties()
-            .flat_map(|prop| {
-                Some((
-                    format!("{}{}", parent_path, prop.ident()?.text(src)?),
-                    PropDefinition {
-                        value: Value::from_ast(&prop.values().collect::<Vec<_>>(), src).ok()?,
-                        node: prop,
-                    },
-                ))
-            })
-            .chain(
-                node.subnodes()
-                    .filter(DtNode::is_concrete)
-                    .flat_map(|node| {
+) -> Option<DefinitionTree> {
+    let children = node.properties()
+        .flat_map(|prop| {
+            Some((
+                prop.ident()?.text(src)?.to_owned(),
+                DefinitionTree::Prop {
+                    value: Value::from_ast(&prop.values().collect::<Vec<_>>(), src).ok()?,
+                    ast: prop,
+                },
+            ))
+        })
+        .chain(
+            node.subnodes()
+                .filter(DtNode::is_concrete)
+                .filter_map(|node| {
+                    Some((
+                        node.name(src)?.into_owned(),
                         analyze_node(
-                            Some(&format!("{}{}/", parent_path, node.ident()?.text(src)?)),
                             node,
                             src,
-                        )
-                    })
-                    .flatten(),
-            )
-            .collect(),
+                        )?
+                    ))
+                })
+        )
+        .collect::<Vec<_>>();
+    let children = {
+        let mut hm: HashMap<String, Vec1<DefinitionTree>> = HashMap::new();
+        for (name, child) in children {
+            let name = name.to_owned();
+            if let Some(vec) = hm.get_mut(&name) {
+                vec.push(child);
+            } else {
+                hm.insert(name, vec1::vec1![child]);
+            }
+        }
+        hm
+    };
+
+    Some(
+        DefinitionTree::Node {
+            children,
+        }
     )
 }
 
@@ -98,6 +172,20 @@ use crate::string::StringParseError;
 use ValueFromAstError::{CannotFindText, MissingAst};
 
 impl Value {
+    pub fn into_custom_value(self) -> Vec<CustomValue> {
+        vec![match self {
+            Self::Empty => CustomValue::Empty,
+            Self::U32(value) => CustomValue::Cell(vec![CustomValueCellItem::U32(value)]),
+            Self::U64(value) => CustomValue::Cell(vec![
+                CustomValueCellItem::U32((value >> 32) as u32),
+                CustomValueCellItem::U32(value as u32),
+            ]),
+            Self::String(string) => CustomValue::String(string),
+            Self::PropEncodedArray(vec) => return vec,
+            Self::Phandle(phandle) => CustomValue::Cell(vec![CustomValueCellItem::Phandle(phandle)]),
+            Self::Stringlist(vec) => return vec.into_iter().map(CustomValue::String).collect(),
+        }]
+    }
     fn from_ast(ast: &[ast::PropValue], src: &str) -> Result<Self, ValueFromAstError> {
         Ok(match ast {
             [] => Value::Empty,
@@ -180,6 +268,7 @@ fn common_string(ast: &ast::DtString, src: &str) -> Result<String, ValueFromAstE
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// See [`Value`] documentation
 pub enum CustomValue {
+    Empty,
     String(String),
     Cell(Vec<CustomValueCellItem>),
     Bytestring(Vec<u8>), // TODO: support for bytestrings in parser and AST

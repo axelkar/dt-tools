@@ -12,4 +12,6 @@ license.workspace = true
 
 [dependencies]
 dt-parser.workspace = true
+either = "1.10.0"
 thiserror = "1.0.57"
+vec1 = "1.10.1"

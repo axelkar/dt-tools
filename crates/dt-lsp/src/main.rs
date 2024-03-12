@@ -136,7 +136,7 @@ impl Backend {
                 analyzed: None,
             },
         );
-        let cst = dt_parser::parse(&text, source_id.clone());
+        let cst = dt_parser::parse(&text);
 
         let mut diagnostics = Vec::new();
 
@@ -224,8 +224,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if first_arg == Some("parse".to_owned()) {
         let path = std::env::args().nth(2).unwrap_or("./a.dts".to_owned());
-        let text = std::fs::read_to_string(&path)?;
-        let (ast, errs) = parser::parse(&text, path.into());
+        let text = std::fs::read_to_string(path)?;
+        let (ast, errs) = parser::parse(&text);
         let ast = match ast {
             Some(ast) => ast,
             None => {

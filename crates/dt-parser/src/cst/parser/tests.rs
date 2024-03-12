@@ -48,7 +48,6 @@ fn test_green_separated() {
     assert_eq!(
         generic_parse(
             "",
-            "src".into(),
             green_separated(true, false, T!['='], T![','])
         ),
         (
@@ -61,15 +60,15 @@ fn test_green_separated() {
 #[test]
 fn test_ident() {
     assert_eq!(
-        generic_parse("#interrupt-cells", "src".into(), nullable_ident),
+        generic_parse("#interrupt-cells", nullable_ident),
         (Some(id(0, 16)), Vec::new())
     );
     assert_eq!(
-        generic_parse("a_label", "src".into(), nullable_ident),
+        generic_parse("a_label", nullable_ident),
         (Some(id(0, 7)), Vec::new())
     );
     assert_eq!(
-        generic_parse("dts-v1", "src".into(), nullable_ident),
+        generic_parse("dts-v1", nullable_ident),
         (Some(id(0, 6)), Vec::new())
     );
 }
@@ -77,7 +76,7 @@ fn test_ident() {
 #[test]
 fn test_property() {
     assert_eq!(
-        generic_parse("<1, 2>", "src".into(), super::property::dt_cell),
+        generic_parse("<1, 2>", super::property::dt_cell),
         (
             Some(node(
                 NodeKind::DtCell,
@@ -106,7 +105,6 @@ fn test_property() {
     assert_eq!(
         generic_parse(
             "<1 &FOO &{/soc/pic}, &{ /soc/pic}>",
-            "src".into(),
             super::property::dt_cell
         ),
         (
@@ -172,7 +170,7 @@ fn test_property() {
     );
 
     assert_eq!(
-        generic_parse("a = <1>;", "src".into(), dt_prop),
+        generic_parse("a = <1>;", dt_prop),
         (
             Some(node(
                 NodeKind::DtProperty,
@@ -204,7 +202,7 @@ fn test_property() {
 #[test]
 fn test_directive() {
     assert_eq!(
-        generic_parse("/foo/;", "src".into(), directive),
+        generic_parse("/foo/;", directive),
         (
             Some(node(
                 NodeKind::Directive,
@@ -221,7 +219,7 @@ fn test_directive() {
         )
     );
     assert_eq!(
-        generic_parse("/foo/\n", "src".into(), directive),
+        generic_parse("/foo/\n", directive),
         (
             Some(node(
                 NodeKind::Directive,
@@ -240,7 +238,7 @@ fn test_directive() {
 }
 
 fn full(input: &str) -> Option<GreenItem> {
-    let (o, e) = super::parse(input, "src".into());
+    let (o, e) = super::parse(input);
     Some(GreenItem::Node(o.filter(|_| e.is_empty())?))
 }
 
@@ -454,7 +452,7 @@ fn test_a_dts() {
 #[test]
 fn test_whitespace() {
     fn parse<'i, O>(input: &'i str, parser: impl Parser<Stream<'i>, O, ContextError>) -> Option<O> {
-        let (o, e) = generic_parse(input, "src".into(), parser);
+        let (o, e) = generic_parse(input, parser);
         o.filter(|_| e.is_empty())
     }
 

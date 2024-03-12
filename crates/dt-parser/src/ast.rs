@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use crate::cst::{
     kinds::{NodeKind, TokenKind}, GreenToken, RedItem, RedNode, RedToken, TreeItem
@@ -313,6 +313,13 @@ impl DtNode {
             .child_nodes()
             .find_map(Ident::cast)
     }
+    /// Get the name with the unit address
+    pub fn name<'i>(&self, src: &'i str) -> Option<Cow<'i, str>> {
+        Some(match self.unit_address() {
+            None => Cow::Borrowed(self.ident()?.text(src)?),
+            Some(unit) => Cow::Owned(format!("{}@{}", self.ident()?.text(src)?, unit.text(src)?))
+        })
+    }
 
     /// Whether this is a node extension (e.g. `&UART_1 { a = <1>; };`)
     ///
@@ -338,12 +345,12 @@ impl DtNode {
     /// Get this node's path
     ///
     /// This skips any nodes with the name "/"
-    pub fn path<'i>(&self, src: &'i str) -> Vec<&'i str> {
+    pub fn path<'i>(&self, src: &'i str) -> Vec<Cow<'i, str>> {
         self.syntax
             .parent_ancestors()
             .filter_map(DtNode::cast)
             .chain(std::iter::once(self.clone()))
-            .filter_map(|node| node.ident()?.text(src))
+            .filter_map(|node| node.name(src))
             .filter(|part| part != &"/")
             .collect()
     }

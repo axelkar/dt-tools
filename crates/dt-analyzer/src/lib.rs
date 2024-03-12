@@ -21,7 +21,7 @@
 //!   c = <3>;
 //! };
 //! ";
-//! let cst = dt_parser::parse(text, "src".into()).unwrap();
+//! let cst = dt_parser::parse(text).unwrap();
 //! let hm = analyze_cst(cst, text).unwrap().props;
 //! eprintln!("{hm:#?}");
 //! assert_eq!(hm["a"][0].value, Value::U32(1));
@@ -30,12 +30,13 @@
 //! assert_eq!(hm.len(), 3);
 //! ```
 
-use std::{collections::HashMap, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 use dt_parser::{
     ast::{self, AstNode as _, HasIdent, HasLabel},
     cst::RedNode,
 };
+use prop::DefinitionTree;
 pub use prop::{
     analyze_node, CustomValue, CustomValueCellItem, PhandleTarget, PropDefinition, Value,
     ValueFromAstError,
@@ -47,8 +48,7 @@ mod string;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDefinition {
-    pub props: HashMap<String, Vec<PropDefinition>>,
-    pub nodes: Vec<String>,
+    pub tree: DefinitionTree,
     pub labels: HashMap<String, Vec<Label>>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,32 +83,18 @@ pub fn analyze_cst(cst: Arc<RedNode>, src: &str) -> Option<FileDefinition> {
         hm
     };
 
-    let mut props = analyze_node(None, root_node, src)?;
-    props.extend(
-        extensions
-            .flat_map(|extension| {
-                let label = extension.ident()?.text(src)?;
-                let label = labels.get(label)?.last()?; // TODO: error or warn on unknown label
+    let mut tree = analyze_node(root_node, src)?;
+    for extension in extensions {
+        let label = extension.ident()?.text(src)?;
+        let label = labels.get(label)?.last()?; // TODO: error or warn on unknown label
 
-                let mut parent = label.node_ast.path(src).join("/");
-                parent.push('/');
-
-                Some(analyze_node(Some(&parent), extension, src)?.into_iter())
-            })
-            .flatten(),
-    );
-    let props = {
-        let mut hm: HashMap<String, Vec<PropDefinition>> = HashMap::new();
-        for (name, ast) in props {
-            let vec = hm.entry(name).or_default();
-            vec.push(ast);
-        }
-        hm
-    };
+        let Some(ex_tree) = analyze_node(extension, src) else { continue };
+        let ex_tree = ex_tree.prefix(label.node_ast.path(src).into_iter().map(Cow::into_owned));
+        tree.merge(ex_tree);
+    }
 
     Some(FileDefinition {
-        props,
-        nodes: vec![], // TODO
+        tree,
         labels,
     })
 }

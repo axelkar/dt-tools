@@ -1,19 +1,18 @@
-use crate::SourceId;
 use std::{fmt::Debug, str::CharIndices};
 use winnow::{
     stream::{Checkpoint, Compare, CompareResult, FindSlice, Offset, Stream},
-    Located, Stateful,
+    Located,
 };
 
-type Inner<'i> = Located<Stateful<&'i str, SourceId>>;
-/// Make Located and Stateful print the inner str on Debug
+type Inner<'i> = Located<&'i str>;
+/// Make Located print the inner str on Debug
 #[derive(Clone, PartialEq, Eq)]
 pub struct Printer<'i>(pub Inner<'i>);
 
 impl Debug for Printer<'_> {
     #[inline(always)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s: &str = **self.0;
+        let s: &str = *self.0;
         Debug::fmt(s, f)
     }
 }
@@ -23,7 +22,7 @@ impl<'i> Offset<<Inner<'i> as Stream>::Checkpoint> for Printer<'i> {
     fn offset_from(
         &self,
         other: &Checkpoint<
-            Checkpoint<Checkpoint<&'i str, &'i str>, Stateful<&'i str, SourceId>>,
+            Checkpoint<&'i str, &'i str>,
             Inner<'i>,
         >,
     ) -> usize {

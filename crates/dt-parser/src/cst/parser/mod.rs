@@ -1,4 +1,4 @@
-use crate::{SourceId, Span};
+use crate::Span;
 
 use super::{GreenItem, GreenNode, GreenToken, NodeKind, TokenKind};
 use either::Either;
@@ -9,7 +9,7 @@ use winnow::{
     prelude::*,
     stream::{Location as _, Recoverable, Stream as _},
     token::{take_till, take_until, take_while},
-    Located, Stateful,
+    Located,
 };
 
 pub(crate) type Stream<'i> = Recoverable<crate::Printer<'i>, ContextError>;
@@ -428,17 +428,15 @@ fn root_level_nodes(input: &mut Stream) -> PResult<GreenItem> {
 
 pub(crate) fn generic_parse<'i, O>(
     input: &'i str,
-    src: SourceId,
     parser: impl Parser<Stream<'i>, O, ContextError>,
 ) -> (Option<O>, Vec<ContextError>) {
     let (_, o, e) = terminated(parser, eof)
-        .recoverable_parse(crate::Printer(Located::new(Stateful { input, state: src })));
+        .recoverable_parse(crate::Printer(Located::new(input)));
     (o, e)
 }
-pub fn parse(input: &str, src: SourceId) -> (Option<Arc<GreenNode>>, Vec<ContextError>) {
+pub fn parse(input: &str) -> (Option<Arc<GreenNode>>, Vec<ContextError>) {
     let (o, e) = generic_parse(
         input,
-        src,
         node!(
             NodeKind::Document,
             (

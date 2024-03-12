@@ -4,8 +4,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args()
         .nth(1)
         .expect("Should have a path as an argument");
-    let text = std::fs::read_to_string(&path)?;
-    let Some(red) = dt_parser::parse(&text, path.into()) else {
+    let text = std::fs::read_to_string(path)?;
+    let Some(red) = dt_parser::parse(&text) else {
         eprintln!("Invalid DTS!");
         std::process::exit(1);
     };

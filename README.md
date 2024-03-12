@@ -12,6 +12,12 @@
 
 ![Lint showcase in Neovim](screenshots/lint_showcase.dts.png)
 
+## TODO
+
+* [ ] dt-diff: Compare DTS or DTB files
+* [ ] something to compare Android dt+dtbo partitions to /sys/firmware/fdt
+* [ ] binding matcher with documentation support
+
 ## Testing
 
 1. Install [Rust](https://www.rust-lang.org/learn/get-started)
