@@ -92,6 +92,9 @@ pub fn get_compatible_items(map: &Mapping) -> HashSet<String> {
 
 pub fn find_select(tree: DefinitionTreeNode, select: &JSONSchema) -> Option<DefinitionTreeNode> {
     // TODO: return path too?
+    // TODO: compare into_json with `dtc example.dts -O yaml | yq '.[]'`
+    // TODO: if select is simple, just check for equality or regex pattern
+    // TODO: don't turn subtrees into JSON multiple times
     Some(
         tree.dfs_iter_nodes()
             .find(|(_path, node)| select.is_valid(&node.clone().into_json()))?

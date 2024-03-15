@@ -206,6 +206,7 @@ dependencies = [
  "dt-parser",
  "either",
  "serde_json",
+ "serde_yaml",
  "thiserror",
  "vec1",
 ]
