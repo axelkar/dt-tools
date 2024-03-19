@@ -43,12 +43,7 @@ impl DefinitionTree {
                 if vec.is_empty() {
                     serde_json::Value::Bool(true)
                 } else {
-                    serde_json::Value::Array(
-                        vec
-                            .into_iter()
-                            .map(CustomValue::into_json)
-                            .collect(),
-                    )
+                    serde_json::Value::Array(vec.into_iter().map(CustomValue::into_json).collect())
                 }
             }
             Self::Node(node) => serde_json::Value::Object({

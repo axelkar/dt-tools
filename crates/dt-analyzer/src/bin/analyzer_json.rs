@@ -23,8 +23,8 @@ fn remove_first<T>(vec: &mut Vec<T>) -> Option<T> {
 ///
 /// shouldn't panic trust me
 fn yaml_to_json(value: serde_yaml::Value) -> serde_json::Value {
-    use serde_yaml::Value as YValue;
     use serde_json::Value as JValue;
+    use serde_yaml::Value as YValue;
     match value {
         YValue::Null => JValue::Null,
         YValue::Bool(v) => JValue::Bool(v),
@@ -33,24 +33,34 @@ fn yaml_to_json(value: serde_yaml::Value) -> serde_json::Value {
         } else if let Some(n) = v.as_i64() {
             n.into()
         } else if let Some(n) = v.as_f64() {
-            serde_json::Number::from_f64(n).expect("serde_yaml should not give NaN or Infinite values")
+            serde_json::Number::from_f64(n)
+                .expect("serde_yaml should not give NaN or Infinite values")
         } else {
             unreachable!()
         }),
         YValue::String(v) => JValue::String(v),
         YValue::Sequence(v) => JValue::Array(v.into_iter().map(yaml_to_json).collect()),
-        YValue::Mapping(v) => JValue::Object(v.into_iter().filter(|(k, _)| k != "phandle").filter_map(|(k, v)| Some((
-            match k {
-                YValue::String(s) => s,
-                _ => return None
-            },
-            yaml_to_json(v)
-        ))).collect()),
-        YValue::Tagged(v) => if v.tag == "phandle" {
-            JValue::Number((-1).into())
-        } else {
-            yaml_to_json(v.value)
-        },
+        YValue::Mapping(v) => JValue::Object(
+            v.into_iter()
+                .filter(|(k, _)| k != "phandle")
+                .filter_map(|(k, v)| {
+                    Some((
+                        match k {
+                            YValue::String(s) => s,
+                            _ => return None,
+                        },
+                        yaml_to_json(v),
+                    ))
+                })
+                .collect(),
+        ),
+        YValue::Tagged(v) => {
+            if v.tag == "phandle" {
+                JValue::Number((-1).into())
+            } else {
+                yaml_to_json(v.value)
+            }
+        }
     }
 }
 
@@ -59,8 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .expect("Should have a path as an argument");
 
-    let assert = std::env::args()
-        .nth(2) == Some("--assert".to_owned());
+    let assert = std::env::args().nth(2) == Some("--assert".to_owned());
 
     let text = std::fs::read_to_string(&path)?;
     let start = Instant::now();
@@ -81,11 +90,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let own_json = def.tree.into_json();
     println!("Turned own into JSON in {:?}", start.elapsed());
     if !assert {
-        eprintln!("Analyzer JSON output: {}", serde_json::to_string(&own_json).unwrap());
+        eprintln!(
+            "Analyzer JSON output: {}",
+            serde_json::to_string(&own_json).unwrap()
+        );
     }
 
     let start = Instant::now();
-    let dtc_out = Command::new("dtc").args([&path, "-O", "yaml"]).output().unwrap();
+    let dtc_out = Command::new("dtc")
+        .args([&path, "-O", "yaml"])
+        .output()
+        .unwrap();
     if !dtc_out.status.success() {
         eprintln!("DTC errored: {}", dtc_out.status);
         std::process::exit(1);
