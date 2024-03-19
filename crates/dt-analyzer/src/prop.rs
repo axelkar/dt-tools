@@ -39,17 +39,17 @@ impl DefinitionTree {
     pub fn into_json(self) -> serde_json::Value {
         match self {
             Self::Prop { value, .. } => {
-                serde_json::Value::Array(
-                    value
-                        .into_custom_value()
-                        .into_iter()
-                        .flat_map(|cv| match cv.into_json() {
-                            // flatten cells
-                            serde_json::Value::Array(arr) => Either::Left(arr.into_iter()),
-                            other => Either::Right(std::iter::once(other)),
-                        })
-                        .collect(),
-                )
+                let vec = value.into_custom_value();
+                if vec.is_empty() {
+                    serde_json::Value::Bool(true)
+                } else {
+                    serde_json::Value::Array(
+                        vec
+                            .into_iter()
+                            .map(CustomValue::into_json)
+                            .collect(),
+                    )
+                }
             }
             Self::Node(node) => serde_json::Value::Object({
                 let mut map = serde_json::Map::new();
@@ -412,7 +412,11 @@ impl CustomValueCellItem {
     pub fn into_json(self) -> serde_json::Value {
         match self {
             Self::U32(n) => serde_json::Value::Number(n.into()),
-            Self::Phandle(_phandle_target) => todo!(),
+            Self::Phandle(_phandle_target) => serde_json::Value::Number((-1).into()),
+            // FIXME: make phandles somehow 😭😭
+            // tbh we don't need phandle numbers at the binding validation phase
+            // DTS `<&foo>` -> YAML `[[!phandle foo]]`
+            // Do I have to fork jsonschema-rs to work with serde_yaml::Value ?
         }
     }
 }
