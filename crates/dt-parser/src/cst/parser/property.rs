@@ -3,7 +3,7 @@ use super::{
     Stream, T,
 };
 use crate::cst::{GreenItem, GreenNode, GreenToken, NodeKind, TokenKind};
-use crate::Span;
+use crate::TextRange;
 use either::Either;
 use std::sync::Arc;
 use winnow::combinator::empty;
@@ -95,7 +95,7 @@ fn dt_string(input: &mut Stream) -> PResult<GreenItem> {
                     alt((
                         preceded('\\', any).void(),
                         take_till(1.., ['"', '\\'])
-                            .verify(|s: &str| !s.is_empty())
+                            .verify(|s: &[u8]| !s.is_empty())
                             .void(),
                     ))
                 )

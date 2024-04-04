@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let text = std::fs::read_to_string(&path)?;
     let start = Instant::now();
-    let Some(red) = dt_parser::parse(&text) else {
+    let Some(red) = dt_parser::parse(text.as_bytes()) else {
         eprintln!("Invalid DTS!");
         std::process::exit(1);
     };

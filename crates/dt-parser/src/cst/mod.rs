@@ -13,11 +13,9 @@
 use kinds::{NodeKind, TokenKind};
 use std::{fmt::Write, sync::Arc};
 
-use crate::Span;
+use crate::TextRange;
 pub(super) mod parser;
 
-// On the cst + ast level I could use a less-descriptive Span, to avoid cloning the SourceId
-// TODO: Span to Arc/Rc/Box<str> or usize to aid in subtree interning/deduplication?
 // TODO: partial reparse?
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -28,7 +26,7 @@ pub struct GreenNode {
     /// The kind of node
     pub kind: NodeKind,
     /// The location in the source document
-    pub span: Span,
+    pub text_range: TextRange,
     /// The child nodes and tokens
     pub children: Vec<GreenItem>,
 }
@@ -36,18 +34,25 @@ impl GreenNode {
     /// Print a tree like rust-analyzer's debug AST
     pub fn print_tree(&self, source: &str) -> String {
         let mut out = String::new();
-        self.print_tree_rec(0, source, &mut out).unwrap();
+        self.print_tree_file(source, &mut out).unwrap();
         out
     }
 
     /// Print a tree like rust-analyzer's debug AST
+    #[inline(always)]
     pub fn print_tree_file(&self, source: &str, out: &mut impl Write) -> std::fmt::Result {
         self.print_tree_rec(0, source, out)
     }
 
     fn print_tree_rec(&self, level: usize, source: &str, out: &mut impl Write) -> std::fmt::Result {
         const INDENT: &str = "  ";
-        writeln!(out, "{}{:?}@{}", INDENT.repeat(level), self.kind, self.span)?;
+        writeln!(
+            out,
+            "{}{:?}@{}",
+            INDENT.repeat(level),
+            self.kind,
+            self.text_range
+        )?;
 
         for child in self.children.iter() {
             match child {
@@ -57,8 +62,8 @@ impl GreenNode {
                     "{}{:?}@{} {:?}",
                     INDENT.repeat(level + 1),
                     token.kind,
-                    token.span,
-                    token.span.text(source).unwrap_or_default()
+                    token.text_range,
+                    token.text_range.text(source).unwrap_or_default()
                 )?,
             }
         }
@@ -79,7 +84,7 @@ impl GreenNode {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GreenToken {
     pub kind: TokenKind,
-    pub span: Span,
+    pub text_range: TextRange,
 }
 
 pub type GreenItem = TreeItem<Arc<GreenNode>, Arc<GreenToken>>;
@@ -144,10 +149,10 @@ impl<Node, Token> TreeItem<Node, Token> {
     }
 }
 impl RedItem {
-    pub fn span(&self) -> Span {
+    pub fn text_range(&self) -> TextRange {
         match self {
-            Self::Node(node) => node.green.span,
-            Self::Token(token) => token.green.span,
+            Self::Node(node) => node.green.text_range,
+            Self::Token(token) => token.green.text_range,
         }
     }
 }
@@ -165,12 +170,12 @@ impl std::fmt::Debug for RedToken {
     }
 }
 impl RedToken {
-    pub fn span(&self) -> &Span {
-        &self.green.span
+    pub fn text_range(&self) -> &TextRange {
+        &self.green.text_range
     }
 
     pub fn text<'i>(&self, src: &'i str) -> Option<&'i str> {
-        self.green.span.text(src)
+        self.green.text_range.text(src)
     }
 
     /// Iterator over all the ancestors of this token excluding itself.
@@ -203,29 +208,29 @@ impl RedNode {
         })
     }
 
-    /// Returns the span from the green node.
+    /// Returns the text range from the green node.
     #[inline(always)]
-    pub fn span(&self) -> &Span {
-        &self.green.span
+    pub fn text_range(&self) -> &TextRange {
+        &self.green.text_range
     }
 
-    /// Returns the node at the specified offset if found.
+    /// Returns the node at the specified byte offset if found.
     pub fn node_at_offset(self: &Arc<RedNode>, offset: usize) -> Option<Arc<RedNode>> {
         // TODO: non recursing algorithm? binary search?
         self.child_nodes()
-            .find(|node| node.span().range().contains(&offset))
+            .find(|node| node.text_range().byte_range().contains(&offset))
             .map(|node| node.node_at_offset(offset).unwrap_or(node))
     }
 
-    /// Returns the token at the specified offset if found.
+    /// Returns the token at the specified byte offset if found.
     pub fn token_at_offset(self: &Arc<RedNode>, offset: usize) -> Option<Arc<RedToken>> {
         // TODO: non recursing algorithm? binary search?
         self.child_nodes()
-            .find(|node| node.span().range().contains(&offset))
+            .find(|node| node.text_range().byte_range().contains(&offset))
             .and_then(|node| node.token_at_offset(offset))
             .or_else(|| {
                 self.child_tokens()
-                    .find(|token| token.span().range().contains(&offset))
+                    .find(|token| token.text_range().byte_range().contains(&offset))
             })
     }
 
@@ -274,11 +279,11 @@ impl RedNode {
     pub fn find_syntax_errors<'a, 'i: 'a>(
         self: &'a Arc<RedNode>,
         src: &'i str,
-    ) -> impl Iterator<Item = (Span, MySyntaxError<'i>)> + 'a {
+    ) -> impl Iterator<Item = (TextRange, MySyntaxError<'i>)> + 'a {
         self.child_tokens()
             .filter_map(|token| {
                 Some((
-                    token.green.span,
+                    token.green.text_range,
                     match token.green.kind {
                         TokenKind::Error if token.parent.green.kind == NodeKind::Ident => {
                             MySyntaxError::MissingIdent
@@ -288,7 +293,7 @@ impl RedNode {
                         TokenKind::MissingPunct(c) => MySyntaxError::MissingPunct(c),
                         TokenKind::UnexpectedWhitespace => MySyntaxError::UnexpectedWhitespace,
                         TokenKind::UnexpectedItem => {
-                            MySyntaxError::UnexpectedItem(token.green.span.text(src)?)
+                            MySyntaxError::UnexpectedItem(token.green.text_range.text(src)?)
                         }
                         _ => return None,
                     },
@@ -297,11 +302,11 @@ impl RedNode {
             .chain(
                 std::iter::once_with(|| {
                     Some((
-                        self.green.span,
+                        self.green.text_range,
                         match self.green.kind {
                             NodeKind::Error => MySyntaxError::NodeError,
                             NodeKind::InvalidPunct => {
-                                MySyntaxError::InvalidPunct(self.green.span.text(src)?)
+                                MySyntaxError::InvalidPunct(self.green.text_range.text(src)?)
                             }
                             _ => return None,
                         },

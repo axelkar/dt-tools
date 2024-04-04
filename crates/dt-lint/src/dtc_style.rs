@@ -33,7 +33,7 @@ impl EarlyLintPass for DtcStyle {
                     LintId::DtcStyle,
                     "First item must be `/dts-v1/;` directive",
                     LintSeverity::Error,
-                    first.span(),
+                    first.text_range(),
                 );
             }
         }
@@ -56,12 +56,12 @@ impl EarlyLintPass for DtcStyle {
         }
         if let Some(last_prop) = last_prop {
             if let Some(first_node) = node.subnodes().next() {
-                if last_prop.syntax().span().end > first_node.syntax().span().start {
+                if last_prop.syntax().text_range().end > first_node.syntax().text_range().start {
                     cx.add_lint_from_cst(
                         LintId::DtcStyle,
                         "Properties must not be defined after nodes",
                         LintSeverity::Error,
-                        *last_prop.syntax().span(),
+                        *last_prop.syntax().text_range(),
                     );
                 }
             }

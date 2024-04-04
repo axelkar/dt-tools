@@ -8,13 +8,13 @@
 //!
 //! ```
 //! // Error-resilient parser
-//! dt_parser::parse(";").unwrap();
-//! dt_parser::parse(" ").unwrap();
-//! dt_parser::parse("").unwrap();
-//! dt_parser::parse("asdf").unwrap();
-//! dt_parser::parse("/ {").unwrap();
-//! dt_parser::parse("/ { a = > }").unwrap();
-//! dt_parser::parse("/ { a = };").unwrap();
+//! dt_parser::parse(b";").unwrap();
+//! dt_parser::parse(b" ").unwrap();
+//! dt_parser::parse(b"").unwrap();
+//! dt_parser::parse(b"asdf").unwrap();
+//! dt_parser::parse(b"/ {").unwrap();
+//! dt_parser::parse(b"/ { a = > }").unwrap();
+//! dt_parser::parse(b"/ { a = };").unwrap();
 //!
 //! let src = "
 //! /dts-v1/;
@@ -23,9 +23,9 @@
 //!   a = <1>;
 //! };
 //! ";
-//! let first = dt_parser::parse(src).unwrap();
+//! let first = dt_parser::parse(src.as_bytes()).unwrap();
 //!
-//! let not_equal = dt_parser::parse("
+//! let not_equal = dt_parser::parse(b"
 //! /dts-v1/;
 //!
 //! / { a = <1>; };
@@ -90,6 +90,6 @@ pub use cst::parser::raw_parse;
 /// Parse a document into a [red CST node](RedNode)
 ///
 /// None will be returned if any fatal errors occur (they shouldn't)
-pub fn parse(text: &str) -> Option<Arc<RedNode>> {
-    Some(RedNode::new(Arc::new(raw_parse(text)?)))
+pub fn parse(input: &[u8]) -> Option<Arc<RedNode>> {
+    Some(RedNode::new(Arc::new(raw_parse(input)?)))
 }

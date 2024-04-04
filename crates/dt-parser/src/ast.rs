@@ -10,18 +10,18 @@
 //!
 //! let red_node: Arc<RedNode>;
 //! # use std::sync::Arc;
-//! # use dt_parser::{Span, cst::{GreenNode, GreenToken, GreenItem, kinds::*}};
+//! # use dt_parser::{TextRange, cst::{GreenNode, GreenToken, GreenItem, kinds::*}};
 //! # let green_node = Arc::new(GreenNode {
 //! #     kind: NodeKind::Directive,
-//! #     span: Span { start: 0, end: 0 },
+//! #     text_range: TextRange { start: 0, end: 0 },
 //! #     children: vec! [
 //! #         GreenItem::Node(Arc::new(GreenNode {
 //! #             kind: NodeKind::Ident,
-//! #             span: Span { start: 0, end: 0 },
+//! #             text_range: TextRange { start: 0, end: 0 },
 //! #             children: vec! [
 //! #                 GreenItem::Token(Arc::new(GreenToken {
 //! #                     kind: TokenKind::Ident,
-//! #                     span: Span { start: 0, end: 0 }
+//! #                     text_range: TextRange { start: 0, end: 0 }
 //! #                 }))
 //! #             ]
 //! #         }))
@@ -139,7 +139,7 @@ impl Ident {
 
     /// Returns the text of the inner token if it exists.
     pub fn text<'i>(&self, src: &'i str) -> Option<&'i str> {
-        self.ident_tok()?.span.text(src)
+        self.ident_tok()?.text_range.text(src)
     }
 }
 
@@ -238,7 +238,7 @@ impl DtProperty {
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, Document};
     ///
-    /// let src = "/ { a = <1 2 3> <4>; };";
+    /// let src = b"/ { a = <1 2 3> <4>; };";
     /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
     /// let property = doc.nodes().next().unwrap().properties().next().unwrap();
     /// let mut values = property.values();
@@ -323,7 +323,7 @@ impl DtPhandle {
     /// use dt_parser::ast::{DtNode, AstNode, Document, PropValue};
     /// use dt_parser::cst::TreeItem;
     ///
-    /// let src = "/ { a = <1 2 &LABEL &{/path/based/phandle}>; };";
+    /// let src = b"/ { a = <1 2 &LABEL &{/path/based/phandle}>; };";
     /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
     /// let node = doc.nodes().next().unwrap();
     /// let property = node.properties().next().unwrap();
@@ -374,7 +374,7 @@ impl DtCell {
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, Document, PropValue};
     ///
-    /// let src = "/ { a = <1 2 &LABEL>; };";
+    /// let src = b"/ { a = <1 2 &LABEL>; };";
     /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
     /// let node = doc.nodes().next().unwrap();
     /// let property = node.properties().next().unwrap();
@@ -466,7 +466,7 @@ impl DtNode {
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, Document};
     ///
-    /// let src = "/ { a = <0>; b; };";
+    /// let src = b"/ { a = <0>; b; };";
     /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
     /// let node = doc.nodes().next().unwrap();
     /// let mut properties = node.properties();
@@ -487,7 +487,7 @@ impl DtNode {
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, Document};
     ///
-    /// let src = "/ { a = <0>; b { c = <1>; }; d {}; };";
+    /// let src = b"/ { a = <0>; b { c = <1>; }; d {}; };";
     /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
     /// let node = doc.nodes().next().unwrap();
     /// let mut subnodes = node.subnodes();
@@ -509,7 +509,7 @@ impl DtNode {
     /// use dt_parser::ast::{DtNode, AstNode, Document, HasIdent};
     ///
     /// let src = "/ { my_node@unit_address { foo = <1>; }; };";
-    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let doc = Document::cast(dt_parser::parse(src.as_bytes()).unwrap()).unwrap();
     /// let node = doc
     ///     .nodes().next().unwrap()
     ///     .subnodes().next().unwrap();
@@ -534,7 +534,7 @@ impl DtNode {
     /// use dt_parser::ast::{DtNode, AstNode, Document, HasIdent};
     ///
     /// let src = "/ { my_node@unit_address { foo = <1>; }; };";
-    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let doc = Document::cast(dt_parser::parse(src.as_bytes()).unwrap()).unwrap();
     /// let node = doc
     ///     .nodes().next().unwrap()
     ///     .subnodes().next().unwrap();
@@ -545,7 +545,15 @@ impl DtNode {
     pub fn name<'i>(&self, src: &'i str) -> Option<Cow<'i, str>> {
         Some(match self.unit_address() {
             None => Cow::Borrowed(self.ident()?.text(src)?),
-            Some(unit) => Cow::Owned(format!("{}@{}", self.ident()?.text(src)?, unit.text(src)?)),
+            Some(unit) => Cow::Owned({
+                let ident = self.ident()?.text(src)?;
+                let unit = unit.text(src)?;
+                let mut out = String::with_capacity(ident.len() + 1 + unit.len());
+                out.push_str(ident);
+                out.push('@');
+                out.push_str(unit);
+                out
+            }),
         })
     }
 
@@ -558,7 +566,7 @@ impl DtNode {
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, Document};
     ///
-    /// let src = "&a { b { .. }; };";
+    /// let src = b"&a { b { .. }; };";
     /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
     /// let node_a = doc.nodes().next().unwrap();
     /// let node_b = node_a.subnodes().next().unwrap();
@@ -585,7 +593,7 @@ impl DtNode {
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, Document};
     ///
-    /// let src = "&a { b { c { .. }; }; };";
+    /// let src = b"&a { b { c { .. }; }; };";
     /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
     /// let node = doc
     ///     .nodes().next().unwrap()
@@ -605,7 +613,7 @@ impl DtNode {
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, Document};
     ///
-    /// let src = "&a { b { c { d { .. }; }; }; };";
+    /// let src = b"&a { b { c { d { .. }; }; }; };";
     /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
     /// let node = doc
     ///     .nodes().next().unwrap()

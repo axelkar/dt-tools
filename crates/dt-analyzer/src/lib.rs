@@ -2,7 +2,7 @@
 //!
 //! A crate for analyzing [CST nodes](RedNode) produced by [`dt_parser`] to property values.
 //!
-//! # Examples
+//! # Example
 //!
 //! ```
 //! use std::collections::HashMap;
@@ -21,7 +21,7 @@
 //!   c = <3>;
 //! };
 //! ";
-//! let cst = dt_parser::parse(text).unwrap();
+//! let cst = dt_parser::parse(text.as_bytes()).unwrap();
 //! let hm: HashMap<_, _> = analyze_cst(cst, text).unwrap().tree
 //!     .dfs_iter()
 //!     .map(|(path, value)| (path.join("/"), value))

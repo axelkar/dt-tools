@@ -41,6 +41,7 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
     let offset = position_to_offset(params.position, &document.text)?;
 
     // TODO: try prev offset?
+    // TODO: Check for nodes above e.g. quit the search directly on an error node
     let token = cst.token_at_offset(offset)?.clone();
 
     if token.green.kind.is_trivia() {
@@ -122,7 +123,8 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
                 kind: MarkupKind::Markdown,
                 value: markdown
             }),
-            range: span.and_then(|span: &dt_parser::Span| {
+            range: span.and_then(|span: &dt_parser::TextRange| {
+                // TODO: proper Span type with file IDs and more
                 Some(Range::new(
                     offset_to_position(span.start, rope)?,
                     offset_to_position(span.end, rope)?

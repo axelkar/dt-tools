@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .expect("Should have a path as an argument");
     let text = std::fs::read_to_string(path)?;
-    let Some(green_node) = dt_parser::raw_parse(&text) else {
+    let Some(green_node) = dt_parser::raw_parse(text.as_bytes()) else {
         eprintln!("Invalid DTS!");
         std::process::exit(1);
     };

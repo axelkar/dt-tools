@@ -38,7 +38,7 @@ impl EarlyLintPass for KernelCodingStyle {
                             LintId::KernelCodingStyle,
                             format!("Label name `{text}` should match `[a-z0-9_]+`"),
                             LintSeverity::Warn,
-                            *ident.syntax().span(),
+                            *ident.syntax().text_range(),
                         );
                     }
                 } else if !valid_node_name(text) {
@@ -46,7 +46,7 @@ impl EarlyLintPass for KernelCodingStyle {
                         LintId::KernelCodingStyle,
                         format!("Node name `{text}` should match `[a-z0-9-]+`"),
                         LintSeverity::Warn,
-                        *ident.syntax().span(),
+                        *ident.syntax().text_range(),
                     );
                 }
             }
@@ -61,7 +61,7 @@ impl EarlyLintPass for KernelCodingStyle {
                             "Node unit name `{text}` should be a hex number without leading zeros"
                         ),
                         LintSeverity::Warn,
-                        *ident.syntax().span(),
+                        *ident.syntax().text_range(),
                     );
                 }
             }
@@ -86,7 +86,7 @@ impl EarlyLintPass for KernelCodingStyle {
                         LintId::KernelCodingStyle,
                         format!("Property name `{text}` should match `#?[a-z0-9-]+`"),
                         LintSeverity::Warn,
-                        *ident.syntax().span(),
+                        *ident.syntax().text_range(),
                     );
                 }
             }
@@ -102,7 +102,7 @@ impl EarlyLintPass for KernelCodingStyle {
                                     LintId::KernelCodingStyle,
                                     "Hex values in properties must use lowercase hex",
                                     LintSeverity::Warn,
-                                    *dt_number.span(),
+                                    *dt_number.text_range(),
                                 );
                             }
                         }
@@ -122,7 +122,7 @@ impl EarlyLintPass for KernelCodingStyle {
                         LintId::KernelCodingStyle,
                         format!("Label name `{text}` should match `[a-z0-9_]+`"),
                         LintSeverity::Warn,
-                        *ident.syntax().span(),
+                        *ident.syntax().text_range(),
                     );
                 }
             }

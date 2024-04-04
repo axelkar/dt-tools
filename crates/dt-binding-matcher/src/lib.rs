@@ -107,7 +107,7 @@ pub fn find_select(tree: DefinitionTreeNode, select: &JSONSchema) -> Option<Defi
 fn test_compile() {
     fn compile_example(example: &str, schema: &BindingSchema) {
         let example = format!("/dts-v1/;\n\n/ {{\n{example}\n}};");
-        let red = dt_parser::parse(&example).unwrap();
+        let red = dt_parser::parse(example.as_bytes()).unwrap();
 
         // TODO: use dt_lint since find_syntax_errors isn't updated
         #[allow(deprecated)]

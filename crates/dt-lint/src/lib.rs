@@ -6,7 +6,7 @@
 
 use dt_parser::{
     ast::{self, HasLabel},
-    Span,
+    TextRange,
 };
 use std::borrow::Cow;
 
@@ -34,11 +34,11 @@ pub type DiagnosticMessage = Cow<'static, str>;
 /// [1]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_error_messages/struct.MultiSpan.html
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultiSpan {
-    pub primary_spans: Vec<Span>,
-    pub span_labels: Vec<(Span, DiagnosticMessage)>,
+    pub primary_spans: Vec<TextRange>,
+    pub span_labels: Vec<(TextRange, DiagnosticMessage)>,
 }
-impl From<Span> for MultiSpan {
-    fn from(value: Span) -> Self {
+impl From<TextRange> for MultiSpan {
+    fn from(value: TextRange) -> Self {
         Self {
             primary_spans: vec![value],
             span_labels: Vec::new(),

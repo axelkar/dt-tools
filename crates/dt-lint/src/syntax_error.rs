@@ -26,25 +26,27 @@ pub fn find_syntax_errors(cx: &mut crate::EarlyContext<'_>, red: &Arc<RedNode>, 
         cx.add_lint_from_cst(LintId::SyntaxError, msg, LintSeverity::Error, span.into());
     }
     match red.green.kind {
-        NodeKind::Error => err(cx, "Syntax error".into(), *red.span()),
+        NodeKind::Error => err(cx, "Syntax error".into(), *red.text_range()),
         NodeKind::InvalidPunct => err(
             cx,
             format!(
                 "Invalid punctuation: `{}`",
-                red.green.span.text(src).unwrap_or_default()
+                red.green.text_range.text(src).unwrap_or_default()
             )
             .into(),
-            *red.span(),
+            *red.text_range(),
         ),
         _ => {}
     }
     for token in red.child_tokens() {
         match token.green.kind {
             TokenKind::Error if token.parent.green.kind == NodeKind::Ident => {
-                err(cx, "Missing identifier".into(), *token.span())
+                err(cx, "Missing identifier".into(), *token.text_range())
             }
-            TokenKind::Error => err(cx, "Syntax error".into(), *token.span()),
-            TokenKind::SeparatedMissingFirst => err(cx, "Missing first item".into(), *token.span()),
+            TokenKind::Error => err(cx, "Syntax error".into(), *token.text_range()),
+            TokenKind::SeparatedMissingFirst => {
+                err(cx, "Missing first item".into(), *token.text_range())
+            }
             TokenKind::MissingPunct('}') => {
                 let unclosed = token
                     .parent
@@ -54,9 +56,9 @@ pub fn find_syntax_errors(cx: &mut crate::EarlyContext<'_>, red: &Arc<RedNode>, 
                     cx,
                     "Missing punctuation: `}`".into(),
                     MultiSpan {
-                        primary_spans: vec![*token.span()],
+                        primary_spans: vec![*token.text_range()],
                         span_labels: if let Some(unclosed) = unclosed {
-                            vec![(*unclosed.span(), "Unclosed `{`".into())]
+                            vec![(*unclosed.text_range(), "Unclosed `{`".into())]
                         } else {
                             Vec::new()
                         },
@@ -66,19 +68,19 @@ pub fn find_syntax_errors(cx: &mut crate::EarlyContext<'_>, red: &Arc<RedNode>, 
             TokenKind::MissingPunct(c) => err(
                 cx,
                 format!("Missing punctuation: `{c}`").into(),
-                *token.span(),
+                *token.text_range(),
             ),
             TokenKind::UnexpectedWhitespace => {
-                err(cx, "Unexpected whitespace".into(), *token.span())
+                err(cx, "Unexpected whitespace".into(), *token.text_range())
             }
             TokenKind::UnexpectedItem => err(
                 cx,
                 format!(
                     "Unexpected item: `{}`",
-                    token.green.span.text(src).unwrap_or_default()
+                    token.green.text_range.text(src).unwrap_or_default()
                 )
                 .into(),
-                *token.span(),
+                *token.text_range(),
             ),
             _ => {}
         }

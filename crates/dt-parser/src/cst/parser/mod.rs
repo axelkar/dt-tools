@@ -9,7 +9,7 @@
 ///
 /// I'd also want to now have to parse numbers and strings twice (in dt-parser for validation, in
 /// dt-analyzer for getting the values)
-use crate::Span;
+use crate::TextRange;
 
 use super::{GreenItem, GreenNode, GreenToken, NodeKind, TokenKind};
 use either::Either;
@@ -55,7 +55,7 @@ macro_rules! node {
             let (children, span) = $parser.with_span().parse_next(input)?;
             Ok(GreenItem::Node(Arc::new(GreenNode {
                 kind,
-                span: Span {
+                text_range: TextRange {
                     start: span.start,
                     end: span.end,
                 },
@@ -72,7 +72,7 @@ macro_rules! token {
             let span = $parser.span().parse_next(input)?;
             Ok(GreenItem::Token(Arc::new(GreenToken {
                 kind,
-                span: Span {
+                text_range: TextRange {
                     start: span.start,
                     end: span.end,
                 },
@@ -163,7 +163,7 @@ where
                     let span_end = input.location();
                     acc.push(GreenItem::Node(Arc::new(GreenNode {
                         kind: NodeKind::Separator,
-                        span: Span {
+                        text_range: TextRange {
                             start: span_start,
                             end: span_end,
                         },
@@ -201,12 +201,12 @@ fn wst(input: &mut Stream) -> PResult<impl PushGreenItem> {
             raw.map(|v| (None, v, None)),
             (
                 opt(raw),
-                token!(TokenKind::Comment, ("/*", take_until(0.., "*/"), "*/")),
+                token!(TokenKind::Comment, (b"/*", take_until(0.., "*/"), b"*/")),
                 opt(raw),
             ),
             (
                 opt(raw),
-                token!(TokenKind::Comment, ("//", take_till(0.., ['\n', '\r']))),
+                token!(TokenKind::Comment, (b"//", take_till(0.., [b'\n', b'\r']))),
                 empty.value(None),
             ),
         )),
@@ -445,7 +445,7 @@ fn root_level_nodes(input: &mut Stream) -> PResult<GreenItem> {
 
 #[cfg(test)]
 pub(crate) fn generic_parse<'i, O>(
-    input: &'i str,
+    input: &'i [u8],
     parser: impl Parser<Stream<'i>, O, ContextError>,
 ) -> (Option<O>, Vec<ContextError>) {
     use winnow::combinator::terminated;
@@ -471,7 +471,7 @@ fn raw_parser(input: &mut Stream) -> PResult<GreenNode> {
 
     Ok(GreenNode {
         kind: NodeKind::Document,
-        span: Span { start, end },
+        text_range: TextRange { start, end },
         children,
     })
 }
@@ -479,7 +479,7 @@ fn raw_parser(input: &mut Stream) -> PResult<GreenNode> {
 /// Parse a document into a [green CST node](GreenNode)
 ///
 /// None will be returned if any fatal errors occur (they shouldn't)
-pub fn raw_parse(input: &str) -> Option<GreenNode> {
+pub fn raw_parse(input: &[u8]) -> Option<GreenNode> {
     let (_, node, errors) = raw_parser.recoverable_parse(crate::Printer(Located::new(input)));
     if !errors.is_empty() {
         return None;

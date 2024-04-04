@@ -134,7 +134,7 @@ impl Backend {
                 analyzed: None,
             },
         );
-        let cst = dt_parser::parse(&text);
+        let cst = dt_parser::parse(text.as_bytes());
 
         let mut diagnostics = Vec::new();
 

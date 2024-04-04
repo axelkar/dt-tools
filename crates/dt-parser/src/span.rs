@@ -6,31 +6,30 @@ use std::ops::Range;
 
 /// A location in source code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Span {
-    // TODO: unicode? bytes or chars?
-    /// The beginning offset of the span (inclusive)
+pub struct TextRange {
+    /// The beginning byte offset of the span (inclusive)
     pub start: usize,
-    /// The ending offset of the span (exclusive)
+    /// The ending byte offset of the span (exclusive)
     pub end: usize,
 }
-impl Display for Span {
+impl Display for TextRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}..{}", self.start, self.end)
     }
 }
 
-impl Span {
+impl TextRange {
     /// Returns the length of the span.
     ///
     /// # Example
     ///
     /// ```
-    /// use dt_parser::Span;
+    /// use dt_parser::TextRange;
     ///
-    /// let span = Span { start: 4, end: 7 };
+    /// let span = TextRange { start: 4, end: 7 };
     /// assert_eq!(span.length(), 3);
     ///
-    /// let span = Span { start: 4, end: 4 };
+    /// let span = TextRange { start: 4, end: 4 };
     /// assert_eq!(span.length(), 0);
     /// ```
     #[inline(always)]
@@ -43,42 +42,52 @@ impl Span {
     /// # Example
     ///
     /// ```
-    /// use dt_parser::Span;
+    /// use dt_parser::TextRange;
     ///
     /// let source = "foo bar baz";
     ///
-    /// let span = Span { start: 4, end: 7 };
+    /// let span = TextRange { start: 4, end: 7 };
     /// assert_eq!(span.text(source), Some("bar"));
     ///
     /// // Out of bounds
-    /// let span = Span { start: 11, end: 12 };
+    /// let span = TextRange { start: 11, end: 12 };
     /// assert_eq!(span.text(source), None);
     /// ```
     #[inline(always)]
-    pub fn text<'a>(&self, source: &'a str) -> Option<&'a str> {
+    pub fn text<'i>(&self, source: &'i str) -> Option<&'i str> {
         source.get(self.start..self.end)
     }
 
-    /// Returns the offset range in a [`Range`].
+    /// Returns the byte offset range in a [`Range`].
     ///
     /// # Example
     ///
     /// ```
-    /// use dt_parser::Span;
+    /// use dt_parser::TextRange;
     ///
-    /// let span = Span { start: 4, end: 7 };
-    /// assert_eq!(span.range(), 4..7);
+    /// let span = TextRange { start: 4, end: 7 };
+    /// assert_eq!(span.byte_range(), 4..7);
     /// ```
     #[inline(always)]
-    pub fn range(&self) -> Range<usize> {
+    pub fn byte_range(&self) -> Range<usize> {
         self.start..self.end
     }
 
     // TODO: lsp_range(&self, rope: ropey::Rope) -> lsp_types::Range?
 }
 
-impl From<Span> for Range<usize> {
-    fn from(value: Span) -> Self {
-        value.range()
+impl From<Range<usize>> for TextRange {
+    #[inline(always)]
+    fn from(value: Range<usize>) -> Self {
+        Self {
+            start: value.start,
+            end: value.end,
+        }
+    }
+}
+impl From<TextRange> for Range<usize> {
+    #[inline(always)]
+    fn from(value: TextRange) -> Self {
+        value.start..value.end
     }
 }

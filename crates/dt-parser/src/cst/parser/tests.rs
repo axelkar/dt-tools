@@ -4,7 +4,7 @@ use pretty_assertions::assert_eq;
 fn node(kind: NodeKind, start: usize, end: usize, children: Vec<GreenItem>) -> GreenItem {
     GreenItem::Node(Arc::new(GreenNode {
         kind,
-        span: Span { start, end },
+        text_range: TextRange { start, end },
         children,
     }))
 }
@@ -12,7 +12,7 @@ fn node(kind: NodeKind, start: usize, end: usize, children: Vec<GreenItem>) -> G
 fn token(kind: TokenKind, start: usize, end: usize) -> GreenItem {
     GreenItem::Token(Arc::new(GreenToken {
         kind,
-        span: Span { start, end },
+        text_range: TextRange { start, end },
     }))
 }
 fn id(start: usize, end: usize) -> GreenItem {
@@ -31,14 +31,14 @@ fn ws(start: usize, end: usize) -> GreenItem {
 fn red_test() {
     use crate::cst::{MySyntaxError, RedNode};
     let text = "/dts-v1/; / {}\n";
-    let green_tree = full(text).unwrap().into_node().unwrap();
+    let green_tree = full(text.as_bytes()).unwrap().into_node().unwrap();
     let red = RedNode::new(green_tree);
     #[allow(deprecated)]
     let vec = red.find_syntax_errors(text).collect::<Vec<_>>();
     assert_eq!(
         vec,
         vec![(
-            Span { start: 14, end: 15 },
+            TextRange { start: 14, end: 15 },
             MySyntaxError::MissingPunct(';')
         )]
     );
@@ -47,7 +47,7 @@ fn red_test() {
 #[test]
 fn test_green_separated() {
     assert_eq!(
-        generic_parse("", green_separated(true, false, T!['='], T![','])),
+        generic_parse(b"", green_separated(true, false, T!['='], T![','])),
         (
             Some(vec![token(TokenKind::SeparatedMissingFirst, 0, 0)]),
             Vec::new()
@@ -58,15 +58,15 @@ fn test_green_separated() {
 #[test]
 fn test_ident() {
     assert_eq!(
-        generic_parse("#interrupt-cells", nullable_ident),
+        generic_parse(b"#interrupt-cells", nullable_ident),
         (Some(id(0, 16)), Vec::new())
     );
     assert_eq!(
-        generic_parse("a_label", nullable_ident),
+        generic_parse(b"a_label", nullable_ident),
         (Some(id(0, 7)), Vec::new())
     );
     assert_eq!(
-        generic_parse("dts-v1", nullable_ident),
+        generic_parse(b"dts-v1", nullable_ident),
         (Some(id(0, 6)), Vec::new())
     );
 }
@@ -74,7 +74,7 @@ fn test_ident() {
 #[test]
 fn test_property() {
     assert_eq!(
-        generic_parse("<1, 2>", super::property::dt_cell),
+        generic_parse(b"<1, 2>", super::property::dt_cell),
         (
             Some(node(
                 NodeKind::DtCell,
@@ -102,7 +102,7 @@ fn test_property() {
 
     assert_eq!(
         generic_parse(
-            "<1 &FOO &{/soc/pic}, &{ /soc/pic}>",
+            b"<1 &FOO &{/soc/pic}, &{ /soc/pic}>",
             super::property::dt_cell
         ),
         (
@@ -168,7 +168,7 @@ fn test_property() {
     );
 
     assert_eq!(
-        generic_parse("a = <1>;", dt_prop),
+        generic_parse(b"a = <1>;", dt_prop),
         (
             Some(node(
                 NodeKind::DtProperty,
@@ -200,7 +200,7 @@ fn test_property() {
 #[test]
 fn test_directive() {
     assert_eq!(
-        generic_parse("/foo/;", directive),
+        generic_parse(b"/foo/;", directive),
         (
             Some(node(
                 NodeKind::Directive,
@@ -217,7 +217,7 @@ fn test_directive() {
         )
     );
     assert_eq!(
-        generic_parse("/foo/\n", directive),
+        generic_parse(b"/foo/\n", directive),
         (
             Some(node(
                 NodeKind::Directive,
@@ -235,15 +235,15 @@ fn test_directive() {
     );
 }
 
-fn full(input: &str) -> Option<GreenItem> {
+fn full(input: &[u8]) -> Option<GreenItem> {
     Some(GreenItem::Node(Arc::new(super::raw_parse(input)?)))
 }
 
 #[test]
 fn test_full() {
-    assert_eq!(full(""), Some(node(NodeKind::Document, 0, 0, vec![])));
+    assert_eq!(full(b""), Some(node(NodeKind::Document, 0, 0, vec![])));
     assert_eq!(
-        full("/dts-v1/;"),
+        full(b"/dts-v1/;"),
         Some(node(
             NodeKind::Document,
             0,
@@ -263,7 +263,7 @@ fn test_full() {
     );
 
     assert_eq!(
-        full("// test\n/dts-v1/;"),
+        full(b"// test\n/dts-v1/;"),
         Some(node(
             NodeKind::Document,
             0,
@@ -288,7 +288,7 @@ fn test_full() {
 
     assert_eq!(
         // TODO: error message like: did you forget to type the node name?
-        full(" {};"),
+        full(b" {};"),
         Some(node(
             NodeKind::Document,
             0,
@@ -311,7 +311,7 @@ fn test_full() {
     );
 
     assert_eq!(
-        full("test"),
+        full(b"test"),
         Some(node(
             NodeKind::Document,
             0,
@@ -321,7 +321,7 @@ fn test_full() {
     );
 
     assert_eq!(
-        full(r#"/dts-v1/; / { a = "b"; };"#),
+        full(br#"/dts-v1/; / { a = "b"; };"#),
         Some(node(
             NodeKind::Document,
             0,
@@ -380,7 +380,7 @@ fn test_full() {
     );
 
     assert_eq!(
-        full(r#"/dts-v1/; / { a = "b";"#),
+        full(br#"/dts-v1/; / { a = "b";"#),
         Some(node(
             NodeKind::Document,
             0,
@@ -441,20 +441,27 @@ fn test_full() {
 fn test_data_expect() {
     let src = include_str!("../../../test_data/1.dts");
     assert_eq!(
-        full(src).unwrap().into_node().unwrap().print_tree(src),
+        full(src.as_bytes())
+            .unwrap()
+            .into_node()
+            .unwrap()
+            .print_tree(src),
         include_str!("../../../test_data/1.dts.expect")
     );
 }
 
 #[test]
 fn test_whitespace() {
-    fn parse<'i, O>(input: &'i str, parser: impl Parser<Stream<'i>, O, ContextError>) -> Option<O> {
+    fn parse<'i, O>(
+        input: &'i [u8],
+        parser: impl Parser<Stream<'i>, O, ContextError>,
+    ) -> Option<O> {
         let (o, e) = generic_parse(input, parser);
         o.filter(|_| e.is_empty())
     }
 
     assert_eq!(
-        parse("// test\n// foo", wst).map(|o| o.collect()),
+        parse(b"// test\n// foo", wst).map(|o| o.collect()),
         Some(vec![
             token(TokenKind::Comment, 0, 7),
             ws(7, 8),
@@ -462,14 +469,14 @@ fn test_whitespace() {
         ])
     );
     assert_eq!(
-        parse("/* /* test\n foo */", wst).map(|o| o.collect()),
+        parse(b"/* /* test\n foo */", wst).map(|o| o.collect()),
         Some(vec![token(TokenKind::Comment, 0, 18),])
     );
-    assert_eq!(parse("/* /* test */ */", wst).map(|o| o.collect()), None);
-    assert_eq!(parse("test", wst).map(|o| o.collect()), None);
+    assert_eq!(parse(b"/* /* test */ */", wst).map(|o| o.collect()), None);
+    assert_eq!(parse(b"test", wst).map(|o| o.collect()), None);
 
-    assert_eq!(parse(" \t ", wsnt), Some(ws(0, 3)));
-    assert_eq!(parse("\n", wsnt), None);
-    assert_eq!(parse("", wsnt), None);
-    assert_eq!(parse("test", wsnt), None);
+    assert_eq!(parse(b" \t ", wsnt), Some(ws(0, 3)));
+    assert_eq!(parse(b"\n", wsnt), None);
+    assert_eq!(parse(b"", wsnt), None);
+    assert_eq!(parse(b"test", wsnt), None);
 }
