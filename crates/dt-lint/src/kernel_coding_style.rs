@@ -58,7 +58,7 @@ impl EarlyLintPass for KernelCodingStyle {
                     cx.add_lint_from_cst(
                         LintId::KernelCodingStyle,
                         format!(
-                            "Node unit name `{text}` should be a hex number without leading zeros"
+                            "Node unit name `{text}` should be a lowercase hex number without leading zeros"
                         ),
                         LintSeverity::Warn,
                         *ident.syntax().text_range(),
@@ -81,7 +81,7 @@ impl EarlyLintPass for KernelCodingStyle {
     fn check_property(&mut self, cx: &mut crate::EarlyContext<'_>, property: &ast::DtProperty) {
         if let Some(ident) = property.ident() {
             if let Some(text) = ident.text(cx.src) {
-                if text != "device_type" && !valid_prop_name(text) {
+                if text != "device_type" && text != "ddr_device_type" && !valid_prop_name(text) {
                     cx.add_lint_from_cst(
                         LintId::KernelCodingStyle,
                         format!("Property name `{text}` should match `#?[a-z0-9-]+`"),

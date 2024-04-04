@@ -235,6 +235,7 @@ fn inner_ident(input: &mut Stream) -> PResult<()> {
         1..,
         (
             'a'..='z',
+            '.',
             ',',
             '-',
             '#',

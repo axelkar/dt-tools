@@ -5,6 +5,7 @@
 / {
   My_Label: Foo@0xA4 {
     MyProp = "";
+    hex-value = <0xAAA>;
   };
   foo = "bar"
 };
