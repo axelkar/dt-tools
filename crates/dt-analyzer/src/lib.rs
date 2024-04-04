@@ -1,13 +1,12 @@
 //! # Devicetree analyzer
 //!
-//! A crate for analyzing [CST nodes](RedNode) to property values.
+//! A crate for analyzing [CST nodes](RedNode) produced by [`dt_parser`] to property values.
 //!
 //! # Examples
 //!
 //! ```
 //! use std::collections::HashMap;
 //! use dt_analyzer::{analyze_cst, PropDefinition, Value};
-//! use dt_parser::Span;
 //! let text = "
 //! /dts-v1/;
 //!
@@ -94,7 +93,7 @@ pub fn analyze_cst(cst: Arc<RedNode>, src: &str) -> Option<FileDefinition> {
         let Some(ex_tree) = analyze_node(extension, src) else {
             continue;
         };
-        let ex_tree = ex_tree.prefix(label.node_ast.path(src).into_iter().map(Cow::into_owned));
+        let ex_tree = ex_tree.prefix(label.node_ast.path(src).map(Cow::into_owned));
         tree.merge(ex_tree);
     }
 

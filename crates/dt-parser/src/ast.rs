@@ -1,3 +1,39 @@
+//! Abstract syntax trees.
+//!
+//! All AST items reference [`RedNode`]s through [`AstNode::syntax()`].
+//!
+//! To get an AST item, use [`AstNode::cast()`] with a [`Arc<RedNode>`] as follows:
+//!
+//! ```
+//! use dt_parser::cst::RedNode;
+//! use dt_parser::ast::{self, AstNode as _};
+//!
+//! let red_node: Arc<RedNode>;
+//! # use std::sync::Arc;
+//! # use dt_parser::{Span, cst::{GreenNode, GreenToken, GreenItem, kinds::*}};
+//! # let green_node = Arc::new(GreenNode {
+//! #     kind: NodeKind::Directive,
+//! #     span: Span { start: 0, end: 0 },
+//! #     children: vec! [
+//! #         GreenItem::Node(Arc::new(GreenNode {
+//! #             kind: NodeKind::Ident,
+//! #             span: Span { start: 0, end: 0 },
+//! #             children: vec! [
+//! #                 GreenItem::Token(Arc::new(GreenToken {
+//! #                     kind: TokenKind::Ident,
+//! #                     span: Span { start: 0, end: 0 }
+//! #                 }))
+//! #             ]
+//! #         }))
+//! #     ]
+//! # });
+//! # red_node = RedNode::new(green_node);
+//! let ast = ast::Directive::cast(red_node).unwrap();
+//!
+//! // Use Has- traits
+//! use dt_parser::ast::HasIdent;
+//! assert!(matches!(ast.ident(), Some(ast::Ident { .. })))
+//! ```
 use std::{borrow::Cow, sync::Arc};
 
 use crate::cst::{
@@ -5,12 +41,22 @@ use crate::cst::{
     GreenToken, RedItem, RedNode, RedToken, TreeItem,
 };
 
+/// Trait used for downcasting from [`RedNode`]s to AST nodes.
 pub trait AstNode {
+    /// Try to cast a [`RedNode`] to an AST node.
+    ///
+    /// The implementor must check [`GreenNode::kind`](crate::cst::GreenNode::kind)!
+    ///
+    /// All functions which reference children (e.g. [`Document::nodes`]) should return [`Option`]s
+    /// or similar!
     fn cast(syntax: Arc<RedNode>) -> Option<Self>
     where
         Self: Sized;
 
+    /// Returns the syntax node.
     fn syntax(&self) -> Arc<RedNode>;
+
+    /// Returns a reference to the syntax node.
     fn syntax_ref(&self) -> &RedNode;
 }
 
@@ -41,17 +87,25 @@ macro_rules! match_ast {
 }
 //pub use match_ast;
 
+/// Trait for [`AstNode`]s with [`Ident`]s
 pub trait HasIdent: AstNode {
+    /// Returns the [`Ident`] if it exists.
     fn ident(&self) -> Option<Ident> {
         self.syntax().child_nodes().find_map(Ident::cast)
     }
 }
+
+/// Trait for [`AstNode`]s with [`DtLabel`]s
 pub trait HasLabel: AstNode {
+    /// Returns the [`DtLabel`] if it exists.
     fn label(&self) -> Option<DtLabel> {
         self.syntax().child_nodes().find_map(DtLabel::cast)
     }
 }
 
+/// An identifier.
+///
+/// Kind: [`NodeKind::Ident`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Ident {
     syntax: Arc<RedNode>,
@@ -72,6 +126,7 @@ impl AstNode for Ident {
 }
 impl Ident {
     // TODO: HasText::text, SyntaxToken::text and/or GreenToken::text?
+    /// Returns the inner [`Arc<GreenToken>`] with the kind [`TokenKind::Ident`] if it exists.
     pub fn ident_tok(&self) -> Option<Arc<GreenToken>> {
         Some(
             self.syntax
@@ -81,11 +136,18 @@ impl Ident {
                 .clone(),
         )
     }
+
+    /// Returns the text of the inner token if it exists.
     pub fn text<'i>(&self, src: &'i str) -> Option<&'i str> {
         self.ident_tok()?.span.text(src)
     }
 }
 
+/// A [Devicetree][1] document, which contains [`ToplevelItem`]s.
+///
+/// Kind: [`NodeKind::Document`]
+///
+/// [1]: https://devicetree.org
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Document {
     syntax: Arc<RedNode>,
@@ -105,16 +167,26 @@ impl AstNode for Document {
     }
 }
 impl Document {
-    /// Get direct [`Directive`] children
+    /// Returns an iterator over direct [`ToplevelItem`] children.
+    pub fn items(&self) -> impl Iterator<Item = ToplevelItem> + '_ {
+        self.syntax.child_nodes().filter_map(ToplevelItem::cast)
+    }
+    /// Returns an iterator over direct [`Directive`] children.
     pub fn directives(&self) -> impl Iterator<Item = Directive> + '_ {
         self.syntax.child_nodes().filter_map(Directive::cast)
     }
-    /// Get direct [`DtNode`] children
+    /// Returns an iterator over direct [`DtNode`] children.
     pub fn nodes(&self) -> impl Iterator<Item = DtNode> + '_ {
         self.syntax.child_nodes().filter_map(DtNode::cast)
     }
 }
 
+/// A [Devicetree directive][1].
+///
+/// Kind: [`NodeKind::Directive`]
+///
+/// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#compiler-directives
+// TODO: directive parameters
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Directive {
     syntax: Arc<RedNode>,
@@ -135,6 +207,11 @@ impl AstNode for Directive {
 }
 impl HasIdent for Directive {}
 
+/// A [Devicetree property][1].
+///
+/// Kind: [`NodeKind::DtProperty`]
+///
+/// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DtProperty {
     syntax: Arc<RedNode>,
@@ -154,7 +231,23 @@ impl AstNode for DtProperty {
     }
 }
 impl DtProperty {
-    /// Get direct [`PropValue`] children
+    /// Returns an iterator over direct [`PropValue`] children.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document};
+    ///
+    /// let src = "/ { a = <1 2 3> <4>; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let property = doc.nodes().next().unwrap().properties().next().unwrap();
+    /// let mut values = property.values();
+    ///
+    /// assert!(values.next().is_some());
+    /// assert!(values.next().is_some());
+    /// assert_eq!(values.next(), None);
+    ///
+    /// ```
     pub fn values(&self) -> impl Iterator<Item = PropValue> + '_ {
         self.syntax.child_nodes().filter_map(PropValue::cast)
     }
@@ -162,6 +255,11 @@ impl DtProperty {
 impl HasIdent for DtProperty {}
 impl HasLabel for DtProperty {}
 
+/// A value of a [`DtProperty`].
+///
+/// Kind: [`NodeKind::DtCell`] or [`NodeKind::DtString`]
+///
+/// More value types are to come later as the library gets developmed
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PropValue {
     Cell(DtCell),
@@ -189,6 +287,9 @@ impl AstNode for PropValue {
     }
 }
 
+/// A phandle item in a [`DtCell`].
+///
+/// Kind: [`NodeKind::DtPhandle`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DtPhandle {
     syntax: Arc<RedNode>,
@@ -208,19 +309,45 @@ impl AstNode for DtPhandle {
     }
 }
 impl DtPhandle {
-    /// Whether this is a path phandle and not a label phandle
+    /// Returns true if this is a path phandle and not a label phandle.
     pub fn is_path(&self) -> bool {
         self.syntax
             .child_tokens()
             .any(|tok| tok.green.kind == TokenKind::DtPathPhandle)
     }
-    /// Whether this is a label phandle and not a path phandle
+    /// Returns true if this is a label phandle and not a path phandle.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document, PropValue};
+    /// use dt_parser::cst::TreeItem;
+    ///
+    /// let src = "/ { a = <1 2 &LABEL &{/path/based/phandle}>; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let node = doc.nodes().next().unwrap();
+    /// let property = node.properties().next().unwrap();
+    /// let property_value = property.values().next().unwrap();
+    /// let cell = match property_value {
+    ///     PropValue::Cell(cell) => cell,
+    ///     _ => panic!("unexpected"),
+    /// };
+    /// let mut phandles = cell.values().filter_map(TreeItem::into_node);
+    ///
+    /// assert!(phandles.next().unwrap().is_label());
+    /// assert!(!phandles.next().unwrap().is_label());
+    /// assert_eq!(phandles.next(), None);
+    ///
+    /// ```
     pub fn is_label(&self) -> bool {
         !self.is_path()
     }
 }
 impl HasIdent for DtPhandle {}
 
+/// A Devicetree cell. A type of [`PropValue`]
+///
+/// Kind: [`NodeKind::DtCell`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DtCell {
     syntax: Arc<RedNode>,
@@ -240,7 +367,31 @@ impl AstNode for DtCell {
     }
 }
 impl DtCell {
-    /// Get either phandle or token children
+    /// Returns an iterator over phandle and number children.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document, PropValue};
+    ///
+    /// let src = "/ { a = <1 2 &LABEL>; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let node = doc.nodes().next().unwrap();
+    /// let property = node.properties().next().unwrap();
+    /// let property_value = property.values().next().unwrap();
+    /// let cell = match property_value {
+    ///     PropValue::Cell(cell) => cell,
+    ///     _ => panic!("unexpected"),
+    /// };
+    /// let mut values = cell.values();
+    ///
+    /// assert!(values.next().is_some());
+    /// assert!(values.next().is_some());
+    /// assert!(values.next().is_some());
+    /// assert_eq!(values.next(), None);
+    ///
+    /// ```
+    // TODO: make DtNumbers nodes so this can return better types
     pub fn values(&self) -> impl Iterator<Item = TreeItem<DtPhandle, Arc<RedToken>>> + '_ {
         self.syntax.children().filter_map(|item| {
             Some(match item {
@@ -254,6 +405,9 @@ impl DtCell {
     }
 }
 
+/// A Devicetree string. A type of [`PropValue`].
+///
+/// Kind: [`NodeKind::DtString`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DtString {
     syntax: Arc<RedNode>,
@@ -273,6 +427,7 @@ impl AstNode for DtString {
     }
 }
 impl DtString {
+    /// Returns the content token if it exists.
     pub fn contents(&self) -> Option<Arc<RedToken>> {
         self.syntax
             .child_tokens()
@@ -280,6 +435,11 @@ impl DtString {
     }
 }
 
+/// A [Devicetree node][1].
+///
+/// Kind: [`NodeKind::DtNode`]
+///
+/// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DtNode {
     syntax: Arc<RedNode>,
@@ -299,16 +459,65 @@ impl AstNode for DtNode {
     }
 }
 impl DtNode {
-    /// Get direct [`DtProperty`] children
+    /// Returns an iterator over direct [`DtProperty`] children.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document};
+    ///
+    /// let src = "/ { a = <0>; b; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let node = doc.nodes().next().unwrap();
+    /// let mut properties = node.properties();
+    ///
+    /// assert!(properties.next().is_some());
+    /// assert!(properties.next().is_some());
+    /// assert_eq!(properties.next(), None);
+    ///
+    /// ```
     pub fn properties(&self) -> impl Iterator<Item = DtProperty> + '_ {
         self.syntax.child_nodes().filter_map(DtProperty::cast)
     }
-    /// Get direct [`DtNode`] children
+
+    /// Returns an iterator over direct [`DtNode`] children.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document};
+    ///
+    /// let src = "/ { a = <0>; b { c = <1>; }; d {}; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let node = doc.nodes().next().unwrap();
+    /// let mut subnodes = node.subnodes();
+    ///
+    /// assert!(subnodes.next().is_some());
+    /// assert!(subnodes.next().is_some());
+    /// assert_eq!(subnodes.next(), None);
+    ///
+    /// ```
     pub fn subnodes(&self) -> impl Iterator<Item = DtNode> + '_ {
         self.syntax.child_nodes().filter_map(DtNode::cast)
     }
 
-    /// Get [`NodeKind::DtNodeUnitAddress`] -> [`Ident`]
+    /// Returns the unit addresses ident.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document, HasIdent};
+    ///
+    /// let src = "/ { my_node@unit_address { foo = <1>; }; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let node = doc
+    ///     .nodes().next().unwrap()
+    ///     .subnodes().next().unwrap();
+    ///
+    /// assert_eq!(node.ident().unwrap().text(src), Some("my_node"));
+    /// assert_eq!(node.unit_address().unwrap().text(src), Some("unit_address"));
+    ///
+    /// ```
     pub fn unit_address(&self) -> Option<Ident> {
         self.syntax
             .child_nodes()
@@ -316,7 +525,23 @@ impl DtNode {
             .child_nodes()
             .find_map(Ident::cast)
     }
-    /// Get the name with the unit address
+
+    /// Returns the name with the unit address.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document, HasIdent};
+    ///
+    /// let src = "/ { my_node@unit_address { foo = <1>; }; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let node = doc
+    ///     .nodes().next().unwrap()
+    ///     .subnodes().next().unwrap();
+    ///
+    /// assert_eq!(node.name(src).as_deref(), Some("my_node@unit_address"));
+    ///
+    /// ```
     pub fn name<'i>(&self, src: &'i str) -> Option<Cow<'i, str>> {
         Some(match self.unit_address() {
             None => Cow::Borrowed(self.ident()?.text(src)?),
@@ -324,43 +549,100 @@ impl DtNode {
         })
     }
 
-    /// Whether this is a node extension (e.g. `&UART_1 { a = <1>; };`)
+    /// Returns true if this is a node extension (e.g. `&UART_1 { .. };`).
     ///
-    /// NOTE: make sure that the parent is ast::Document
+    /// NOTE: for the extension to be valid the immediate parent must be a [`Document`]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document};
+    ///
+    /// let src = "&a { b { .. }; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let node_a = doc.nodes().next().unwrap();
+    /// let node_b = node_a.subnodes().next().unwrap();
+    ///
+    /// assert!(node_a.is_extension());
+    /// assert!(!node_b.is_extension());
+    ///
+    /// ```
     pub fn is_extension(&self) -> bool {
         self.syntax
             .child_nodes()
             .any(|node| node.green.kind == NodeKind::DtNodeExtension)
     }
-    /// Whether this is not a node extension (may be part of an extension, though)
+
+    /// Returns true if this is not a node extension.
+    ///
+    /// <div class="warning">
+    /// This may be part of an extension.
+    ///
+    /// You can try the following code to get the value
+    /// for all parent ancestors.
+    /// </div>
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document};
+    ///
+    /// let src = "&a { b { c { .. }; }; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let node = doc
+    ///     .nodes().next().unwrap()
+    ///     .subnodes().next().unwrap()
+    ///     .subnodes().next().unwrap();
+    ///
+    /// assert!(node.parent_nodes().any(|node| node.is_extension()));
+    /// ```
     pub fn is_concrete(&self) -> bool {
         !self.is_extension()
     }
-    /// Whether this is a root node
-    pub fn is_root(&self, src: &str) -> bool {
-        self.is_concrete()
-            && self
-                .ident()
-                .and_then(|ident| Some(ident.text(src)? == "/"))
-                .unwrap_or_default()
+
+    /// Returns an iterator over [`DtNode`] ancestors.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_parser::ast::{DtNode, AstNode, Document};
+    ///
+    /// let src = "&a { b { c { d { .. }; }; }; };";
+    /// let doc = Document::cast(dt_parser::parse(src).unwrap()).unwrap();
+    /// let node = doc
+    ///     .nodes().next().unwrap()
+    ///     .subnodes().next().unwrap()
+    ///     .subnodes().next().unwrap()
+    ///     .subnodes().next().unwrap();
+    ///
+    /// assert_eq!(node.parent_nodes().count(), 3);
+    ///
+    /// ```
+    pub fn parent_nodes(&self) -> impl Iterator<Item = DtNode> + '_ {
+        self.syntax.parent_ancestors().filter_map(DtNode::cast)
     }
 
-    /// Get this node's path
+    /// Returns true if this is a concrete node with the name "/".
+    pub fn is_root(&self, src: &str) -> bool {
+        self.is_concrete() && self.name(src).map(|name| name == "/").unwrap_or_default()
+    }
+
+    /// Returns an iterator over this node's path.
     ///
-    /// This skips any nodes with the name "/"
-    pub fn path<'i>(&self, src: &'i str) -> Vec<Cow<'i, str>> {
+    /// This skips any nodes with the name "/".
+    pub fn path<'i>(&self, src: &'i str) -> impl Iterator<Item = Cow<'i, str>> {
         self.syntax
             .parent_ancestors()
             .filter_map(DtNode::cast)
             .chain(std::iter::once(self.clone()))
             .filter_map(|node| node.name(src))
             .filter(|part| part != "/")
-            .collect()
     }
 }
 impl HasIdent for DtNode {}
 impl HasLabel for DtNode {}
 
+/// A [`DtNode`]'s optional label
+///
+/// Kind: [`NodeKind::DtLabel`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DtLabel {
     syntax: Arc<RedNode>,
@@ -381,17 +663,22 @@ impl AstNode for DtLabel {
 }
 impl HasIdent for DtLabel {}
 
+/// Top-level item in a [`Document`]
+///
+/// Kind: [`NodeKind::DtNode`] or [`NodeKind::Directive`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Item {
+pub enum ToplevelItem {
+    /// A Devicetree node
     Node(DtNode),
-    Property(DtProperty),
+    /// A compiler or DTS directive
+    ///
+    /// e.g. `/include/ file.dts;`, `#include file.dts`
     Directive(Directive),
 }
-impl AstNode for Item {
+impl AstNode for ToplevelItem {
     fn cast(syntax: Arc<RedNode>) -> Option<Self> {
         match syntax.green.kind {
             NodeKind::DtNode => Some(Self::Node(DtNode { syntax })),
-            NodeKind::DtProperty => Some(Self::Property(DtProperty { syntax })),
             NodeKind::Directive => Some(Self::Directive(Directive { syntax })),
             _ => None,
         }
@@ -399,16 +686,14 @@ impl AstNode for Item {
     fn syntax(&self) -> Arc<RedNode> {
         match self {
             Self::Node(it) => it.syntax.clone(),
-            Self::Property(it) => it.syntax.clone(),
             Self::Directive(it) => it.syntax.clone(),
         }
     }
     fn syntax_ref(&self) -> &RedNode {
         match self {
             Self::Node(it) => &it.syntax,
-            Self::Property(it) => &it.syntax,
             Self::Directive(it) => &it.syntax,
         }
     }
 }
-impl HasIdent for Item {}
+impl HasIdent for ToplevelItem {}

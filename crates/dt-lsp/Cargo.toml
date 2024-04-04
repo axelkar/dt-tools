@@ -22,3 +22,4 @@ winnow = "0.6.2"
 dt-parser.workspace = true
 dt-analyzer.workspace = true
 dt-lint.workspace = true
+itertools = "0.12.1"

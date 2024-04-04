@@ -1,19 +1,37 @@
+//! # Devicetree linter
+//!
+//! A crate for linting [Devicetree][1] documents one-by-one and as collections.
+//!
+//! [1]: https://www.devicetree.org/
+
 use dt_parser::{
     ast::{self, HasLabel},
     Span,
 };
 use std::borrow::Cow;
 
-pub mod dtc_style;
-pub mod kernel_coding_style;
-pub mod syntax_error;
+mod dtc_style;
+mod kernel_coding_style;
+mod syntax_error;
+
+pub mod lints {
+    //! The full collection of lints upstream.
+    //!
+    //! Currently all lints in here are applied by the [default_lint](crate::default_lint) function
+    //! used by the LSP.
+    pub use crate::dtc_style::DtcStyle;
+    pub use crate::kernel_coding_style::KernelCodingStyle;
+    pub use crate::syntax_error::SyntaxError;
+}
 
 // TODO: something like this:
 // https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/visit/index.html
 
 pub type DiagnosticMessage = Cow<'static, str>;
 
-/// https://doc.rust-lang.org/nightly/nightly-rustc/rustc_error_messages/struct.MultiSpan.html
+/// Just like the [MultiSpan from rustc & clippy][1]
+///
+/// [1]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_error_messages/struct.MultiSpan.html
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MultiSpan {
     pub primary_spans: Vec<Span>,
@@ -85,12 +103,15 @@ impl EarlyContext<'_> {
     }
 }
 
+/// The early lint pass before type information is acquired. This runs on [AST](ast)s.
 pub trait EarlyLintPass {
+    /// Lint a document's [AST](ast::Document)
     fn check_document(&mut self, cx: &mut EarlyContext<'_>, doc: &ast::Document) {
         for node in doc.nodes() {
             self.check_node(cx, &node)
         }
     }
+    /// Lint a node's [AST](ast::DtNode)
     fn check_node(&mut self, cx: &mut EarlyContext<'_>, node: &ast::DtNode) {
         if let Some(label) = node.label() {
             self.check_label(cx, &label);
@@ -102,11 +123,13 @@ pub trait EarlyLintPass {
             self.check_node(cx, &node)
         }
     }
+    /// Lint a property's [AST](ast::DtProperty)
     fn check_property(&mut self, cx: &mut EarlyContext, property: &ast::DtProperty) {
         if let Some(label) = property.label() {
             self.check_label(cx, &label);
         }
     }
+    /// Lint a node label's [AST](ast::DtLabel)
     fn check_label(&mut self, _cx: &mut EarlyContext, _label: &ast::DtLabel) {}
 }
 
@@ -116,9 +139,9 @@ pub fn default_lint(doc: &ast::Document, src: &str) -> Vec<EarlyLint> {
         src,
     };
     // TODO: go over the tree just once
-    kernel_coding_style::KernelCodingStyle.check_document(&mut cx, doc);
-    dtc_style::DtcStyle.check_document(&mut cx, doc);
-    syntax_error::SyntaxError.check_document(&mut cx, doc);
+    crate::lints::KernelCodingStyle.check_document(&mut cx, doc);
+    crate::lints::DtcStyle.check_document(&mut cx, doc);
+    crate::lints::SyntaxError.check_document(&mut cx, doc);
     // TODO: warn for `&LABEL,` (ident eats the comma), although... it shouldn't be possible when
     // not in a dt cell e.g. `a = &LABEL, "foo";`
     cx.lints

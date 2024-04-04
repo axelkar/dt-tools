@@ -79,8 +79,9 @@ impl DefinitionTreeNode {
     pub fn into_json(self) -> serde_json::Value {
         DefinitionTree::Node(self).into_json()
     }
-    /// TODO: return Vec<Value> instead of Value
-    /// TODO: create "linked list" type with Arc<str> and efficient pushing to left
+
+    // TODO: return Vec<Value> instead of Value
+    // TODO: create "linked list" type with Arc<str> and efficient pushing to left
     pub fn dfs_iter(self) -> Box<dyn Iterator<Item = (Vec<String>, Value)>> {
         Box::new(self.children.into_iter().flat_map(|(parent_n, v)| {
             v.into_iter().flat_map(move |tree| {

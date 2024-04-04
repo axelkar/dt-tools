@@ -33,6 +33,7 @@ fn red_test() {
     let text = "/dts-v1/; / {}\n";
     let green_tree = full(text).unwrap().into_node().unwrap();
     let red = RedNode::new(green_tree);
+    #[allow(deprecated)]
     let vec = red.find_syntax_errors(text).collect::<Vec<_>>();
     assert_eq!(
         vec,
@@ -235,8 +236,7 @@ fn test_directive() {
 }
 
 fn full(input: &str) -> Option<GreenItem> {
-    let (o, e) = super::parse(input);
-    Some(GreenItem::Node(o.filter(|_| e.is_empty())?))
+    Some(GreenItem::Node(Arc::new(super::raw_parse(input)?)))
 }
 
 #[test]
@@ -438,11 +438,11 @@ fn test_full() {
 }
 
 #[test]
-fn test_a_dts() {
-    let src = include_str!("../../../a.dts");
+fn test_data_expect() {
+    let src = include_str!("../../../test_data/1.dts");
     assert_eq!(
         full(src).unwrap().into_node().unwrap().print_tree(src),
-        include_str!("../../../a.dts.expect")
+        include_str!("../../../test_data/1.dts.expect")
     );
 }
 

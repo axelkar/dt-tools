@@ -3,6 +3,7 @@ use dt_parser::{
     ast::{self, AstNode, HasIdent},
     match_ast, SourceId,
 };
+use itertools::Itertools;
 use tower_lsp::lsp_types::*;
 
 // ## DynMap:

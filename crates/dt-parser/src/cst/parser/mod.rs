@@ -1,10 +1,21 @@
+/// # Error handling
+///
+/// Winnow is a really cool parsing combinator library but its way of handling errors is really bad.
+///
+/// winnow::stream::Stateful doesn't really work with backtracking.
+///
+/// I should probably report errors here in dt_parser instead of looking for specific nodes and
+/// tokens in [`dt_lint::lints::SyntaxError`].
+///
+/// I'd also want to now have to parse numbers and strings twice (in dt-parser for validation, in
+/// dt-analyzer for getting the values)
 use crate::Span;
 
 use super::{GreenItem, GreenNode, GreenToken, NodeKind, TokenKind};
 use either::Either;
 use std::sync::Arc;
 use winnow::{
-    combinator::{alt, cut_err, empty, eof, opt, repeat, terminated, trace},
+    combinator::{alt, cut_err, empty, eof, opt, repeat, trace},
     error::{ContextError, ErrMode, ParserError as _, StrContext},
     prelude::*,
     stream::{Location as _, Recoverable, Stream as _},
@@ -23,6 +34,7 @@ mod push_green;
 use push_green::PushGreenItem;
 
 // TODO: we don't need .context(_) since we have our own error solution
+// TODO: make node! use input.location() instead of .with_span()
 
 macro_rules! node {
     (@count_tts) => (0usize);
@@ -431,23 +443,46 @@ fn root_level_nodes(input: &mut Stream) -> PResult<GreenItem> {
     .parse_next(input)
 }
 
+#[cfg(test)]
 pub(crate) fn generic_parse<'i, O>(
     input: &'i str,
     parser: impl Parser<Stream<'i>, O, ContextError>,
 ) -> (Option<O>, Vec<ContextError>) {
+    use winnow::combinator::terminated;
     let (_, o, e) = terminated(parser, eof).recoverable_parse(crate::Printer(Located::new(input)));
     (o, e)
 }
-pub fn parse(input: &str) -> (Option<Arc<GreenNode>>, Vec<ContextError>) {
-    let (o, e) = generic_parse(
-        input,
-        node!(
-            NodeKind::Document,
-            (
-                opt(wst),
-                repeat(0.., (root_level_nodes, opt(wst))).map(|vec: Vec<_>| vec),
-            )
-        ),
-    );
-    (o.map(|o| o.into_node().expect("just did node! above")), e)
+
+fn raw_parser(input: &mut Stream) -> PResult<GreenNode> {
+    let start = input.location();
+
+    let mut children: Vec<GreenItem> = Vec::with_capacity(node!(@count_tts $($item)+));
+
+    opt(wst).parse_next(input)?.push_onto(&mut children);
+
+    repeat(0.., (root_level_nodes, opt(wst)))
+        .map(|vec: Vec<_>| vec)
+        .parse_next(input)?
+        .push_onto(&mut children);
+
+    eof.parse_next(input)?;
+
+    let end = input.location();
+
+    Ok(GreenNode {
+        kind: NodeKind::Document,
+        span: Span { start, end },
+        children,
+    })
+}
+
+/// Parse a document into a [green CST node](GreenNode)
+///
+/// None will be returned if any fatal errors occur (they shouldn't)
+pub fn raw_parse(input: &str) -> Option<GreenNode> {
+    let (_, node, errors) = raw_parser.recoverable_parse(crate::Printer(Located::new(input)));
+    if !errors.is_empty() {
+        return None;
+    }
+    node
 }

@@ -1,31 +1,51 @@
-//! I take a lot of inspiration from cstree & [rust-analyzer's syntax architecture](https://github.com/rust-lang/rust-analyzer/blob/5346002d07d09badaf37949bec68012d963d61fc/docs/dev/syntax.md).
+//! I take a lot of inspiration from [cstree] & [rust-analyzer's syntax architecture][1],
+//! although I haven't written a single line of unsafe code in this crate.
+//!
+//!
+//! Note: This does NOT [leak memory] and does not use cycled Arcs since [RedNode]s only point to
+//! parents and the respective [GreenNode]s.
+//!
+//! [cstree]: https://lib.rs/crates/cstree
+//! [1]: https://github.com/rust-lang/rust-analyzer/blob/5346002d07d09badaf37949bec68012d963d61fc/docs/dev/syntax.md
+//! [leak memory]: https://doc.rust-lang.org/std/sync/struct.Arc.html#breaking-cycles-with-weak
+// XXX, FIXME: Don't leak memory with cycled Arcs:
 
 use kinds::{NodeKind, TokenKind};
 use std::{fmt::Write, sync::Arc};
 
 use crate::Span;
-pub mod parser;
+pub(super) mod parser;
 
 // On the cst + ast level I could use a less-descriptive Span, to avoid cloning the SourceId
 // TODO: Span to Arc/Rc/Box<str> or usize to aid in subtree interning/deduplication?
 // TODO: partial reparse?
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// A "green node".
+///
+/// This is what the parser ([`raw_parse`](crate::raw_parse)) outputs.
 pub struct GreenNode {
+    /// The kind of node
     pub kind: NodeKind,
+    /// The location in the source document
     pub span: Span,
+    /// The child nodes and tokens
     pub children: Vec<GreenItem>,
 }
 impl GreenNode {
     /// Print a tree like rust-analyzer's debug AST
-    /// This panics?
     pub fn print_tree(&self, source: &str) -> String {
         let mut out = String::new();
         self.print_tree_rec(0, source, &mut out).unwrap();
         out
     }
 
-    fn print_tree_rec(&self, level: usize, source: &str, out: &mut String) -> std::fmt::Result {
+    /// Print a tree like rust-analyzer's debug AST
+    pub fn print_tree_file(&self, source: &str, out: &mut impl Write) -> std::fmt::Result {
+        self.print_tree_rec(0, source, out)
+    }
+
+    fn print_tree_rec(&self, level: usize, source: &str, out: &mut impl Write) -> std::fmt::Result {
         const INDENT: &str = "  ";
         writeln!(out, "{}{:?}@{}", INDENT.repeat(level), self.kind, self.span)?;
 
@@ -45,12 +65,12 @@ impl GreenNode {
         Ok(())
     }
 
-    /// For convenience, use RedNode::child_nodes
+    /// Returns an iterator over immediate child nodes
     pub fn child_nodes(&self) -> impl Iterator<Item = &Arc<GreenNode>> + '_ {
         self.children.iter().flat_map(GreenItem::as_node)
     }
 
-    /// For convenience, use RedNode::child_tokens
+    /// Returns an iterator over immediate child tokens
     pub fn child_tokens(&self) -> impl Iterator<Item = &Arc<GreenToken>> + '_ {
         self.children.iter().flat_map(GreenItem::as_token)
     }
@@ -160,12 +180,22 @@ impl RedToken {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// A "red node".
+///
+/// This references the green nodes and its own parent nodes.
+///
+/// You basically get a tree you can go up and down in without cyclic references!
 pub struct RedNode {
+    /// The parent node if it exists.
+    ///
+    /// All of the `child_` functions set this to `self` for their children.
     pub parent: Option<Arc<RedNode>>,
+    /// The respective [`GreenNode`].
     pub green: Arc<GreenNode>,
 }
 
 impl RedNode {
+    /// Creates a new red node with no parent.
     pub fn new(root: Arc<GreenNode>) -> Arc<Self> {
         Arc::new(RedNode {
             parent: None,
@@ -173,19 +203,23 @@ impl RedNode {
         })
     }
 
+    /// Returns the span from the green node.
+    #[inline(always)]
     pub fn span(&self) -> &Span {
         &self.green.span
     }
 
+    /// Returns the node at the specified offset if found.
     pub fn node_at_offset(self: &Arc<RedNode>, offset: usize) -> Option<Arc<RedNode>> {
-        // TODO: non recursing algorithm?
+        // TODO: non recursing algorithm? binary search?
         self.child_nodes()
             .find(|node| node.span().range().contains(&offset))
             .map(|node| node.node_at_offset(offset).unwrap_or(node))
     }
 
+    /// Returns the token at the specified offset if found.
     pub fn token_at_offset(self: &Arc<RedNode>, offset: usize) -> Option<Arc<RedToken>> {
-        // TODO: non recursing algorithm?
+        // TODO: non recursing algorithm? binary search?
         self.child_nodes()
             .find(|node| node.span().range().contains(&offset))
             .and_then(|node| node.token_at_offset(offset))
@@ -195,6 +229,7 @@ impl RedNode {
             })
     }
 
+    /// Returns an iterator over all children.
     pub fn children<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = RedItem> + 'a {
         let arc = Arc::clone(self);
         self.green
@@ -212,6 +247,7 @@ impl RedNode {
             })
     }
 
+    /// Returns an iterator over the child nodes.
     pub fn child_nodes<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = Arc<RedNode>> + 'a {
         let arc = Arc::clone(self);
         self.green.child_nodes().map(move |green_child| {
@@ -221,6 +257,8 @@ impl RedNode {
             })
         })
     }
+
+    /// Returns an iterator over the child tokens.
     pub fn child_tokens<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = Arc<RedToken>> + 'a {
         let arc = Arc::clone(self);
         self.green.child_tokens().map(move |green_child| {
@@ -231,7 +269,8 @@ impl RedNode {
         })
     }
 
-    /// Find Error tokens
+    /// Find nodes and tokens corresponding to syntax errors
+    #[deprecated = "Use `dt_lint::SyntaxErrors` instead"]
     pub fn find_syntax_errors<'a, 'i: 'a>(
         self: &'a Arc<RedNode>,
         src: &'i str,
@@ -285,6 +324,7 @@ impl RedNode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// Kinds of errors returned from [`RedNode::find_syntax_errors`]
+// TODO: remove since dt_lint exists
 pub enum MySyntaxError<'i> {
     TokenError,
     NodeError,
@@ -333,7 +373,6 @@ pub mod kinds {
         /// Always T!['&']
         DtNodeExtension,
 
-        /// [`crate::cst::parser::green_separated`] separator
         Separator,
         /// Wrong punctuation
         InvalidPunct,

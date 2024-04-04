@@ -10,6 +10,9 @@ use dt_parser::{
 
 use crate::{EarlyLintPass, LintId, LintSeverity, MultiSpan};
 
+/// Collect syntax errors via the lint system
+///
+/// This lint should always be mandatory when deriving custom lint sets
 pub struct SyntaxError;
 
 impl EarlyLintPass for SyntaxError {

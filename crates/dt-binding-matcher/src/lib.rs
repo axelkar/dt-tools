@@ -110,7 +110,10 @@ fn test_compile() {
         let red = dt_parser::parse(&example).unwrap();
 
         // TODO: use dt_lint since find_syntax_errors isn't updated
-        assert!(red.find_syntax_errors(&example).next().is_none());
+        #[allow(deprecated)]
+        {
+            assert!(red.find_syntax_errors(&example).next().is_none());
+        }
 
         let def = dt_analyzer::analyze_cst(red, &example).unwrap();
         let json = find_select(def.tree, &schema.select).unwrap().into_json();

@@ -62,10 +62,10 @@
    ```sh
    cargo test # Run unit and integration tests
    # Showcase parser output
-   cargo run --bin test_parser ./crates/dt-parser/a.dts
-   cargo run --bin test_parser ./syntax_error_showcase.dts
+   cargo run --example test_parser ./crates/dt-parser/a.dts
+   cargo run --example test_parser ./syntax_error_showcase.dts
    # Showcase analyzer output
-   cargo run --bin test_analyzer ./syntax_error_showcase.dts
+   cargo run --example test_analyzer ./syntax_error_showcase.dts
    ```
 
 ## LSP

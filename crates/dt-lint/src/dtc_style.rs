@@ -2,6 +2,15 @@ use dt_parser::ast::{self, AstNode, HasIdent, HasLabel as _};
 
 use crate::{EarlyLintPass, LintId, LintSeverity};
 
+/// Lint items by [`dtc`](https://github.com/dgibson/dtc)'s rules
+///
+/// (CURRENTLY) Even if documents don't pass this lint they can still be consumed for DTB conversion,
+/// validation and more.
+///
+/// This includes lints for making sure that
+/// - `/dts-v1/;` is the first item (other than whitespace and comments)
+/// - Properties are defined before nodes
+// - TODO: No duplicate items
 pub struct DtcStyle;
 
 // TODO: validate idents

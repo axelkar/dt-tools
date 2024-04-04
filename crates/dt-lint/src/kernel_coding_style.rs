@@ -5,7 +5,9 @@ use dt_parser::{
 
 use crate::{EarlyLintPass, LintId, LintSeverity};
 
-/// https://docs.kernel.org/devicetree/bindings/dts-coding-style.html
+/// Lint items to match the Linux kernel's devicetree [coding style](https://docs.kernel.org/devicetree/bindings/dts-coding-style.html).
+///
+/// This is mostly composed of lints for naming conventions.
 pub struct KernelCodingStyle;
 
 fn valid_node_name(s: &str) -> bool {

@@ -2,7 +2,7 @@ use dashmap::DashMap;
 use dt_analyzer::{analyze_cst, FileDefinition};
 use dt_parser::{
     ast::{self, AstNode},
-    cst::{parser, RedNode},
+    cst::RedNode,
     SourceId,
 };
 use ropey::Rope;
@@ -12,8 +12,6 @@ use tokio::net::TcpListener;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-//pub mod ast;
-//pub mod parser;
 mod hover;
 
 #[derive(Debug)]
@@ -221,21 +219,6 @@ impl Backend {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let first_arg = std::env::args().nth(1);
-
-    if first_arg == Some("parse".to_owned()) {
-        let path = std::env::args().nth(2).unwrap_or("./a.dts".to_owned());
-        let text = std::fs::read_to_string(path)?;
-        let (ast, errs) = parser::parse(&text);
-        let ast = match ast {
-            Some(ast) => ast,
-            None => {
-                eprintln!("Parser error: {:#?}", errs);
-                std::process::exit(1);
-            }
-        };
-        println!("{:#?}", ast);
-        return Ok(());
-    }
 
     let (service, socket) = LspService::new(|client| Backend {
         client,
