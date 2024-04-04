@@ -8,7 +8,7 @@ use either::Either;
 use std::sync::Arc;
 use winnow::{
     ascii::{dec_uint, hex_uint},
-    combinator::{alt, opt, preceded, repeat, trace, empty},
+    combinator::{alt, empty, opt, preceded, repeat, trace},
     error::StrContext,
     prelude::*,
     token::{any, take_till},
@@ -65,7 +65,10 @@ pub(crate) fn dt_cell(input: &mut Stream) -> PResult<GreenItem> {
                                 .map(|vec: Vec<_>| vec),
                         )
                     }),
-                    token!(TokenKind::UnexpectedItem, take_till(1.., [' ', '>', '\n', ';'])),
+                    token!(
+                        TokenKind::UnexpectedItem,
+                        take_till(1.., [' ', '>', '\n', ';'])
+                    ),
                 )),
                 alt((
                     (opt(wst), node!(NodeKind::InvalidPunct, T![',']), opt(wst)).map(Either::Left),

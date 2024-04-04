@@ -11,7 +11,10 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
+drop_bomb = "0.1.5"
 either = "1.10.0"
+logos = "0.14.0"
+thiserror = "1.0.58"
 winnow = { version = "0.6.2", features = ["unstable-recover"] }
 
 [dev-dependencies]

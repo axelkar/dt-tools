@@ -79,6 +79,7 @@ pub use span::*;
 
 pub mod ast;
 pub mod cst;
+pub mod cst2;
 mod printer;
 mod span;
 pub use printer::Printer;
