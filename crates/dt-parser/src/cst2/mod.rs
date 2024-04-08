@@ -3,13 +3,18 @@ use std::sync::Arc;
 use self::lexer::TokenKind;
 use crate::cst::TreeItem;
 
+pub mod grammar;
 pub mod lexer;
 pub mod parser;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
     Document,
+    /// A parse error
+    ParseError,
     Directive,
+    /// A directive's parameters, if any.
+    DirectiveParams,
     PreprocessorDirective,
     DtNode,
     DtProperty,

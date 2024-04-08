@@ -5,19 +5,23 @@ use crate::cst2::{
     GreenItem, GreenNode, GreenToken, NodeKind, TokenText,
 };
 
-use super::event::Event;
+use super::{event::Event, Parse, ParseError, WrappedLexError};
 
-pub(super) struct Sink<'t, 'input> {
-    /// The incoming tokens for trivia handling
+pub(crate) struct Sink<'t, 'input> {
+    /// The incoming tokens for trivia handling.
     tokens: &'t [Token<'input>],
-    /// The incoming events
+    /// The incoming events.
     events: Vec<Event>,
-    /// Token index for trivia handling
+    /// Token index for trivia handling.
     cursor: usize,
-    /// Stack of parent nodes
+    /// Stack of parent nodes.
     stack: Vec<GreenNode>,
-    /// The current node
+    /// The current node.
     current_node: GreenNode,
+    /// Collected parse errors.
+    errors: Vec<ParseError>,
+    /// Collected lex errors.
+    lex_errors: Vec<WrappedLexError<'input>>,
 }
 
 impl<'t, 'input> Sink<'t, 'input> {
@@ -26,15 +30,17 @@ impl<'t, 'input> Sink<'t, 'input> {
             tokens,
             events,
             cursor: 0,
+            stack: Vec::new(),
             current_node: GreenNode {
                 kind: NodeKind::Document,
                 children: Vec::new(),
             },
-            stack: Vec::new(),
+            errors: Vec::new(),
+            lex_errors: Vec::new(),
         }
     }
 
-    pub(super) fn finish(mut self) -> GreenNode {
+    pub(super) fn finish(mut self) -> Parse<'input> {
         if self.events.is_empty() {
             self.eat_trivia();
         }
@@ -82,16 +88,17 @@ impl<'t, 'input> Sink<'t, 'input> {
                         .push(GreenItem::Node(Arc::new(old_current_node)));
                 }
                 Event::Placeholder => {}
-                Event::Error(_err) => {
-                    // TODO: implement error sink
-                }
+                Event::Error(error) => self.errors.push(error),
             }
 
             self.eat_trivia();
         }
 
-        //(self.current_node, self.errors)
-        self.current_node
+        Parse {
+            green_node: self.current_node,
+            lex_errors: self.lex_errors,
+            errors: self.errors,
+        }
     }
 
     fn start_node(&mut self, kind: NodeKind) {
@@ -104,13 +111,22 @@ impl<'t, 'input> Sink<'t, 'input> {
     }
 
     fn token(&mut self) {
-        let Token { kind, text, .. } = self.tokens.get(self.cursor).unwrap();
+        let Token {
+            kind,
+            text,
+            text_range,
+        } = self.tokens.get(self.cursor).unwrap();
 
         let kind = match kind {
             Ok(kind) => *kind,
-            Err(_err) => {
-                // TODO: add lexer error
-                TokenKind::LexerError
+            Err(error) => {
+                self.lex_errors.push(WrappedLexError {
+                    inner: *error,
+                    text_range: *text_range,
+                    text,
+                });
+
+                TokenKind::LexError
             }
         };
 

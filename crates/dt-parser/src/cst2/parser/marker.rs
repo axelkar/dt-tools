@@ -4,7 +4,7 @@ use crate::cst2::{parser::event::Event, NodeKind};
 
 use super::Parser;
 
-pub(super) struct Marker {
+pub struct Marker {
     pos: usize,
     bomb: DropBomb,
 }
@@ -17,7 +17,7 @@ impl Marker {
         }
     }
 
-    pub(super) fn complete(mut self, p: &mut Parser, kind: NodeKind) -> CompletedMarker {
+    pub fn complete(mut self, p: &mut Parser, kind: NodeKind) -> CompletedMarker {
         self.bomb.defuse();
 
         let event_at_pos = &mut p.events[self.pos];
@@ -34,13 +34,12 @@ impl Marker {
     }
 }
 
-pub(super) struct CompletedMarker {
+pub struct CompletedMarker {
     pos: usize,
 }
 
 impl CompletedMarker {
-    #[allow(dead_code)]
-    pub(super) fn precede(self, p: &mut Parser) -> Marker {
+    pub fn precede(self, p: &mut Parser) -> Marker {
         let new_m = p.start();
 
         if let Event::StartNode {

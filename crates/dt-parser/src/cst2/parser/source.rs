@@ -1,4 +1,7 @@
-use crate::cst2::lexer::{Token, TokenKind};
+use crate::{
+    cst2::lexer::{Token, TokenKind},
+    TextRange,
+};
 
 #[derive(Debug)]
 pub(super) struct Source<'t, 'input> {
@@ -20,12 +23,25 @@ impl<'t, 'input> Source<'t, 'input> {
         Some(token)
     }
 
+    /// Returns the last token's range if it exists.
+    pub(crate) fn last_token_range(&self) -> Option<TextRange> {
+        self.tokens.last().map(|token| token.text_range)
+    }
+
     /// Peeks ahead at the next token's kind.
     ///
     /// Returns None on EOF
     pub(super) fn peek_kind(&mut self) -> Option<TokenKind> {
         self.skip_trivia();
         self.peek_kind_raw()
+    }
+
+    /// Peeks ahead at the next token.
+    ///
+    /// Returns None on EOF
+    pub(super) fn peek_token(&mut self) -> Option<&Token> {
+        self.skip_trivia();
+        self.peek_token_raw()
     }
 
     fn skip_trivia(&mut self) {
@@ -38,10 +54,11 @@ impl<'t, 'input> Source<'t, 'input> {
     ///
     /// Returns None on EOF
     fn peek_kind_raw(&self) -> Option<TokenKind> {
-        match self.tokens.get(self.cursor)?.kind {
-            Ok(kind) => Some(kind),
-            // We can ignore the error when peeking
-            Err(_err) => Some(TokenKind::LexerError),
-        }
+        // We can ignore the error when peeking
+        Some(self.peek_token_raw()?.kind.unwrap_or(TokenKind::LexError))
+    }
+
+    fn peek_token_raw(&self) -> Option<&Token> {
+        self.tokens.get(self.cursor)
     }
 }

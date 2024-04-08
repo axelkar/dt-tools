@@ -2,76 +2,82 @@
 //! - <https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html>
 
 use self::event::Event;
-use self::marker::Marker;
-use self::sink::Sink;
 use self::source::Source;
-use crate::TextRange;
+#[allow(unused_imports)]
+pub use marker::{CompletedMarker, Marker};
+use smallvec::SmallVec;
 
-use super::lexer::{LexError, Lexer, Token, TokenKind};
-use super::{GreenNode, NodeKind};
+use super::{grammar, lexer::TokenKind, GreenNode, NodeKind};
 
+mod errors;
 mod event;
 mod marker;
 mod sink;
 mod source;
 
-// XXX: For events: https://lunacookies.github.io/lang/13/:
-// > Crucially, it is at this step that we locate the whitespace tokens missing from the parser’s
-// > events, allowing us to add them to the syntax tree as necessary. This way we can handle
-// > whitespace in one place, divorcing it from the parser.
-//
+pub use errors::{ParseError, WrappedLexError};
+
+// FIXME: previous is Semicolon or RCurly
+//const RECOVERY_SET: [TokenKind; 2] = [TokenKind::Semicolon, TokenKind::RCurly];
+//const RECOVERY_SET: [TokenKind; 1] = [TokenKind::RCurly];
+const RECOVERY_SET: [TokenKind; 1] = [TokenKind::Semicolon];
+//const RECOVERY_SET: [TokenKind; 0] = [];
+
+// TODO: Event incremental reparse:
 // > Events can make our parser faster if we have a previous parse tree lying around; rather than
 // > constructing a new parse tree every time, we can patch an existing one with the events of the
 // > new parse.
 
-/// CST parser error
-// TODO: If possible, errors are not reported during parsing and are postponed for a separate validation step. For example, parser accepts visibility modifiers on trait methods, but then a separate tree traversal flags all such visibilities as erroneous.
-#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParserErrorKind {
-    /// The parser supports lexer errors but should stop upon meeting one
-    #[error("Lexer error: {0}")]
-    Lex(#[from] LexError),
-    #[error("Expected top-level item")]
-    ExpectedToplevelItem,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parse<'input> {
+    pub green_node: GreenNode,
+    pub lex_errors: Vec<WrappedLexError<'input>>,
+    pub errors: Vec<ParseError>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ParseError {
-    inner: ParserErrorKind,
-    text_range: TextRange,
+pub fn parse(input: &str) -> Parse {
+    use super::lexer::Lexer;
+
+    let tokens: Vec<_> = Lexer::new(input).collect();
+    let source = Source::new(&tokens);
+    let mut parser = Parser::new(source);
+
+    grammar::root(&mut parser);
+
+    let sink = sink::Sink::new(&tokens, parser.events);
+
+    let parse = sink.finish();
+    eprintln!("tree = {}", parse.green_node.print_tree());
+    parse
 }
 
-/// CST parser builder.
+/// CST parser.
 #[derive(Debug)]
-struct Parser<'t, 'input> {
-    /// The token source
+pub struct Parser<'t, 'input> {
+    /// The token source.
     source: Source<'t, 'input>,
-    /// Events to feed into [`Sink`]
+    /// Events to feed into [`Sink`].
     events: Vec<Event>,
+    /// The tokens that are expected at the current position.
+    expected_kinds: SmallVec<[TokenKind; 2]>,
 }
 
 impl<'t, 'input> Parser<'t, 'input> {
-    /// Creates and initializes a parser builder.
-    pub fn new(tokens: &'t [Token<'input>]) -> Self {
+    /// Creates and initializes a parser.
+    fn new(source: Source<'t, 'input>) -> Self {
         Self {
-            source: Source::new(tokens),
+            source,
             events: Vec::new(),
+            expected_kinds: SmallVec::new(),
         }
     }
 
     /// Starts a node using a [`Marker`].
-    fn start(&mut self) -> Marker {
+    pub fn start(&mut self) -> Marker {
         let pos = self.events.len();
         self.events.push(Event::Placeholder);
 
         Marker::new(pos)
-    }
-
-    fn error(&mut self, error: impl Into<ParserErrorKind>, text_range: TextRange) {
-        self.events.push(Event::Error(ParseError {
-            inner: error.into(),
-            text_range,
-        }))
     }
 
     /// Peeks ahead at the next token's kind.
@@ -82,130 +88,154 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
 
     /// Returns true if `kind` is the next token's kind.
-    fn at(&mut self, kind: TokenKind) -> bool {
+    pub fn at(&mut self, kind: TokenKind) -> bool {
+        self.expected_kinds.push(kind);
         self.peek() == Some(kind)
+    }
+
+    /// Returns true if `kind` is the next token's kind.
+    /// 
+    /// - This does not add `kind` to `expected_kinds`.
+    pub fn silent_at(&mut self, kind: TokenKind) -> bool {
+        self.peek() == Some(kind)
+    }
+
+    /// Errors and returns true if `kind` is the next token's kind.
+    ///
+    /// - This adds an error if it matches.
+    /// - This does not add `kind` to `expected_kinds`.
+    /// - This never bumps forward.
+    ///
+    /// You can use this to take care of `RCurly` tokens when there should be `Semicolon` for
+    /// example.
+    pub fn expect_no_ending(&mut self, kind: TokenKind) -> bool {
+        if self.peek() == Some(kind) {
+            self.error_no_bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns true if the next token's kind is in `set`.
+    pub fn at_set(&mut self, set: &[TokenKind]) -> bool {
+        self.expected_kinds.extend_from_slice(set);
+        self.peek().map_or(false, |k| set.contains(&k))
+    }
+
+    /// Bumps when `set` contains the current token's kind and errors otherwise.
+    pub fn expect_set(&mut self, set: &[TokenKind]) {
+        if self.at_set(set) {
+            self.bump();
+        } else {
+            self.error();
+        }
+    }
+
+    /// Bumps when `kind` is the current token's kind and errors otherwise.
+    pub fn expect(&mut self, kind: TokenKind) {
+        if self.at(kind) {
+            self.bump();
+        } else {
+            self.error();
+        }
+    }
+
+    /// Reports the current token as an error.
+    pub fn error(&mut self) {
+        self.error_no_bump();
+
+        if !self.at_set(&RECOVERY_SET) && !self.at_end() {
+            let m = self.start();
+            self.bump();
+            m.complete(self, NodeKind::ParseError);
+        }
+    }
+
+    /// Reports the current token as an error.
+    ///
+    /// In contrast to the `error` method, this will never `bump` the token.
+    pub fn error_no_bump(&mut self) {
+        let current_token = self.source.peek_token();
+
+        let (found, range) = if let Some(token) = current_token {
+            (
+                // Sink will handle lex errors
+                Some(token.kind.unwrap_or(TokenKind::LexError)),
+                token.text_range,
+            )
+        } else {
+            (None, self.source.last_token_range().unwrap())
+        };
+
+        self.events.push(Event::Error(ParseError {
+            expected: std::mem::take(&mut self.expected_kinds),
+            found,
+            text_range: range,
+        }));
     }
 
     /// Returns true if at the end-of-file.
     // TODO: Rust-analyzer has a token for EOF, should I?
-    #[allow(dead_code)]
-    fn at_end(&mut self) -> bool {
+    pub fn at_end(&mut self) -> bool {
         self.peek().is_none()
     }
 
     /// Adds the next token to the parse tree.
-    fn bump(&mut self) {
+    pub fn bump(&mut self) {
+        self.expected_kinds.clear();
         self.source.next_token().unwrap();
         self.events.push(Event::AddToken)
     }
 }
 
-fn parse_dt_node(p: &mut Parser) {
-    let m = p.start();
-    if p.at(TokenKind::Ampersand) {
-        p.bump();
-    }
-    match p.peek().unwrap() {
-        TokenKind::Slash => {}
-        TokenKind::Ident => {
-            // parse a node
-        }
-        _ => {}
-    }
-    m.complete(p, NodeKind::DtNode);
-}
-
-/// TODO: mod_contents: while !(p.at(EOF) || (p.at(T!['}']) && stop_on_r_curly)) {
-fn parse_toplevel_item(p: &mut Parser) -> Option<()> {
-    match p.peek()? {
-        TokenKind::Slash => {
-            // can be a node or a directive
-        }
-        TokenKind::Ident => {
-            // parse a node
-            parse_dt_node(p);
-        }
-        TokenKind::Ampersand => {
-            // parse a node
-            parse_dt_node(p);
-        }
-        _ => {
-            //let text_range = parser.lexer.peek().unwrap().2;
-            let text_range = (0..0).into(); // FIXME
-            p.error(ParserErrorKind::ExpectedToplevelItem, text_range);
-        }
-    }
-    p.bump();
-    Some(())
-}
-
-pub fn parse_api(input: &str) -> (GreenNode, Vec<ParseError>) {
-    let tokens: Vec<_> = Lexer::new(input).collect();
-    let mut parser = Parser::new(&tokens);
-
-    while parse_toplevel_item(&mut parser).is_some() {}
-
-    let sink = Sink::new(&tokens, parser.events);
-    (sink.finish(), Vec::new())
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use crate::cst2::{GreenItem, GreenToken, TokenText};
+    use super::sink::Sink;
+    use crate::cst2::grammar::tests::{node, dynamic_token};
+    use crate::cst2::lexer::{LexError, Lexer};
+    use crate::cst2::{GreenNode, NodeKind};
 
     use super::*;
     use pretty_assertions::assert_eq;
 
-    fn node(kind: NodeKind, children: Vec<GreenItem>) -> GreenItem {
-        GreenItem::Node(Arc::new(GreenNode { kind, children }))
-    }
-
-    fn token(kind: TokenKind, text: TokenText) -> GreenItem {
-        GreenItem::Token(Arc::new(GreenToken { kind, text }))
-    }
-
     #[test]
-    fn parse_full() {
-        // TODO: make the parser and add the tokens
-        /*assert_eq!(
-            parse_api("/dts-v1/;").0.children,
-            vec![node(NodeKind::Directive, vec![
-                // add tokens here
-            ])]
-        );*/
-    }
+    fn builder_api_lex_error() {
+        let tokens: Vec<_> = Lexer::new("\"abc").collect();
+        let mut parser = Parser::new(Source::new(&tokens));
 
-    #[test]
-    fn parse_trivia() {
+        while !parser.at_end() {
+            parser.bump();
+        }
+
+        assert_eq!(parser.events.len(), 1);
+
+        let output = Sink::new(&tokens, parser.events).finish();
+
         assert_eq!(
-            parse_api("  ").0.children,
-            vec![token(
-                TokenKind::Whitespace,
-                TokenText::Dynamic("  ".to_owned())
-            )]
-        );
-        assert_eq!(
-            parse_api("/* test */ // test").0.children,
-            vec![
-                token(
-                    TokenKind::BlockComment,
-                    TokenText::Dynamic("/* test */".to_owned())
-                ),
-                token(TokenKind::Whitespace, TokenText::Dynamic(" ".to_owned())),
-                token(
-                    TokenKind::LineComment,
-                    TokenText::Dynamic("// test".to_owned())
-                )
-            ]
+            output,
+            Parse {
+                green_node: GreenNode {
+                    kind: NodeKind::Document,
+                    children: vec![dynamic_token(
+                        TokenKind::LexError,
+                        "\"abc"
+                    )]
+                },
+                lex_errors: vec![WrappedLexError {
+                    inner: LexError::UnexpectedEofString,
+                    text_range: (0..4).into(),
+                    text: "\"abc",
+                }],
+                errors: Vec::new()
+            }
         );
     }
 
     #[test]
     fn builder_api() {
         let tokens: Vec<_> = Lexer::new("ident").collect();
-        let mut parser = Parser::new(&tokens);
+        let mut parser = Parser::new(Source::new(&tokens));
 
         let m_node = parser.start();
         let m_prop = parser.start();
@@ -222,7 +252,7 @@ mod tests {
         // FIXME: with Sink code
         let output = Sink::new(&tokens, parser.events).finish();
         assert_eq!(
-            output,
+            output.green_node,
             GreenNode {
                 kind: NodeKind::Document,
                 children: vec![node(
@@ -231,9 +261,9 @@ mod tests {
                         NodeKind::DtProperty,
                         vec![node(
                             NodeKind::DtCell,
-                            vec![token(
+                            vec![dynamic_token(
                                 TokenKind::Ident,
-                                TokenText::Dynamic("ident".to_owned())
+                                "ident"
                             )]
                         )]
                     )]
@@ -245,7 +275,7 @@ mod tests {
     #[test]
     fn builder_api_precede() {
         let tokens: Vec<_> = Lexer::new("hello world").collect();
-        let mut parser = Parser::new(&tokens);
+        let mut parser = Parser::new(Source::new(&tokens));
 
         let m_node = parser.start();
         let m_cell = parser.start();
@@ -268,7 +298,7 @@ mod tests {
         // FIXME: with Sink code
         let output = Sink::new(&tokens, parser.events).finish();
         assert_eq!(
-            output,
+            output.green_node,
             GreenNode {
                 kind: NodeKind::Document,
                 children: vec![node(
@@ -279,14 +309,14 @@ mod tests {
                             node(
                                 NodeKind::DtCell,
                                 vec![
-                                    token(TokenKind::Ident, TokenText::Dynamic("hello".to_owned())),
-                                    token(
+                                    dynamic_token(TokenKind::Ident, "hello"),
+                                    dynamic_token(
                                         TokenKind::Whitespace,
-                                        TokenText::Dynamic(" ".to_owned())
+                                        " "
                                     )
                                 ]
                             ),
-                            token(TokenKind::Ident, TokenText::Dynamic("world".to_owned()))
+                            dynamic_token(TokenKind::Ident, "world")
                         ]
                     )]
                 )]

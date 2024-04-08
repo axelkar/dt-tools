@@ -3,6 +3,7 @@ use std::ops::Range;
 
 // TODO: About identical files: don't deduplicate the root Arcs.
 // Check out rust-analyzer hir::semantics::SemanticsImpl::find_file.
+// TODO: use `text_size::TextRange` instead
 
 /// A location in source code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

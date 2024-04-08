@@ -134,11 +134,30 @@ impl Backend {
                 analyzed: None,
             },
         );
-        let cst = dt_parser::parse(text.as_bytes());
+        let parse = dt_parser::cst2::parser::parse(&text);
 
         let mut diagnostics = Vec::new();
 
-        if let Some(cst) = cst {
+        for lex_error in &parse.lex_errors {
+            let range = Range::new(
+                offset_to_position(lex_error.text_range.start, &rope).unwrap(),
+                offset_to_position(lex_error.text_range.end, &rope).unwrap(),
+            );
+            diagnostics.push(Diagnostic::new_simple(
+                range,
+                format!("{} [syntax error]", lex_error.inner),
+            ));
+        }
+
+        for error in &parse.errors {
+            let range = Range::new(
+                offset_to_position(error.text_range.start, &rope).unwrap(),
+                offset_to_position(error.text_range.end, &rope).unwrap(),
+            );
+            diagnostics.push(Diagnostic::new_simple(range, format!("{} [error]", error)));
+        }
+
+        if let Some(cst) = None::<Arc<RedNode>> {
             let ast = ast::Document::cast(cst.clone()).unwrap();
             diagnostics.extend(dt_lint::default_lint(&ast, &text).iter().flat_map(|lint| {
                 lint.span
