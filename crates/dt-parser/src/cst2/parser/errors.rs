@@ -1,7 +1,35 @@
+use std::borrow::Cow;
+
 use super::super::TokenKind;
-use smallvec::SmallVec;
 
 use crate::{cst2::lexer::LexError, TextRange};
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum Expected {
+    Kind(TokenKind),
+    Name,
+    PreprocessorDirective,
+}
+impl core::fmt::Display for Expected {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Expected::Kind(kind) => kind.fmt(f),
+            Expected::Name => f.write_str("item name"),
+            Expected::PreprocessorDirective => f.write_str("preprocessor directive"),
+        }
+    }
+}
+impl From<TokenKind> for Expected {
+    fn from(value: TokenKind) -> Self {
+        Self::Kind(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpanLabel {
+    pub span: TextRange,
+    pub message: Cow<'static, str>,
+}
 
 /// CST parser error
 // TODO: From rust-analyzer: If possible, errors are not reported during parsing and are postponed
@@ -9,9 +37,9 @@ use crate::{cst2::lexer::LexError, TextRange};
 // methods, but then a separate tree traversal flags all such visibilities as erroneous.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
-    pub expected: SmallVec<[TokenKind; 2]>,
-    pub found: Option<TokenKind>,
-    pub text_range: TextRange,
+    pub message: Cow<'static, str>,
+    pub primary_span: TextRange,
+    pub span_labels: Vec<SpanLabel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,92 +47,4 @@ pub struct WrappedLexError<'input> {
     pub inner: LexError,
     pub text_range: TextRange,
     pub text: &'input str,
-}
-
-impl core::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("Expected ")?;
-
-        let num_expected = self.expected.len();
-        let is_first = |idx| idx == 0;
-        let is_last = |idx| idx == num_expected - 1;
-
-        for (idx, expected_kind) in self.expected.iter().enumerate() {
-            if is_first(idx) {
-                write!(f, "{}", expected_kind)?;
-            } else if is_last(idx) {
-                write!(f, " or {}", expected_kind)?;
-            } else {
-                write!(f, ", {}", expected_kind)?;
-            }
-        }
-
-        if self.expected.is_empty() {
-            write!(f, "nothing")?;
-        }
-
-        if let Some(found) = self.found {
-            write!(f, ", but found {}", found)?;
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ops::Range as StdRange;
-
-    use pretty_assertions::assert_eq;
-
-    fn check(
-        expected: Vec<TokenKind>,
-        found: Option<TokenKind>,
-        range: StdRange<usize>,
-        output: &str,
-    ) {
-        let error = ParseError {
-            expected: expected.into(),
-            found,
-            text_range: range.into(),
-        };
-
-        assert_eq!(format!("{}", error), output);
-    }
-
-    #[test]
-    fn one_expected_did_find() {
-        check(
-            vec![TokenKind::Equals],
-            Some(TokenKind::Ident),
-            10..20,
-            "Expected ‘=’, but found identifier",
-        );
-    }
-
-    #[test]
-    fn one_expected_did_not_find() {
-        check(
-            vec![TokenKind::RParen],
-            None,
-            5..6,
-            "Expected ‘)’",
-        );
-    }
-
-    #[test]
-    fn multiple_expected_did_find() {
-        check(
-            vec![
-                TokenKind::Number,
-                TokenKind::Ident,
-                TokenKind::Minus,
-                TokenKind::LParen,
-            ],
-            Some(TokenKind::RBrack),
-            100..105,
-            "Expected number literal, identifier, ‘-’ or ‘(’, but found ‘]’",
-        );
-    }
 }

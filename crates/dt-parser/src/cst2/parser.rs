@@ -1,11 +1,15 @@
 //! - <https://rust-analyzer.github.io/blog/2020/09/16/challeging-LR-parsing.html#error-resilience>
 //! - <https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html>
 
+use std::borrow::Cow;
+
 use self::event::Event;
 use self::source::Source;
+use itertools::Itertools;
 #[allow(unused_imports)]
 pub use marker::{CompletedMarker, Marker};
 use smallvec::SmallVec;
+use tracing::debug;
 
 use super::{grammar, lexer::TokenKind, GreenNode, NodeKind};
 
@@ -15,18 +19,33 @@ mod marker;
 mod sink;
 mod source;
 
-pub use errors::{ParseError, WrappedLexError};
+pub use errors::{Expected, ParseError, SpanLabel, WrappedLexError};
 
-// FIXME: previous is Semicolon or RCurly
-//const RECOVERY_SET: [TokenKind; 2] = [TokenKind::Semicolon, TokenKind::RCurly];
-//const RECOVERY_SET: [TokenKind; 1] = [TokenKind::RCurly];
-const RECOVERY_SET: [TokenKind; 1] = [TokenKind::Semicolon];
-//const RECOVERY_SET: [TokenKind; 0] = [];
+// TODO: axka style naming naming lints
+const NAME_SET: [TokenKind; 4] = [
+    TokenKind::Ident,
+    TokenKind::Number,
+    TokenKind::Comma,
+    TokenKind::Minus,
+];
+
+const PREPROCESSOR_DIRECTIVE_SET: [TokenKind; 9] = [
+    TokenKind::UndefDirective,
+    TokenKind::PragmaDirective,
+    TokenKind::ElseDirective,
+    TokenKind::EndifDirective,
+    TokenKind::IfndefDirective,
+    TokenKind::IfdefDirective,
+    TokenKind::IfDirective,
+    TokenKind::DefineDirective,
+    TokenKind::IncludeDirective,
+];
 
 // TODO: Event incremental reparse:
 // > Events can make our parser faster if we have a previous parse tree lying around; rather than
 // > constructing a new parse tree every time, we can patch an existing one with the events of the
 // > new parse.
+// kinda like duct-taping different parts of the parse tree together
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parse<'input> {
@@ -47,7 +66,6 @@ pub fn parse(input: &str) -> Parse {
     let sink = sink::Sink::new(&tokens, parser.events);
 
     let parse = sink.finish();
-    eprintln!("tree = {}", parse.green_node.print_tree());
     parse
 }
 
@@ -58,8 +76,8 @@ pub struct Parser<'t, 'input> {
     source: Source<'t, 'input>,
     /// Events to feed into [`Sink`].
     events: Vec<Event>,
-    /// The tokens that are expected at the current position.
-    expected_kinds: SmallVec<[TokenKind; 2]>,
+    /// The values that are expected at the current position.
+    expected: SmallVec<[Expected; 2]>,
 }
 
 impl<'t, 'input> Parser<'t, 'input> {
@@ -68,7 +86,7 @@ impl<'t, 'input> Parser<'t, 'input> {
         Self {
             source,
             events: Vec::new(),
-            expected_kinds: SmallVec::new(),
+            expected: SmallVec::new(),
         }
     }
 
@@ -77,58 +95,84 @@ impl<'t, 'input> Parser<'t, 'input> {
         let pos = self.events.len();
         self.events.push(Event::Placeholder);
 
+        #[cfg(feature = "grammar-tracing")]
+        debug!(pos, "start node");
+
         Marker::new(pos)
     }
 
-    /// Peeks ahead at the next token's kind.
+    /// Peeks ahead at the current token's kind.
     ///
     /// Returns None on EOF
+    #[inline(always)]
+    fn peek_immediate(&mut self) -> Option<TokenKind> {
+        self.source.peek_kind_immediate()
+    }
+
+    /// Peeks ahead at the current token's kind.
+    ///
+    /// Returns None on EOF
+    #[inline(always)]
     fn peek(&mut self) -> Option<TokenKind> {
         self.source.peek_kind()
     }
 
-    /// Returns true if `kind` is the next token's kind.
+    /// Returns true if `kind` is the current token's kind.
     pub fn at(&mut self, kind: TokenKind) -> bool {
-        self.expected_kinds.push(kind);
+        self.expected.push(Expected::Kind(kind));
         self.peek() == Some(kind)
     }
 
-    /// Returns true if `kind` is the next token's kind.
-    /// 
-    /// - This does not add `kind` to `expected_kinds`.
-    pub fn silent_at(&mut self, kind: TokenKind) -> bool {
-        self.peek() == Some(kind)
-    }
-
-    /// Errors and returns true if `kind` is the next token's kind.
+    /// Bumps and returns true if `kind` is the current token's kind.
     ///
-    /// - This adds an error if it matches.
-    /// - This does not add `kind` to `expected_kinds`.
-    /// - This never bumps forward.
-    ///
-    /// You can use this to take care of `RCurly` tokens when there should be `Semicolon` for
-    /// example.
-    pub fn expect_no_ending(&mut self, kind: TokenKind) -> bool {
-        if self.peek() == Some(kind) {
-            self.error_no_bump();
+    /// Basically a combination of [`Parser::at`] and [`Parser::bump`]
+    pub fn eat(&mut self, kind: TokenKind) -> bool {
+        if self.at(kind) {
+            self.bump();
             true
         } else {
             false
         }
     }
 
-    /// Returns true if the next token's kind is in `set`.
+    /// Returns true if `kind` is the current token's kind.
+    ///
+    /// - This does not add `kind` to `expected_kinds`.
+    #[inline(always)]
+    pub fn silent_at(&mut self, kind: TokenKind) -> bool {
+        self.peek() == Some(kind)
+    }
+
+    /// Returns true if `kind` is the current token's kind.
+    ///
+    /// - This does not add `kind` to `expected_kinds`.
+    #[inline(always)]
+    pub fn silent_at_immediate(&mut self, kind: TokenKind) -> bool {
+        self.peek_immediate() == Some(kind)
+    }
+
+    /// Returns true if the current token's kind is in `set`.
     pub fn at_set(&mut self, set: &[TokenKind]) -> bool {
-        self.expected_kinds.extend_from_slice(set);
+        self.expected.reserve(set.len());
+        for kind in set {
+            self.expected.push(Expected::Kind(*kind));
+        }
+        self.peek().map_or(false, |k| set.contains(&k))
+    }
+
+    /// Returns true if the current token's kind is in `set`.
+    ///
+    /// - This doesn't add `set` to `expected_kinds`.
+    pub fn silent_at_set(&mut self, set: &[TokenKind]) -> bool {
         self.peek().map_or(false, |k| set.contains(&k))
     }
 
     /// Bumps when `set` contains the current token's kind and errors otherwise.
-    pub fn expect_set(&mut self, set: &[TokenKind]) {
+    pub fn expect_bump_set(&mut self, set: &[TokenKind]) {
         if self.at_set(set) {
             self.bump();
         } else {
-            self.error();
+            self.emit_expect_error();
         }
     }
 
@@ -137,42 +181,178 @@ impl<'t, 'input> Parser<'t, 'input> {
         if self.at(kind) {
             self.bump();
         } else {
-            self.error();
+            self.emit_expect_error();
         }
     }
 
-    /// Reports the current token as an error.
-    pub fn error(&mut self) {
-        self.error_no_bump();
+    pub fn emit_expect_error(&mut self) {
+        use std::fmt::Write;
+        let mut message = "Expected ".to_owned();
 
-        if !self.at_set(&RECOVERY_SET) && !self.at_end() {
-            let m = self.start();
-            self.bump();
-            m.complete(self, NodeKind::ParseError);
+        self.expected = std::mem::take(&mut self.expected)
+            .into_iter()
+            .unique()
+            .collect::<Vec<_>>()
+            .into();
+
+        let num_expected = self.expected.len();
+
+        for (idx, expected_kind) in self.expected.iter().enumerate() {
+            let is_first = idx == 0;
+            let is_last = idx == num_expected - 1;
+
+            if is_first {
+                write!(message, "{}", expected_kind).ok();
+            } else if is_last {
+                write!(message, " or {}", expected_kind).ok();
+            } else {
+                write!(message, ", {}", expected_kind).ok();
+            }
         }
-    }
 
-    /// Reports the current token as an error.
-    ///
-    /// In contrast to the `error` method, this will never `bump` the token.
-    pub fn error_no_bump(&mut self) {
-        let current_token = self.source.peek_token();
-
-        let (found, range) = if let Some(token) = current_token {
-            (
-                // Sink will handle lex errors
-                Some(token.kind.unwrap_or(TokenKind::LexError)),
-                token.text_range,
-            )
+        if let Some(kind) = self.peek() {
+            write!(message, ", but found {}", kind).ok();
         } else {
-            (None, self.source.last_token_range().unwrap())
+            write!(message, ", but found end-of-file").ok();
+        }
+
+        self.simple_error(message.into());
+    }
+
+    /// Errors when the current token's kind isn't `kind`.
+    ///
+    /// - Doesn't bump when at `recovery_set`.
+    pub fn expect_recoverable(&mut self, kind: TokenKind, recovery_set: &[TokenKind]) {
+        if self.at(kind) {
+            self.bump();
+        } else if self.silent_at_set(recovery_set) {
+            self.emit_expect_error();
+        } else {
+            self.error2();
+        }
+    }
+
+    /// Reports the current token as an expect error.
+    // TODO: better name
+    pub fn error2(&mut self) {
+        self.emit_expect_error();
+
+        // TODO: make grammar use this
+        if !self.at_end() {
+            let e = self.start();
+            self.bump();
+            e.complete(self, NodeKind::ParseError);
+        }
+    }
+
+    /// Reports the current token as an error.
+    pub fn simple_error(&mut self, message: Cow<'static, str>) {
+        self.fancy_error(message, Vec::new())
+    }
+
+    /// Returns the range of the current token if it exists.
+    pub fn range(&self) -> Option<crate::TextRange> {
+        self.source.range()
+    }
+
+    /// Reports the current token as an error.
+    pub fn fancy_error(&mut self, message: Cow<'static, str>, span_labels: Vec<errors::SpanLabel>) {
+        let primary_span = if self.at_end() {
+            let pos = self.source.last_token_range().unwrap().end;
+            crate::TextRange {
+                start: pos,
+                end: pos,
+            }
+        } else if self.expected.len() == 1
+            && self.expected.first() == Some(&Expected::Kind(TokenKind::Semicolon))
+        {
+            self.source.prev_next_range().unwrap()
+        } else {
+            self.source.range().unwrap()
         };
 
+        debug!(?primary_span, %message, "fancy_error");
+
         self.events.push(Event::Error(ParseError {
-            expected: std::mem::take(&mut self.expected_kinds),
-            found,
-            text_range: range,
+            message,
+            primary_span,
+            span_labels,
         }));
+    }
+
+    /// Sets the hint for the error.
+    ///
+    /// Does nothing if the last event was not an error.
+    pub fn add_hint(&mut self, hint: Cow<'static, str>) {
+        if let Some(Event::Error(err)) = self.events.last_mut() {
+            err.span_labels.push(errors::SpanLabel {
+                message: hint,
+                span: err.primary_span,
+            });
+        }
+    }
+
+    /// Returns true if at a name token.
+    pub fn at_name(&mut self) -> bool {
+        if self.silent_at_set(&NAME_SET) {
+            true
+        } else {
+            self.expected.push(Expected::Name);
+            false
+        }
+    }
+
+    /// Returns true if at a preprocessor directive token.
+    pub fn at_preprocessor_directive(&mut self) -> bool {
+        if self.silent_at_set(&PREPROCESSOR_DIRECTIVE_SET) {
+            true
+        } else {
+            self.expected.push(Expected::PreprocessorDirective);
+            false
+        }
+    }
+
+    /// Bumps name tokens into [`NodeKind::Name`].
+    pub fn bump_name(&mut self) -> Option<CompletedMarker> {
+        if !self.silent_at_set(&NAME_SET) {
+            self.expected.push(Expected::Name);
+            return None;
+        }
+
+        fn bump_notrivia(p: &mut Parser) {
+            p.expected.clear();
+            assert!(p.source.next_token().is_some(), "Tried to bump at EOF");
+
+            #[cfg(feature = "grammar-tracing")]
+            debug!(pos = p.events.len(), kind = ?p.source.peek_kind_immediate(), "push token");
+
+            // This makes sure the whitespace only gets eaten when name_m is completed
+            p.events.push(Event::AddTokenNoTrivia)
+        }
+
+        self.source.skip_trivia();
+
+        let name_m = self.start();
+
+        bump_notrivia(self);
+
+        while self
+            .peek_immediate()
+            .map_or(false, |k| NAME_SET.contains(&k))
+        {
+            bump_notrivia(self);
+        }
+
+        Some(name_m.complete(self, NodeKind::Name))
+    }
+
+    /// Bumps name tokens into [`NodeKind::Name`] or error otherwise.
+    pub fn expect_name(&mut self) {
+        if self.at_name() {
+            self.bump_name();
+        } else {
+            self.emit_expect_error();
+        }
     }
 
     /// Returns true if at the end-of-file.
@@ -181,10 +361,16 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.peek().is_none()
     }
 
-    /// Adds the next token to the parse tree.
+    /// Adds the current token to the parse tree.
+    ///
+    /// This equals the result of any previous `peek_*` calls
     pub fn bump(&mut self) {
-        self.expected_kinds.clear();
-        self.source.next_token().unwrap();
+        self.expected.clear();
+
+        #[cfg(feature = "grammar-tracing")]
+        debug!(pos = self.events.len(), kind = ?self.source.peek_kind(), "push token");
+
+        assert!(self.source.next_token().is_some(), "Tried to bump at EOF");
         self.events.push(Event::AddToken)
     }
 }
@@ -192,7 +378,7 @@ impl<'t, 'input> Parser<'t, 'input> {
 #[cfg(test)]
 mod tests {
     use super::sink::Sink;
-    use crate::cst2::grammar::tests::{node, dynamic_token};
+    use crate::cst2::grammar::tests::{dynamic_token, node};
     use crate::cst2::lexer::{LexError, Lexer};
     use crate::cst2::{GreenNode, NodeKind};
 
@@ -217,10 +403,8 @@ mod tests {
             Parse {
                 green_node: GreenNode {
                     kind: NodeKind::Document,
-                    children: vec![dynamic_token(
-                        TokenKind::LexError,
-                        "\"abc"
-                    )]
+                    width: "\"abc".len(),
+                    children: vec![dynamic_token(TokenKind::Unrecognized, "\"abc")]
                 },
                 lex_errors: vec![WrappedLexError {
                     inner: LexError::UnexpectedEofString,
@@ -245,7 +429,7 @@ mod tests {
         parser.bump();
 
         // They aren't in the same order as they were defined in
-        m_cell.complete(&mut parser, NodeKind::DtCell);
+        m_cell.complete(&mut parser, NodeKind::DtCellList);
         m_node.complete(&mut parser, NodeKind::DtNode);
         m_prop.complete(&mut parser, NodeKind::DtProperty);
 
@@ -255,16 +439,14 @@ mod tests {
             output.green_node,
             GreenNode {
                 kind: NodeKind::Document,
+                width: "ident".len(),
                 children: vec![node(
                     NodeKind::DtNode,
                     vec![node(
                         NodeKind::DtProperty,
                         vec![node(
-                            NodeKind::DtCell,
-                            vec![dynamic_token(
-                                TokenKind::Ident,
-                                "ident"
-                            )]
+                            NodeKind::DtCellList,
+                            vec![dynamic_token(TokenKind::Ident, "ident")]
                         )]
                     )]
                 )]
@@ -283,7 +465,7 @@ mod tests {
         // Add the "ident" and whitespace tokens
         parser.bump();
 
-        let completed_cell = m_cell.complete(&mut parser, NodeKind::DtCell);
+        let completed_cell = m_cell.complete(&mut parser, NodeKind::DtCellList);
 
         // actually, let's wrap the cell in a DtProperty
         let m_prop = completed_cell.precede(&mut parser);
@@ -301,21 +483,17 @@ mod tests {
             output.green_node,
             GreenNode {
                 kind: NodeKind::Document,
+                width: "hello world".len(),
                 children: vec![node(
                     NodeKind::DtNode,
                     vec![node(
                         NodeKind::DtProperty,
                         vec![
                             node(
-                                NodeKind::DtCell,
-                                vec![
-                                    dynamic_token(TokenKind::Ident, "hello"),
-                                    dynamic_token(
-                                        TokenKind::Whitespace,
-                                        " "
-                                    )
-                                ]
+                                NodeKind::DtCellList,
+                                vec![dynamic_token(TokenKind::Ident, "hello"),]
                             ),
+                            dynamic_token(TokenKind::Whitespace, " "),
                             dynamic_token(TokenKind::Ident, "world")
                         ]
                     )]

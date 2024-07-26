@@ -10,18 +10,19 @@ use dt_parser::{
 };
 use std::borrow::Cow;
 
-mod dtc_style;
-mod kernel_coding_style;
-mod syntax_error;
+//mod dtc_style;
+//mod kernel_coding_style;
+
+// TODO: delete
+//mod syntax_error;
 
 pub mod lints {
     //! The full collection of lints upstream.
     //!
     //! Currently all lints in here are applied by the [default_lint](crate::default_lint) function
     //! used by the LSP.
-    pub use crate::dtc_style::DtcStyle;
-    pub use crate::kernel_coding_style::KernelCodingStyle;
-    pub use crate::syntax_error::SyntaxError;
+    //pub use crate::dtc_style::DtcStyle;
+    //pub use crate::kernel_coding_style::KernelCodingStyle;
 }
 
 // TODO: something like this:
@@ -133,15 +134,14 @@ pub trait EarlyLintPass {
     fn check_label(&mut self, _cx: &mut EarlyContext, _label: &ast::DtLabel) {}
 }
 
-pub fn default_lint(doc: &ast::Document, src: &str) -> Vec<EarlyLint> {
-    let mut cx = EarlyContext {
+pub fn default_lint(_doc: &ast::Document, src: &str) -> Vec<EarlyLint> {
+    let cx = EarlyContext {
         lints: Vec::new(),
         src,
     };
     // TODO: go over the tree just once
-    crate::lints::KernelCodingStyle.check_document(&mut cx, doc);
-    crate::lints::DtcStyle.check_document(&mut cx, doc);
-    crate::lints::SyntaxError.check_document(&mut cx, doc);
+    //crate::lints::KernelCodingStyle.check_document(&mut cx, doc);
+    //crate::lints::DtcStyle.check_document(&mut cx, doc);
     // TODO: warn for `&LABEL,` (ident eats the comma), although... it shouldn't be possible when
     // not in a dt cell e.g. `a = &LABEL, "foo";`
     cx.lints

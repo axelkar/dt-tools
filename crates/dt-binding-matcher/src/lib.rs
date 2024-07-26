@@ -93,7 +93,7 @@ pub fn get_compatible_items(map: &Mapping) -> HashSet<String> {
 pub fn find_select(tree: DefinitionTreeNode, select: &JSONSchema) -> Option<DefinitionTreeNode> {
     // TODO: return path too?
     // TODO: compare into_json with `dtc example.dts -O yaml | yq '.[]'`
-    // TODO: if select is simple, just check for equality or regex pattern
+    // TODO: if select is simple, just check for equality or regex pattern (lazy into_json)
     // TODO: don't turn subtrees into JSON multiple times
     Some(
         tree.dfs_iter_nodes()
@@ -105,17 +105,26 @@ pub fn find_select(tree: DefinitionTreeNode, select: &JSONSchema) -> Option<Defi
 #[cfg(test)]
 #[test]
 fn test_compile() {
+    use std::sync::Arc;
+
+    use dt_parser::{
+        ast::{self, AstNode as _},
+        cst2::RedNode,
+    };
+
     fn compile_example(example: &str, schema: &BindingSchema) {
         let example = format!("/dts-v1/;\n\n/ {{\n{example}\n}};");
-        let red = dt_parser::parse(example.as_bytes()).unwrap();
+        let parse = dt_parser::cst2::parser::parse(&example);
 
-        // TODO: use dt_lint since find_syntax_errors isn't updated
-        #[allow(deprecated)]
-        {
-            assert!(red.find_syntax_errors(&example).next().is_none());
-        }
+        if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
+            eprintln!("Invalid DTS!");
+            std::process::exit(1);
+        };
 
-        let def = dt_analyzer::analyze_cst(red, &example).unwrap();
+        let doc = ast::Document::cast(RedNode::new(Arc::new(parse.green_node))).unwrap();
+        eprintln!("{}", doc.syntax_ref().green.print_tree());
+
+        let def = dt_analyzer::analyze_cst(&doc, &example).unwrap();
         let json = find_select(def.tree, &schema.select).unwrap().into_json();
         eprintln!("{:#?}", json);
         if let Err(e) = schema.schema.validate(&json) {

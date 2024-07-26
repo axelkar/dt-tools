@@ -1,5 +1,4 @@
 -- nvim -S lsp.lua a.dts
-
 vim.lsp.start({
   name = 'DeviceTreeLSP',
   --cmd = {'../../target/debug/dt-lsp'},

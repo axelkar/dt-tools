@@ -46,6 +46,9 @@ impl<'a> Iterator for InterpretEscapedString<'a> {
 }
 
 pub fn interpret_escaped_string(s: &str) -> Result<String, StringParseError> {
+    debug_assert!(s.starts_with('"'));
+    debug_assert!(s.ends_with('"'));
+    let s = s.get(1..(s.len() - 1)).expect("lexer safe");
     (InterpretEscapedString {
         s: s.chars().peekable(),
     })

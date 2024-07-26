@@ -1,8 +1,8 @@
-use std::{collections::HashMap, num::ParseIntError};
+use std::{collections::HashMap, num::ParseIntError, sync::Arc};
 
 use dt_parser::{
-    ast::{self, DtNode, HasIdent},
-    cst::TreeItem,
+    ast::{self, DtNode, HasName},
+    cst2::RedToken,
 };
 use either::Either;
 use vec1::Vec1;
@@ -157,9 +157,10 @@ pub fn analyze_node(node: ast::DtNode, src: &str) -> Option<DefinitionTreeNode> 
         .properties()
         .flat_map(|prop| {
             Some((
-                prop.ident()?.text(src)?.to_owned(),
+                prop.name()?.text(src)?.to_owned(),
                 DefinitionTree::Prop {
-                    value: Value::from_ast(&prop.values().collect::<Vec<_>>(), src).ok()?,
+                    value: Value::from_ast(&prop.values()?.values().collect::<Vec<_>>(), src)
+                        .ok()?,
                     ast: prop,
                 },
             ))
@@ -169,8 +170,13 @@ pub fn analyze_node(node: ast::DtNode, src: &str) -> Option<DefinitionTreeNode> 
                 .filter(DtNode::is_concrete)
                 .filter_map(|node| {
                     Some((
-                        // TODO: what to do with unit address?, $nodename?
-                        node.name(src)?.into_owned(),
+                        // TODO: what to do with unit address?, $nodename (jsonschema property)?
+                        // Kernel 6.10:
+                        // Documentation/devicetree/bindings/thermal/thermal-zones.yaml#L41
+                        // Documentation/devicetree/bindings/riscv/sifive.yaml#L17
+                        // Documentation/devicetree/bindings/i2c/i2c-virtio.yaml#L20
+                        // Documentation/devicetree/bindings/serial/serial.yaml#L23
+                        node.text_name(src)?.into_owned(),
                         DefinitionTree::Node(analyze_node(node, src)?),
                     ))
                 }),
@@ -259,34 +265,33 @@ impl Value {
     fn from_ast(ast: &[ast::PropValue], src: &str) -> Result<Self, ValueFromAstError> {
         Ok(match ast {
             [] => Value::Empty,
-            [ast::PropValue::Cell(cell)] => match &cell.values().collect::<Vec<_>>()[..] {
-                [TreeItem::Node(phandle)] => Value::Phandle({
-                    let ident = phandle
-                        .ident()
-                        .ok_or(MissingAst)?
-                        .text(src)
-                        .ok_or(CannotFindText)?
-                        .to_owned();
-                    if phandle.is_path() {
-                        PhandleTarget::Path(ident)
-                    } else {
-                        PhandleTarget::Label(ident)
-                    }
-                }),
-                [TreeItem::Token(number)] => {
-                    Value::U32(parse_u32(number.text(src).ok_or(CannotFindText)?)?)
+            [ast::PropValue::CellList(cell_list)] => {
+                match &cell_list.cells().collect::<Vec<_>>()[..] {
+                    [ast::Cell::Phandle(phandle)] => Value::Phandle({
+                        let ident = phandle
+                            .name()
+                            .ok_or(MissingAst)?
+                            .text(src)
+                            .ok_or(CannotFindText)?
+                            .to_owned();
+                        if phandle.is_path() {
+                            PhandleTarget::Path(ident)
+                        } else {
+                            PhandleTarget::Label(ident)
+                        }
+                    }),
+                    [ast::Cell::Number(number)] => Value::U32(parse_u32(number.text())?),
+                    [ast::Cell::Number(low), ast::Cell::Number(high)] => Value::U64(
+                        ((parse_u32(low.text())? as u64) << 32) + parse_u32(high.text())? as u64,
+                    ),
+                    [..] => Value::PropEncodedArray(
+                        ast.iter()
+                            .map(|ast| CustomValue::from_ast(ast, src))
+                            .collect::<Result<_, _>>()?,
+                    ),
                 }
-                [TreeItem::Token(low), TreeItem::Token(high)] => Value::U64(
-                    ((parse_u32(low.text(src).ok_or(CannotFindText)?)? as u64) << 32)
-                        + parse_u32(high.text(src).ok_or(CannotFindText)?)? as u64,
-                ),
-                [..] => Value::PropEncodedArray(
-                    ast.iter()
-                        .map(|ast| CustomValue::from_ast(ast, src))
-                        .collect::<Result<_, _>>()?,
-                ),
-            },
-            [ast::PropValue::String(ast)] => Value::String(common_string(ast, src)?),
+            }
+            [ast::PropValue::String(tok)] => Value::String(common_string(tok)?),
             stringlist
                 if !stringlist.is_empty()
                     && stringlist
@@ -303,7 +308,7 @@ impl Value {
                                 None
                             }
                         })
-                        .map(|ast| common_string(ast, src))
+                        .map(common_string)
                         .collect::<Result<_, ValueFromAstError>>()?,
                 )
             }
@@ -326,13 +331,9 @@ fn parse_u32(src: &str) -> Result<u32, ValueFromAstError> {
     })
 }
 
-fn common_string(ast: &ast::DtString, src: &str) -> Result<String, ValueFromAstError> {
-    Ok(crate::string::interpret_escaped_string(
-        ast.contents()
-            .ok_or(MissingAst)?
-            .text(src)
-            .ok_or(CannotFindText)?,
-    )?)
+fn common_string(tok: &Arc<RedToken>) -> Result<String, ValueFromAstError> {
+    // TODO: fix it!
+    Ok(crate::string::interpret_escaped_string(tok.text())?)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -355,14 +356,15 @@ impl CustomValue {
     }
     fn from_ast(ast: &ast::PropValue, src: &str) -> Result<Self, ValueFromAstError> {
         Ok(match ast {
-            ast::PropValue::String(ast) => CustomValue::String(common_string(ast, src)?),
-            ast::PropValue::Cell(cell) => CustomValue::Cell(
-                cell.values()
-                    .map(|item| {
-                        Ok(Some(match item {
-                            TreeItem::Node(phandle) => CustomValueCellItem::Phandle({
+            ast::PropValue::String(tok) => CustomValue::String(common_string(tok)?),
+            ast::PropValue::CellList(cell_list) => CustomValue::Cell(
+                cell_list
+                    .cells()
+                    .map(|cell| {
+                        Ok(Some(match cell {
+                            ast::Cell::Phandle(phandle) => CustomValueCellItem::Phandle({
                                 let ident = phandle
-                                    .ident()
+                                    .name()
                                     .ok_or(MissingAst)?
                                     .text(src)
                                     .ok_or(CannotFindText)?
@@ -373,9 +375,9 @@ impl CustomValue {
                                     PhandleTarget::Label(ident)
                                 }
                             }),
-                            TreeItem::Token(token) => CustomValueCellItem::U32(parse_u32(
-                                token.text(src).ok_or(MissingAst)?,
-                            )?),
+                            ast::Cell::Number(token) => {
+                                CustomValueCellItem::U32(parse_u32(token.text())?)
+                            }
                         }))
                     })
                     .filter_map(|v| match v {

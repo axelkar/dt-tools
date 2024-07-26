@@ -1,10 +1,14 @@
-//! Should we parse some stuff like numbers and strings here and store them in [`Token`]?
+//! Should we parse some stuff like strings here and store them in [`Token`]?
 //!
 //! How about ditching the source after lexing and storing all dynamic details in tuple enums?
 
 use logos::Logos;
 
 use crate::TextRange;
+
+pub fn lex(input: &str) -> Vec<Token> {
+    Lexer::new(input).collect()
+}
 
 #[derive(Debug, Clone)]
 /// [`logos::Lexer`] wrapper for also returning the slice in the iterator
@@ -38,15 +42,39 @@ impl<'input> Iterator for Lexer<'input> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token<'input> {
-    pub(crate) kind: Result<TokenKind, LexError>,
-    pub(crate) text: &'input str,
-    pub(crate) text_range: TextRange,
+    pub kind: Result<TokenKind, LexError>,
+    pub text: &'input str,
+    pub text_range: TextRange,
 }
 
 #[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LexError {
+    #[error("Unexpected EOF (hint: unterminated incbin directive)")]
+    UnexpectedEofIncbin,
+
+    #[error("Missing ( in incbin directive")]
+    IncbinMissingLParen,
+
+    #[error("Missing ) in incbin directive")]
+    IncbinMissingRParen,
+
+    #[error("Missing number in incbin directive")]
+    IncbinMissingNumber,
+
+    #[error("Missing comma in incbin directive")]
+    IncbinMissingComma,
+
+    #[error("Missing string in incbin directive")]
+    IncbinMissingString,
+
     #[error("Unexpected EOF (hint: unterminated string literal)")]
     UnexpectedEofString,
+
+    #[error("Unexpected EOF (hint: unterminated bytestring literal)")]
+    UnexpectedEofBytestring,
+
+    #[error("Unexpected EOF (hint: unterminated char literal)")]
+    UnexpectedEofChar,
 
     #[error("Unexpected EOF (hint: unterminated block comment)")]
     UnexpectedEofBlockComment,
@@ -58,7 +86,7 @@ pub enum LexError {
 
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[logos(error = LexError)]
-// TODO: #[logos(source = &[u8])] ?
+// TODO: #[logos(source = [u8])] ?
 pub enum TokenKind {
     #[regex("[ \t\r\n]+")]
     Whitespace,
@@ -67,17 +95,58 @@ pub enum TokenKind {
     #[token("/*", callback = lex_block_comment)]
     BlockComment,
 
+    #[token(",")]
+    Comma,
+
     #[regex(r"//[^\n\r]+")]
     LineComment,
 
-    /// An error!!
-    ///
-    /// Not produced by Logos but by the parser
-    LexError,
+    #[regex(r"#( |\t)*undef[^\n]*")]
+    UndefDirective,
+    #[regex(r"#( |\t)*pragma[^\n]*")]
+    PragmaDirective,
+    #[regex(r"#( |\t)*else[^\n]*")]
+    ElseDirective,
+    #[regex(r"#( |\t)*endif[^\n]*")]
+    EndifDirective,
+    #[regex(r"#( |\t)*ifndef[^\n]*")]
+    IfndefDirective,
+    #[regex(r"#( |\t)*ifdef[^\n]*")]
+    IfdefDirective,
+    #[regex(r"#( |\t)*if[^\n]*")]
+    IfDirective,
+    #[regex(r"#( |\t)*define[^\n\\]*", callback = lex_preprocessor_directive)]
+    DefineDirective,
+    #[regex(r"#( |\t)*include[^\n]*")]
+    IncludeDirective,
 
-    // TODO: include more chars for this?
-    //#[regex("[A-Za-z0-9-,_#]+", priority = 1)]
-    #[regex(r#"[^ \t\r\n"/{}<>\[\]();:&=@]+"#)]
+    // TODO: bits directive
+    // TODO: plugin directive
+    #[token("/bits/")]
+    BitsDirective,
+
+    #[token("/include/")]
+    DtIncludeDirective,
+
+    #[token("/memreserve/")]
+    MemreserveDirective,
+
+    #[token("/delete-node/")]
+    DeleteNodeDirective,
+
+    #[token("/delete-property/")]
+    DeletePropertyDirective,
+
+    #[token("/dts-v1/")]
+    V1Directive,
+
+    #[token("/plugin/")]
+    PluginDirective,
+
+    /// A lex error!!
+    Unrecognized,
+
+    #[regex(r#"[^ \t\r\n"'/*+%|{}<>\[()?;:&=@,0-9-]+"#)]
     Ident,
 
     #[token("=")]
@@ -95,19 +164,24 @@ pub enum TokenKind {
     #[token("@")]
     AtSign,
 
-    #[token(",", priority = 3)]
-    Comma,
-
     // -- Basic prop types --
-    //#[regex(r#""([^"\\]|\\["\\bnfrt]|u[a-fA-F0-9]{4})*""#)]
     #[token("\"", callback = lex_string)]
     String,
 
-    #[regex(r"-?\d+", priority = 5)]
-    #[regex(r"-?0[xX][0-9a-fA-F]*", priority = 5)]
+    /// A single character (e.g '\x41', 'a', '\0')
+    #[token("'", callback = lex_char)]
+    Char,
+
+    // I would have wanted to do [0-1_]*[0-1][0-1_]* but it isn't possible without backtracking.
+    // Maybe I should write a callback
+    #[regex("[0-9][0-9_]*((u|i)(8|16|32|64|128))?")]
+    #[regex("0b[0-1_]+((u|i)(8|16|32|64|128))?")]
+    #[regex("0o[0-7_]+((u|i)(8|16|32|64|128))?")]
+    #[regex("0x[0-9a-fA-F_]+((u|i)(8|16|32|64|128))?")]
     Number,
 
-    // bytestring can be implemented with LBrack + Ident* + RBrack
+    #[token("[", callback = lex_bytestring)]
+    DtBytestring,
 
     // -- Curly braces, angle brackets, brackets, parenthesis --
     #[token("{")]
@@ -118,10 +192,10 @@ pub enum TokenKind {
     LAngle,
     #[token(">")]
     RAngle,
-    #[token("[")]
-    LBrack,
-    #[token("]")]
-    RBrack,
+    //#[token("[")]
+    //LBrack,
+    //#[token("]")]
+    //RBrack,
     #[token("(")]
     LParen,
     #[token(")")]
@@ -130,36 +204,46 @@ pub enum TokenKind {
     // -- Math symbols --
     #[token("/")]
     Slash,
-    #[token("*", priority = 3)]
+    #[token("*")]
     Asterisk,
-    #[token("+", priority = 3)]
+    #[token("+")]
     Plus,
-    #[token("-", priority = 3)]
+    #[token("-")]
     Minus,
+    #[token("%")]
+    Modulo,
+    #[token("|")]
+    BitwiseOr,
 }
 
 impl TokenKind {
     pub fn static_text(self) -> Option<&'static str> {
-        use TokenKind::*;
         Some(match self {
-            Equals => "=",
-            Semicolon => ";",
-            Ampersand => "&",
-            Colon => ":",
-            AtSign => "@",
-            Comma => ",",
-            LCurly => "{",
-            RCurly => "}",
-            LAngle => "<",
-            RAngle => ">",
-            LBrack => "[",
-            RBrack => "]",
-            LParen => "(",
-            RParen => ")",
-            Slash => "/",
-            Asterisk => "*",
-            Plus => "+",
-            Minus => "-",
+            TokenKind::Comma => ",",
+            TokenKind::BitsDirective => "/bits/",
+            TokenKind::DtIncludeDirective => "/include/",
+            TokenKind::MemreserveDirective => "/memreserve/",
+            TokenKind::DeleteNodeDirective => "/delete-node/",
+            TokenKind::DeletePropertyDirective => "/delete-property/",
+            TokenKind::V1Directive => "/dts-v1/",
+            TokenKind::PluginDirective => "/plugin/",
+            TokenKind::Equals => "=",
+            TokenKind::Semicolon => ";",
+            TokenKind::Ampersand => "&",
+            TokenKind::Colon => ":",
+            TokenKind::AtSign => "@",
+            TokenKind::LCurly => "{",
+            TokenKind::RCurly => "}",
+            TokenKind::LAngle => "<",
+            TokenKind::RAngle => ">",
+            TokenKind::LParen => "(",
+            TokenKind::RParen => ")",
+            TokenKind::Slash => "/",
+            TokenKind::Asterisk => "*",
+            TokenKind::Plus => "+",
+            TokenKind::Minus => "-",
+            TokenKind::Modulo => "%",
+            TokenKind::BitwiseOr => "|",
             _ => return None,
         })
     }
@@ -172,37 +256,71 @@ impl TokenKind {
             TokenKind::Whitespace | TokenKind::LineComment | TokenKind::BlockComment
         )
     }
+
+    /// Returns true for preprocessor directive token kinds.
+    #[inline(always)]
+    pub fn is_preprocessor_directive(self) -> bool {
+        matches!(
+            self,
+            TokenKind::UndefDirective
+                | TokenKind::PragmaDirective
+                | TokenKind::ElseDirective
+                | TokenKind::EndifDirective
+                | TokenKind::IfndefDirective
+                | TokenKind::IfdefDirective
+                | TokenKind::IfDirective
+                | TokenKind::DefineDirective
+                | TokenKind::IncludeDirective
+        )
+    }
 }
 
 impl core::fmt::Display for TokenKind {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        use TokenKind::*;
         f.write_str(match self {
-            Whitespace => "whitespace",
-            BlockComment => "block comment",
-            LineComment => "line comment",
-            LexError => "an unrecognized token",
-            Ident => "identifier",
-            Equals => "‘=’",
-            Semicolon => "‘;’",
-            Ampersand => "‘&’",
-            Colon => "‘:’",
-            AtSign => "‘@’",
-            Comma => "‘,’",
-            String => "string literal",
-            Number => "number literal",
-            LCurly => "‘{’",
-            RCurly => "‘}’",
-            LAngle => "‘<’",
-            RAngle => "‘>’",
-            LBrack => "‘[’",
-            RBrack => "‘]’",
-            LParen => "‘(’",
-            RParen => "‘)’",
-            Slash => "‘/’",
-            Asterisk => "‘*’",
-            Plus => "‘+’",
-            Minus => "‘-’",
+            TokenKind::Whitespace => "whitespace",
+            TokenKind::BlockComment => "block comment",
+            TokenKind::LineComment => "line comment",
+            TokenKind::Comma => "‘,’",
+            TokenKind::UndefDirective => "‘#undef‘ preprocessor directive",
+            TokenKind::PragmaDirective => "‘#pragma‘ preprocessor directive",
+            TokenKind::ElseDirective => "‘#else‘ preprocessor directive",
+            TokenKind::EndifDirective => "‘#endif‘ preprocessor directive",
+            TokenKind::IfndefDirective => "‘#ifndef‘ preprocessor directive",
+            TokenKind::IfdefDirective => "‘#ifdef‘ preprocessor directive",
+            TokenKind::IfDirective => "‘#if‘ preprocessor directive",
+            TokenKind::DefineDirective => "‘#define‘ preprocessor directive",
+            TokenKind::IncludeDirective => "‘#include‘ preprocessor directive",
+            TokenKind::BitsDirective => "‘/bits/‘",
+            TokenKind::DtIncludeDirective => "‘/memreserve/‘",
+            TokenKind::MemreserveDirective => "‘/memreserve/‘",
+            TokenKind::DeleteNodeDirective => "‘/delete-node/‘",
+            TokenKind::DeletePropertyDirective => "‘/delete-property/‘",
+            TokenKind::V1Directive => "‘/dts-v1/‘",
+            TokenKind::PluginDirective => "‘/plugin/‘",
+            TokenKind::Unrecognized => "unrecognized token",
+            TokenKind::Ident => "identifier",
+            TokenKind::Equals => "‘=’",
+            TokenKind::Semicolon => "‘;’",
+            TokenKind::Ampersand => "‘&’",
+            TokenKind::Colon => "‘:’",
+            TokenKind::AtSign => "‘@’",
+            TokenKind::String => "string literal",
+            TokenKind::Char => "character literal",
+            TokenKind::Number => "number literal",
+            TokenKind::DtBytestring => "bytestring literal",
+            TokenKind::LCurly => "‘{’",
+            TokenKind::RCurly => "‘}’",
+            TokenKind::LAngle => "‘<’",
+            TokenKind::RAngle => "‘>’",
+            TokenKind::LParen => "‘(’",
+            TokenKind::RParen => "‘)’",
+            TokenKind::Slash => "‘/’",
+            TokenKind::Asterisk => "‘*’",
+            TokenKind::Plus => "‘+’",
+            TokenKind::Minus => "‘-’",
+            TokenKind::Modulo => "‘%’",
+            TokenKind::BitwiseOr => "‘|’",
         })
     }
 }
@@ -231,6 +349,36 @@ fn lex_block_comment(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> 
     Err(LexError::UnexpectedEofBlockComment)
 }
 
+fn lex_preprocessor_directive(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
+    let remainder: &str = lex.remainder();
+
+    if remainder.as_bytes().first() == Some(&b'\\') {
+        let mut escaped = false;
+        let mut total_len = 0;
+
+        for c in remainder.chars() {
+            total_len += c.len_utf8();
+
+            if c == '\\' {
+                escaped = !escaped;
+                continue;
+            }
+
+            if c == '\n' && !escaped {
+                lex.bump(remainder[0..total_len].as_bytes().len());
+                return Ok(());
+            }
+
+            escaped = false;
+        }
+        eprintln!("lex: {lex:#?}");
+        lex.bump(remainder[0..total_len].as_bytes().len());
+    }
+
+    // Otherwise either newline or end-of-file
+    Ok(())
+}
+
 fn lex_string(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
     let remainder: &str = lex.remainder();
     let mut escaped = false;
@@ -255,9 +403,51 @@ fn lex_string(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
     Err(LexError::UnexpectedEofString)
 }
 
+fn lex_bytestring(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
+    let remainder: &str = lex.remainder();
+    let mut total_len = 0;
+
+    // TODO: benchmark as_bytes vs chars
+    for c in remainder.chars() {
+        total_len += c.len_utf8();
+
+        if c == ']' {
+            lex.bump(remainder[0..total_len].as_bytes().len());
+            return Ok(());
+        }
+    }
+    lex.bump(remainder[0..total_len].as_bytes().len());
+    Err(LexError::UnexpectedEofBytestring)
+}
+
+fn lex_char(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
+    let remainder: &str = lex.remainder();
+    let mut escaped = false;
+    let mut total_len = 0;
+
+    for c in remainder.chars() {
+        total_len += c.len_utf8();
+
+        if c == '\\' {
+            escaped = !escaped;
+            continue;
+        }
+
+        if c == '\'' && !escaped {
+            lex.bump(remainder[0..total_len].as_bytes().len());
+            return Ok(());
+        }
+
+        escaped = false;
+    }
+    lex.bump(remainder[0..total_len].as_bytes().len());
+    Err(LexError::UnexpectedEofChar)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     fn check(input: &str, kind: TokenKind) {
         let lexer = Lexer::new(input);
@@ -288,15 +478,37 @@ mod tests {
     }
 
     #[test]
-    fn lex_number_literals() {
-        check("123", TokenKind::Number);
-        check("0xdeadbeef", TokenKind::Number);
+    fn lex_semicolon() {
+        check(";", TokenKind::Semicolon);
     }
 
     #[test]
-    fn lex_number_and_comma() {
-        // This syntax is rejected in cells in dtc, but not as prop names
-        check("123,", TokenKind::Ident);
+    fn lex_preprocessor_directive() {
+        check("#define FOO BAR", TokenKind::DefineDirective);
+        check("#define FOO 123", TokenKind::DefineDirective);
+        check("#define FOO \"bar\"", TokenKind::DefineDirective);
+        check("#define FOO <123>", TokenKind::DefineDirective);
+        check("#include \"a.dtsi\"", TokenKind::IncludeDirective);
+        check("#        define CONFIG_FOO", TokenKind::DefineDirective);
+        check("#ifdef FOO", TokenKind::IfdefDirective);
+        check("#else", TokenKind::ElseDirective);
+    }
+
+    #[test]
+    fn lex_number_literals() {
+        check("123", TokenKind::Number);
+        check("1_000_000", TokenKind::Number);
+        check("0xdeadbeef", TokenKind::Number);
+        check("0x07", TokenKind::Number);
+        check("0o777", TokenKind::Number);
+        check("0b00101010", TokenKind::Number);
+
+        // TODO: is this syntax in DTC? used out in the wild? in the spec?
+        //check("123U", TokenKind::Number);
+        //check("123L", TokenKind::Number);
+        //check("123UL", TokenKind::Number);
+        //check("123LL", TokenKind::Number);
+        //check("123ULL", TokenKind::Number);
     }
 
     #[test]
@@ -313,6 +525,17 @@ mod tests {
         let mut lexer = TokenKind::lexer(r#""abc\";"#);
         assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEofString)));
         assert_eq!(lexer.slice(), r#""abc\";"#);
+    }
+
+    #[test]
+    fn lex_bytestring_literals() {
+        check("[0123456789abcdef]", TokenKind::DtBytestring);
+        check("[  01 23 45 6789 a b ]", TokenKind::DtBytestring);
+
+        // Unterminated string
+        let mut lexer = TokenKind::lexer("[1234");
+        assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEofBytestring)));
+        assert_eq!(lexer.slice(), "[1234");
     }
 
     fn test_expected(src: &str, expected: &str) {
@@ -343,19 +566,47 @@ mod tests {
     #[test]
     fn lex_identifiers() {
         check("/", TokenKind::Slash);
-        check("#a-cells", TokenKind::Ident); // hashtags
-        check("PREPROCESSOR", TokenKind::Ident);
+        check("#a", TokenKind::Ident); // hashtags
+        check("DEFINE_MACRO", TokenKind::Ident);
         check("åäö", TokenKind::Ident); // 2-byte letters
-        check("test1234", TokenKind::Ident); // digits in an identifier
-        check("a-b", TokenKind::Ident); // has minus
-        check("-a", TokenKind::Ident); // has minus
-        check("a-", TokenKind::Ident); // has minus
-        check("123test", TokenKind::Ident); // begins with digits
     }
 
     #[test]
-    fn lex_minus() {
-        check("-", TokenKind::Minus);
+    fn lex_minus_identifiers() {
+        let mut lexer = TokenKind::lexer("#a-cells");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
+        assert_eq!(lexer.slice(), "#a");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Minus)));
+        assert_eq!(lexer.slice(), "-");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
+        assert_eq!(lexer.slice(), "cells");
+
+        let mut lexer = TokenKind::lexer("-a");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Minus)));
+        assert_eq!(lexer.slice(), "-");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
+        assert_eq!(lexer.slice(), "a");
+
+        let mut lexer = TokenKind::lexer("a-");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
+        assert_eq!(lexer.slice(), "a");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Minus)));
+        assert_eq!(lexer.slice(), "-");
+    }
+
+    #[test]
+    fn lex_number_identifiers() {
+        let mut lexer = TokenKind::lexer("123abc");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Number)));
+        assert_eq!(lexer.slice(), "123");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
+        assert_eq!(lexer.slice(), "abc");
+
+        let mut lexer = TokenKind::lexer("abc123");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
+        assert_eq!(lexer.slice(), "abc");
+        assert_eq!(lexer.next(), Some(Ok(TokenKind::Number)));
+        assert_eq!(lexer.slice(), "123");
     }
 
     #[test]

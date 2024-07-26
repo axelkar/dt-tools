@@ -2,7 +2,11 @@
 //!
 //! Use `--assert` in argv[2] to pretty_assertions::assert_eq
 
+use dt_parser::ast::{AstNode as _, Document};
+use dt_parser::cst2::RedNode;
+use owo_colors::{colors::xterm::Gray, OwoColorize as _};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Instant;
 
 fn remove_first<T>(vec: &mut Vec<T>) -> Option<T> {
@@ -71,31 +75,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let assert = std::env::args().nth(2) == Some("--assert".to_owned());
 
+    let total_own_start = Instant::now();
     let text = std::fs::read_to_string(&path)?;
     let start = Instant::now();
-    let Some(red) = dt_parser::parse(text.as_bytes()) else {
-        eprintln!("Invalid DTS!");
+    let parse = dt_parser::cst2::parser::parse(&text);
+    eprintln!(
+        "{}{:?}",
+        "Parsed in ".fg::<Gray>(),
+        start.elapsed().bright_green()
+    );
+
+    if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
+        eprintln!("{}", "Invalid DTS!".red());
+        if !parse.lex_errors.is_empty() {
+            eprintln!("{}: {:#?}", "Lex errors".red(), parse.errors);
+        }
+        if !parse.errors.is_empty() {
+            eprintln!("{}: {:#?}", "Parse errors".red(), parse.errors);
+        }
+        eprintln!("{}", "CST tree:".fg::<Gray>());
+        eprintln!("{}", parse.green_node.print_tree());
         std::process::exit(1);
     };
-    println!("Parsed in {:?}", start.elapsed());
+
+    let cst = RedNode::new(Arc::new(parse.green_node));
+    let doc = Document::cast(cst).unwrap();
 
     let start = Instant::now();
-    let Some(def) = dt_analyzer::analyze_cst(red, &text) else {
+    let Some(def) = dt_analyzer::analyze_cst(&doc, &text) else {
         eprintln!("analyze_cst returned None");
         std::process::exit(1);
     };
-    println!("Analyzed CST in {:?}", start.elapsed());
+    eprintln!(
+        "{}{:?}",
+        "Analyzed CST in ".fg::<Gray>(),
+        start.elapsed().bright_green()
+    );
 
     let start = Instant::now();
     let own_json = def.tree.into_json();
-    println!("Turned own into JSON in {:?}", start.elapsed());
+    eprintln!(
+        "{}{:?}",
+        "Turned own into JSON in ".fg::<Gray>(),
+        start.elapsed().bright_green()
+    );
     if !assert {
         eprintln!(
             "Analyzer JSON output: {}",
             serde_json::to_string(&own_json).unwrap()
         );
     }
+    eprintln!(
+        "{}{:?}",
+        "Total own time: ".fg::<Gray>(),
+        total_own_start.elapsed().bright_green()
+    );
 
+    let total_dtc_start = Instant::now();
     let start = Instant::now();
     let dtc_out = Command::new("dtc")
         .args([&path, "-O", "yaml"])
@@ -105,11 +141,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("DTC errored: {}", dtc_out.status);
         std::process::exit(1);
     }
-    println!("Ran DTC in {:?}", start.elapsed());
+    eprintln!(
+        "{}{:?}",
+        "Ran DTC in ".fg::<Gray>(),
+        start.elapsed().bright_green()
+    );
 
     let start = Instant::now();
     let mut dtc_json = yaml_to_json(serde_yaml::from_slice(&dtc_out.stdout).unwrap());
-    println!("Turned DTC output into JSON in {:?}", start.elapsed());
+    eprintln!(
+        "{}{:?}",
+        "Turned DTC output into JSON in ".fg::<Gray>(),
+        start.elapsed().bright_green()
+    );
+
     let Some(dtc_json) = dtc_json.as_array_mut().and_then(remove_first) else {
         eprintln!("Invalid DTC output");
         std::process::exit(1);
@@ -120,5 +165,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         pretty_assertions::assert_eq!(own_json, dtc_json);
     }
+    eprintln!(
+        "{}{:?}",
+        "Total DTC time: ".fg::<Gray>(),
+        total_dtc_start.elapsed().bright_green()
+    );
     Ok(())
 }

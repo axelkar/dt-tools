@@ -9,6 +9,7 @@ pub(crate) enum Event {
         forward_parent: Option<usize>,
     },
     AddToken,
+    AddTokenNoTrivia,
     FinishNode,
     Placeholder,
     Error(ParseError),

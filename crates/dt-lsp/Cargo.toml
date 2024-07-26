@@ -11,8 +11,8 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-compact_str = "0.7.1"
-dashmap = "5.5.3"
+compact_str = "0.8.0"
+dashmap = "6.0.1"
 ropey = "1.6.1"
 smallstr = "0.3.0"
 smallvec = "1.13.1"
@@ -22,4 +22,7 @@ winnow = "0.6.2"
 dt-parser.workspace = true
 dt-analyzer.workspace = true
 dt-lint.workspace = true
-itertools = "0.12.1"
+itertools = "0.13.0"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+rayon = "1.10.0"

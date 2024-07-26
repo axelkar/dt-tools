@@ -17,6 +17,7 @@ impl Marker {
         }
     }
 
+    /// Completes the marker.
     pub fn complete(mut self, p: &mut Parser, kind: NodeKind) -> CompletedMarker {
         self.bomb.defuse();
 
@@ -27,6 +28,9 @@ impl Marker {
             kind,
             forward_parent: None,
         };
+
+        #[cfg(feature = "grammar-tracing")]
+        tracing::debug!(pos = p.events.len(), "end node");
 
         p.events.push(Event::FinishNode);
 
@@ -39,6 +43,7 @@ pub struct CompletedMarker {
 }
 
 impl CompletedMarker {
+    /// Wraps the completed marker within a new marker.
     pub fn precede(self, p: &mut Parser) -> Marker {
         let new_m = p.start();
 

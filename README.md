@@ -7,6 +7,46 @@
 * [IDE integration](#lsp)
 * Linting
 * Devicetree binding validation
+* NOTE: only some basic preprocessor features are supported:
+  * `#define`s can't take parameters and their expansion can only go in place
+    of names, numbers, strings and cells
+
+    TODO: add parametric macros
+
+    e.g.
+    ```dts
+    // not allowed:
+    #define MY_MACRO(a) a + 42
+
+    #define SPECIAL_SYNTAX ) + (
+    / {
+      prop = (1 SPECIAL_SYNTAX 2);
+    };
+
+    // allowed:
+    #define MAGIC_NUMBER 42
+    #define MY_NODE_NAME foo
+    #define MY_PROP_NAME bar
+    #define MY_STRING "baz"
+    #define MY_CELL <123 MAGIC_NUMBER>
+
+    / {
+      MY_NODE_NAME {
+        MY_PROP_NAME = MY_CELL, MY_STRING;
+      };
+    };
+    ```
+  * `#include` can only be used outside of nodes
+    So you can't do this:
+    ```dts
+    / {
+    # include "my-file.dtsi"
+    };
+    ```
+  * `#ifdef`, `#ifndef`, `#if`, `#else` and `#elif`
+    * Can only be wrap nodes, properties and other preprocessor directives
+    * They can't be used on property values and
+    * `#if`, `#else` and `#elif` can only check for equality or ordering
 * Possibly in the future:
   * Comparing DTS or DTB files
   * Comparing Android `dt` and `dtbo` partitions with `/sys/firmware/fdt`
@@ -29,6 +69,7 @@
 
 * `crates/dt-binding-matcher` could use a little help from the contributors of [dt-schema](https://github.com/devicetree-org/dt-schema)
 * DTS generator
+* Highlight address and size portions of `reg` property
 * Code to gobble up directories of devicetree bindings. Currently hardcoded to search from
   `/home/axel/dev/mainlining/linux/Documentation/devicetree/bindings` and
   `crates/dt-binding-matcher/dt-schema/dtschema`
@@ -39,6 +80,9 @@
 * Take care of code containing `TODO`, `FIXME`, `todo!`, `unimplemented!` or similar
 * Add `/bits/` (used in Linux kernel tree) <http://web.mit.edu/freebsd/head/contrib/dtc/Documentation/dts-format.txt>
 * Make parser faster!! One fairly large example with 2738 lines took 2ms to read file + 16ms to parse + 3ms to analyze compared to 8ms with a subprocess running `dtc -O yaml`
+* Use arena for allocating the tree(?)
+  * <https://www.cs.cornell.edu/~asampson/blog/flattening.html>
+  * <https://github.com/saschagrunert/indextree>
 * Use SmallVec for GreenItem children
 * Return ast::document from dt_parser::parse
 * A good and correct way to to get YAML file offsets from JSON Schema

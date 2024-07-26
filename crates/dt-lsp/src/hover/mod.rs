@@ -1,6 +1,7 @@
 use crate::{offset_to_position, position_to_offset};
 use dt_parser::{
-    ast::{self, AstNode, HasIdent},
+    ast::{self, AstNode},
+    cst2::{lexer::TokenKind, NodeKind},
     match_ast, SourceId,
 };
 use itertools::Itertools;
@@ -24,40 +25,42 @@ use tower_lsp::lsp_types::*;
 // {doc}
 // {fi}
 
-fn node_definition(node: &ast::DtNode, src: &str) -> Option<String> {
+fn node_definition(node: &ast::DtNode, src: &str) -> String {
     let path = node.path(src).join("/");
 
     // TODO: get documentation by `compatible`
-    Some(format!("node `/{path}`"))
+    format!("node `/{path}`")
 }
 
 pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
     let params = params.text_document_position_params;
     let uri = params.text_document.uri.to_string();
+    tracing::info!(?uri);
     let source_id = SourceId::from(uri.to_string());
-    let document = state.document_map.get(&source_id)?;
+    let document = state.state.document_map.get(&source_id)?;
 
-    let cst = document.cst.clone()?;
+    let cst = document.doc.clone()?.syntax();
     let offset = position_to_offset(params.position, &document.text)?;
 
     // TODO: try prev offset?
     // TODO: Check for nodes above e.g. quit the search directly on an error node
     let token = cst.token_at_offset(offset)?.clone();
+    tracing::debug!(kind = ?token.green.kind, "Found token");
 
     if token.green.kind.is_trivia() {
         return None;
     }
-    if token.parent.green.kind.is_error() {
+    if token.parent.green.kind == NodeKind::ParseError {
         state
             .client
             .show_message(MessageType::ERROR, "parent node is error")
             .await;
         return None;
     }
-    if token.green.kind.is_error() {
+    if token.green.kind == TokenKind::Unrecognized {
         state
             .client
-            .show_message(MessageType::ERROR, "token is error")
+            .show_message(MessageType::ERROR, "token is unrecognized")
             .await;
         return None;
     }
@@ -69,44 +72,41 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
     // definition
     {
         let parent = token.parent.clone();
+        tracing::debug!("analyzed, direct parent #1 kind = {:?}", parent.green.kind);
 
-        if let Some(ident) = ast::Ident::cast(parent) {
-            let parent = ident.syntax().parent.clone()?;
+        if let Some(name) = ast::Name::cast(parent) {
+            let parent = name.syntax().parent.clone()?;
             match_ast! {
                 match parent {
                     ast::DtProperty(_it) => {
                         // call doc and sema db
                         Some(("property".to_owned(), None))
                     },
-                    ast::DtNode(node) => {
-                        if node.is_extension() {
-                            let label_name = node.ident()?.text(&src)?;
-                            let Some(label_defs) = analyzed.labels.get(label_name) else {
-                                state.client.show_message(MessageType::WARNING, "Unknown label").await;
-                                return None
-                            };
-                            let label = label_defs.last()?; // TODO: show all label defs
-                            Some((format!("{}\n---\nlabel `{label_name}`", node_definition(&label.node_ast, &src)?), None))
-                        } else {
-                            // call doc and sema db
-                            Some(("node".into(), None))
-                        }
+                    ast::DtNode(_node) => {
+                        // call doc and sema db
+                        Some(("node".into(), None))
                     },
                     ast::DtLabel(_it) => {
                         Some(("label".into(), None))
                     },
                     ast::DtPhandle(phandle) => {
+                        tracing::debug!("Is phandle");
+
+                        // TODO: Something like Either<&RedNode, Arc<RedNode>> so I don't have to
+                        // clone here
+
+                        let node = phandle.syntax().parent.as_ref().unwrap().clone();
+                        if let Some(_node) = ast::DtNode::cast(node) {}
+
                         if phandle.is_path() {
-                            let _path = token.text(&src);
+                            let _path = token.text();
                             None // TODO
                         } else {
-                            let label_name = token.text(&src)?;
-                            let Some(label_defs) = analyzed.labels.get(label_name) else {
-                                state.client.show_message(MessageType::WARNING, "Unknown label").await;
-                                return None
-                            };
+                            let label_name = token.text();
+                            // TODO: to_string is a HACK
+                            let label_defs = analyzed.exported_labels.get(&label_name.to_string())?;
                             let label = label_defs.last()?; // TODO: show all label defs
-                            Some((format!("{}\n---\nlabel `{label_name}`", node_definition(&label.node_ast, &src)?), None))
+                            Some((format!("{}\n---\nlabel `{label_name}`", node_definition(&label.node_ast, &src)), None))
                         }
                     },
                     _ => None

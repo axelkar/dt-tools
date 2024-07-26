@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Copyright (c) 2024, Axel Karjalainen <axel@axka.fi>
+ */
+
+/dts-v1/;
+
+/ {
+	model = "OnePlus Nord CE 5G";
+	compatible = "qcom,lagoon", "qcom,sm7225";
+	chassis-type = "handset";
+
+	/* Required for bootloader to select correct board */
+	// TODO(axka): qcom,msm-id, qcom,board-id
+	// TODO: use values from dt-bindings/arm/qcom,ids.h
+	qcom,msm-id = <434 0x10000>, <459 0x10000>;
+	qcom,board-id = <8 0>;
+
+	// TODO: extra reserved memory?
+
+	chosen {
+		// TODO(axka): #{address,size}-cells and ranges from fp4?
+		framebuffer0: framebuffer@a000000 {
+			compatible = "simple-framebuffer";
+			reg = <0 0xa0000000 0 (2400 * 1080 * 4)>; // lagoon.dtsi says end is 0x2300000, xbl reserved says 0x2400000
+			// reserved_memory.cont_splash_memory is to 0x2300000
+			width = <1080>;
+			height = <2400>;
+			stride = <(1080 * 4)>;
+			format = "a8r8g8b8";
+		};
+	};
+};

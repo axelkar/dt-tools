@@ -33,6 +33,7 @@ impl<'t, 'input> Sink<'t, 'input> {
             stack: Vec::new(),
             current_node: GreenNode {
                 kind: NodeKind::Document,
+                width: 0,
                 children: Vec::new(),
             },
             errors: Vec::new(),
@@ -45,11 +46,16 @@ impl<'t, 'input> Sink<'t, 'input> {
             self.eat_trivia();
         }
         for idx in 0..self.events.len() {
+            #[cfg(feature = "grammar-tracing")]
+            let _span = tracing::span!(tracing::Level::TRACE, "loop", pos = idx).entered();
+
             match std::mem::replace(&mut self.events[idx], Event::Placeholder) {
                 Event::StartNode {
                     kind,
                     forward_parent,
                 } => {
+                    #[cfg(feature = "grammar-tracing")]
+                    tracing::debug!(?kind, "start node");
                     let mut kinds = vec![kind];
 
                     let mut idx = idx;
@@ -77,12 +83,28 @@ impl<'t, 'input> Sink<'t, 'input> {
                     for kind in kinds.into_iter().rev() {
                         self.start_node(kind);
                     }
+
+                    // TODO: remove this:
+                    // Somehow breaks dt-binding-matcher
+                    // TODO: manually AddTokenNoTrivia for all trivia tokens before Name?
+                    // see n_attached_trivias in rust-analyzer/crates/parser/src/shortcuts.rs
+                    self.eat_trivia();
                 }
-                Event::AddToken => self.token(),
+                Event::AddToken => {
+                    self.eat_trivia();
+                    self.token()
+                }
+                // TODO: make this better?
+                // https://nnethercote.github.io/2022/10/05/quirks-of-rusts-token-representation.html ?
+                Event::AddTokenNoTrivia => self.token(),
                 Event::FinishNode => {
+                    #[cfg(feature = "grammar-tracing")]
+                    tracing::debug!(kind = ?self.current_node.kind, "finish node");
                     let next_current_node = self.stack.pop().unwrap();
                     let old_current_node =
                         std::mem::replace(&mut self.current_node, next_current_node);
+
+                    self.current_node.width += old_current_node.width;
                     self.current_node
                         .children
                         .push(GreenItem::Node(Arc::new(old_current_node)));
@@ -90,8 +112,6 @@ impl<'t, 'input> Sink<'t, 'input> {
                 Event::Placeholder => {}
                 Event::Error(error) => self.errors.push(error),
             }
-
-            self.eat_trivia();
         }
 
         Parse {
@@ -104,6 +124,7 @@ impl<'t, 'input> Sink<'t, 'input> {
     fn start_node(&mut self, kind: NodeKind) {
         let new_current_node = GreenNode {
             kind,
+            width: 0,
             children: Vec::new(),
         };
         self.stack
@@ -126,9 +147,13 @@ impl<'t, 'input> Sink<'t, 'input> {
                     text,
                 });
 
-                TokenKind::LexError
+                TokenKind::Unrecognized
             }
         };
+        #[cfg(feature = "grammar-tracing")]
+        tracing::debug!(cursor = self.cursor, ?kind, "add token");
+
+        self.current_node.width += text.len();
 
         self.current_node
             .children
