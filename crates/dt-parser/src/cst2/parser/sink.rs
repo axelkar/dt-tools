@@ -42,9 +42,6 @@ impl<'t, 'input> Sink<'t, 'input> {
     }
 
     pub(super) fn finish(mut self) -> Parse<'input> {
-        if self.events.is_empty() {
-            self.eat_trivia();
-        }
         for idx in 0..self.events.len() {
             #[cfg(feature = "grammar-tracing")]
             let _span = tracing::span!(tracing::Level::TRACE, "loop", pos = idx).entered();
@@ -113,6 +110,9 @@ impl<'t, 'input> Sink<'t, 'input> {
                 Event::Error(error) => self.errors.push(error),
             }
         }
+
+        // Eat trailing trivia
+        self.eat_trivia();
 
         Parse {
             green_node: self.current_node,

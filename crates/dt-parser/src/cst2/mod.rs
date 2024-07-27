@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use self::lexer::TokenKind;
-use crate::{cst::TreeItem, TextRange};
+use crate::TextRange;
 
 pub mod grammar;
 pub mod lexer;
@@ -155,20 +155,6 @@ impl GreenToken {
     }
 }
 
-pub type GreenItem = TreeItem<Arc<GreenNode>, Arc<GreenToken>>;
-pub type RedItem = TreeItem<Arc<RedNode>, Arc<RedToken>>;
-
-impl GreenItem {
-    /// Returns the length of the textual contents.
-    #[inline]
-    pub fn length(&self) -> usize {
-        match self {
-            GreenItem::Node(node) => node.width,
-            GreenItem::Token(token) => token.length(),
-        }
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct RedToken {
     pub parent: Arc<RedNode>,
@@ -304,5 +290,78 @@ impl RedNode {
     /// Iterator over all the ancestors of this node excluding itself.
     pub fn parent_ancestors(&self) -> impl Iterator<Item = Arc<RedNode>> {
         std::iter::successors(self.parent.clone(), |node| node.parent.clone())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TreeItem<Node, Token> {
+    Node(Node),
+    Token(Token),
+}
+impl<Node, Token> TreeItem<Node, Token> {
+    pub fn as_node(&self) -> Option<&Node> {
+        match self {
+            Self::Node(node) => Some(node),
+            _ => None,
+        }
+    }
+    pub fn as_token(&self) -> Option<&Token> {
+        match self {
+            Self::Token(token) => Some(token),
+            _ => None,
+        }
+    }
+    pub fn into_node(self) -> Option<Node> {
+        match self {
+            Self::Node(node) => Some(node),
+            _ => None,
+        }
+    }
+    pub fn into_token(self) -> Option<Token> {
+        match self {
+            Self::Token(token) => Some(token),
+            _ => None,
+        }
+    }
+    pub fn map_node<NewNode>(self, f: impl FnOnce(Node) -> NewNode) -> TreeItem<NewNode, Token> {
+        match self {
+            Self::Node(node) => TreeItem::Node(f(node)),
+            Self::Token(token) => TreeItem::Token(token),
+        }
+    }
+    pub fn map_token<NewToken>(
+        self,
+        f: impl FnOnce(Token) -> NewToken,
+    ) -> TreeItem<Node, NewToken> {
+        match self {
+            Self::Node(node) => TreeItem::Node(node),
+            Self::Token(token) => TreeItem::Token(f(token)),
+        }
+    }
+    pub fn filter_node(self, f: impl FnOnce(&Node) -> bool) -> Option<Self> {
+        match self {
+            Self::Node(node) if !f(&node) => None,
+            other => Some(other),
+        }
+    }
+    pub fn filter_token(self, f: impl FnOnce(&Token) -> bool) -> Option<Self> {
+        match self {
+            Self::Token(token) if !f(&token) => None,
+            other => Some(other),
+        }
+    }
+}
+
+pub type GreenItem = TreeItem<Arc<GreenNode>, Arc<GreenToken>>;
+pub type RedItem = TreeItem<Arc<RedNode>, Arc<RedToken>>;
+
+impl GreenItem {
+    /// Returns the length of the textual contents.
+    #[inline]
+    pub fn length(&self) -> usize {
+        match self {
+            GreenItem::Node(node) => node.width,
+            GreenItem::Token(token) => token.length(),
+        }
     }
 }

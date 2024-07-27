@@ -570,7 +570,11 @@ pub(super) mod tests {
         let parse_output = parse(src);
         assert_eq!(parse_output.lex_errors, Vec::new());
         assert_eq!(parse_output.errors, Vec::new());
-        //assert_eq!(parse_output.green_node.children, expected_children);
+
+        assert_eq!(
+            parse_output.green_node.print_tree(),
+            include_str!("../../test_data/1.dts.expect")
+        );
     }
 
     #[test]

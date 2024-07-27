@@ -53,19 +53,27 @@ pub trait AstNode {
     fn syntax_ref(&self) -> &RedNode;
 }
 
-/// Matches a `RedNode` against an `ast` type.
+// TODO: Better to just make if-let chains? I think this breaks rust-analyzer
+/// Matches an [`Arc<RedNode>`][RedNode] against an `ast` type.
 ///
 /// # Example:
 ///
-/// ```ignore
+/// ```
+/// # use dt_parser::{match_ast, ast, cst2::RedNode};
+/// # use std::sync::Arc;
+/// let node: Arc<RedNode>;
+/// # use dt_parser::cst2::{GreenNode, NodeKind};
+/// # node = RedNode::new(Arc::new(GreenNode { kind: NodeKind::Document, width: 0, children: Vec::new() }));
+/// # let _ =
 /// match_ast! {
 ///     match node {
-///         ast::DtNode(it) => { ... },
-///         ast::DtProperty(it) => { ... },
-///         ast::Ident(it) => { ... },
-///         _ => None,
+///         ast::DtNode(it) => { .. },
+///         ast::DtProperty(it) => { .. },
+///         ast::Name(it) => { .. },
+///         _ => { .. },
 ///     }
 /// }
+/// # ;
 /// ```
 #[macro_export]
 macro_rules! match_ast {
@@ -74,6 +82,7 @@ macro_rules! match_ast {
         $( $( $path:ident )::+ ($it:pat) => $res:expr, )*
         _ => $catch_all:expr $(,)?
     }) => {{
+        use $crate::ast::AstNode;
         $( if let Some($it) = $($path::)+cast($node.clone()) { $res } else )*
         { $catch_all }
     }};
