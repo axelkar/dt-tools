@@ -80,7 +80,11 @@ fn dt_expr<const IN_MACRO: bool>(p: &mut Parser) {
 /// Parses a Devicetree phandle.
 ///
 /// - Form: `&foo` | `&{/path}`.
+#[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn dt_phandle(p: &mut Parser) {
+    #[cfg(feature = "grammar-tracing")]
+    debug!("dt_phandle start");
+
     let m = p.start();
 
     assert!(p.eat(TokenKind::Ampersand));
@@ -100,6 +104,9 @@ fn dt_phandle(p: &mut Parser) {
     }
 
     m.complete(p, NodeKind::DtPhandle);
+
+    #[cfg(feature = "grammar-tracing")]
+    debug!("dt_phandle end");
 }
 
 /// Parses a Devicetree cell list.
@@ -214,11 +221,12 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
 /// The caller is expected to handle the label, ampersand, name and unit address.
 ///
 /// - Form: `{ foo = "bar"; baz {}; };`.
+#[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn dt_node_body(p: &mut Parser, m: Marker) {
     #[cfg(feature = "grammar-tracing")]
     debug!("dt_node_body start");
 
-    let lcurly_span = p.range().unwrap();
+    let lcurly_span = p.range().expect("should not be at end-of-file");
 
     // TODO: convert other grammars to assert eat
     assert!(p.eat(TokenKind::LCurly));
@@ -228,6 +236,7 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     }
 
     if p.at_end() {
+        // TODO: this produces 2 errors?
         p.expect(TokenKind::RCurly);
         p.fancy_error(
             Cow::Borrowed("Expected `}`, but found end-of-file"),
@@ -251,6 +260,7 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
 }
 
 /// TODO: mod_contents: while !(p.at(EOF) || (p.at(T!['}']) && stop_on_r_curly)) {
+#[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn item(p: &mut Parser) {
     #[cfg(feature = "grammar-tracing")]
     debug!("item start");
@@ -305,6 +315,8 @@ fn item(p: &mut Parser) {
         if p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon) {
             dt_property(p, m);
         } else if p.silent_at(TokenKind::RCurly) {
+            // TODO: what if inside a node?
+
             p.emit_expect_error();
             p.bump();
             m.complete(p, NodeKind::ParseError);
@@ -313,7 +325,7 @@ fn item(p: &mut Parser) {
         } else {
             p.emit_expect_error();
 
-            if !p.silent_at_set(ITEM_RECOVERY_SET) {
+            if !p.silent_at_set(ITEM_RECOVERY_SET) && !p.at_end() {
                 p.bump();
             }
 
@@ -333,9 +345,11 @@ fn item(p: &mut Parser) {
 
         if p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon) {
             dt_property(p, m);
-        } else {
-            // FIXME: require LCurly
+        } else if p.at(TokenKind::LCurly) {
             dt_node_body(p, m);
+        } else {
+            p.emit_expect_error();
+            m.complete(p, NodeKind::ParseError);
         }
     } else if p.silent_at(TokenKind::Equals) {
         p.emit_expect_error();
