@@ -12,3 +12,5 @@ license.workspace = true
 
 [dependencies]
 dt-parser.workspace = true
+itertools = "0.13.0"
+tracing = "0.1.40"

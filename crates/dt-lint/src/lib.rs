@@ -10,19 +10,16 @@ use dt_parser::{
 };
 use std::borrow::Cow;
 
-//mod dtc_style;
-//mod kernel_coding_style;
-
-// TODO: delete
-//mod syntax_error;
+mod dtc_style;
+mod kernel_coding_style;
 
 pub mod lints {
     //! The full collection of lints upstream.
     //!
     //! Currently all lints in here are applied by the [default_lint](crate::default_lint) function
     //! used by the LSP.
-    //pub use crate::dtc_style::DtcStyle;
-    //pub use crate::kernel_coding_style::KernelCodingStyle;
+    pub use crate::dtc_style::DtcStyle;
+    pub use crate::kernel_coding_style::KernelCodingStyle;
 }
 
 // TODO: something like this:
@@ -51,14 +48,12 @@ impl From<TextRange> for MultiSpan {
 pub enum LintId {
     DtcStyle,
     KernelCodingStyle,
-    SyntaxError,
 }
 impl std::fmt::Display for LintId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::DtcStyle => "dtc_style",
             Self::KernelCodingStyle => "kernel_coding_style",
-            Self::SyntaxError => "syntax_error",
         })
     }
 }
@@ -90,7 +85,7 @@ impl EarlyContext<'_> {
         severity: LintSeverity,
         span: impl Into<MultiSpan>,
     ) {
-        eprintln!("adding lint {}, {:?}", msg.clone().into(), severity);
+        tracing::debug!("adding lint {}, {:?}", msg.clone().into(), severity);
         self.lints.push(EarlyLint {
             id,
             span: span.into(),
@@ -99,16 +94,16 @@ impl EarlyContext<'_> {
         });
     }
     pub fn add_lint(&mut self, lint: EarlyLint) {
-        eprintln!("adding lint {lint:?}");
+        tracing::debug!("adding lint {lint:?}");
         self.lints.push(lint);
     }
 }
 
 /// The early lint pass before type information is acquired. This runs on [AST](ast)s.
 pub trait EarlyLintPass {
-    /// Lint a document's [AST](ast::Document)
-    fn check_document(&mut self, cx: &mut EarlyContext<'_>, doc: &ast::Document) {
-        for node in doc.nodes() {
+    /// Lint a source file's [AST](ast::SourceFile)
+    fn check_document(&mut self, cx: &mut EarlyContext<'_>, file: &ast::SourceFile) {
+        for node in file.nodes() {
             self.check_node(cx, &node)
         }
     }
@@ -134,15 +129,14 @@ pub trait EarlyLintPass {
     fn check_label(&mut self, _cx: &mut EarlyContext, _label: &ast::DtLabel) {}
 }
 
-pub fn default_lint(_doc: &ast::Document, src: &str) -> Vec<EarlyLint> {
-    let cx = EarlyContext {
+pub fn default_lint(file: &ast::SourceFile, src: &str) -> Vec<EarlyLint> {
+    let mut cx = EarlyContext {
         lints: Vec::new(),
         src,
     };
-    // TODO: go over the tree just once
-    //crate::lints::KernelCodingStyle.check_document(&mut cx, doc);
-    //crate::lints::DtcStyle.check_document(&mut cx, doc);
-    // TODO: warn for `&LABEL,` (ident eats the comma), although... it shouldn't be possible when
-    // not in a dt cell e.g. `a = &LABEL, "foo";`
+    // TODO: go over the tree only once
+    crate::lints::KernelCodingStyle.check_document(&mut cx, file);
+    crate::lints::DtcStyle.check_document(&mut cx, file);
+    // TODO: warn for `&LABEL,` (ident eats the comma) in a devicetree cell
     cx.lints
 }

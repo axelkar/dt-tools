@@ -1,4 +1,8 @@
-use dt_parser::ast::{self, AstNode, HasIdent, HasLabel as _};
+use dt_parser::{
+    ast::{self, AstNode, AstNodeOrToken, HasLabel as _},
+    cst2::{lexer::TokenKind, NodeKind},
+};
+use itertools::Itertools as _;
 
 use crate::{EarlyLintPass, LintId, LintSeverity};
 
@@ -16,29 +20,25 @@ pub struct DtcStyle;
 // TODO: validate idents
 
 impl EarlyLintPass for DtcStyle {
-    fn check_document(&mut self, cx: &mut crate::EarlyContext<'_>, doc: &ast::Document) {
-        // TODO: use ast::Item instead?
-        let first = doc
-            .syntax()
-            .children()
-            .find_map(|item| item.filter_token(|token| !token.green.kind.is_trivia()));
-        if let Some(first) = first {
-            let directive = first
-                .clone()
-                .into_node()
-                .and_then(ast::Directive::cast)
-                .and_then(|dir| dir.ident()?.text(cx.src));
-            if directive != Some("dts-v1") {
+    fn check_document(&mut self, cx: &mut crate::EarlyContext<'_>, file: &ast::SourceFile) {
+        if let Some(first) = file.items().next() {
+            let is_v1_directive = first.clone().into_directive().ok().map_or(false, |dir| {
+                dir.syntax()
+                    .child_tokens()
+                    .any(|tok| tok.green.kind == TokenKind::V1Directive)
+            });
+
+            if !is_v1_directive {
                 cx.add_lint_from_cst(
                     LintId::DtcStyle,
                     "First item must be `/dts-v1/;` directive",
                     LintSeverity::Error,
-                    first.text_range(),
+                    first.syntax().text_range(),
                 );
             }
         }
 
-        for node in doc.nodes() {
+        for node in file.nodes() {
             self.check_node(cx, &node)
         }
     }
@@ -46,14 +46,17 @@ impl EarlyLintPass for DtcStyle {
         if let Some(label) = node.label() {
             self.check_label(cx, &label);
         }
+
         let mut last_prop = None;
         for property in node.properties() {
             self.check_property(cx, &property);
             last_prop = Some(property);
         }
+
         for node in node.subnodes() {
             self.check_node(cx, &node)
         }
+
         if let Some(last_prop) = last_prop {
             if let Some(first_node) = node.subnodes().next() {
                 if last_prop.syntax().text_range().end > first_node.syntax().text_range().start {
@@ -61,10 +64,29 @@ impl EarlyLintPass for DtcStyle {
                         LintId::DtcStyle,
                         "Properties must not be defined after nodes",
                         LintSeverity::Error,
-                        *last_prop.syntax().text_range(),
+                        last_prop.syntax().text_range(),
                     );
                 }
             }
+        }
+    }
+    fn check_property(&mut self, cx: &mut crate::EarlyContext<'_>, property: &ast::DtProperty) {
+        // TODO: This should really be in validations or in the grammar..
+        if let Some(unit_address) = property
+            .syntax()
+            .child_nodes()
+            .find(|node| node.green.kind == NodeKind::UnitAddress)
+        {
+            cx.add_lint_from_cst(
+                LintId::DtcStyle,
+                "Properties must not have unit addresses",
+                LintSeverity::Error,
+                unit_address.text_range(),
+            );
+        }
+
+        if let Some(label) = property.label() {
+            self.check_label(cx, &label);
         }
     }
 }

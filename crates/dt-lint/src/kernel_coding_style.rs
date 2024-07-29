@@ -1,7 +1,4 @@
-use dt_parser::{
-    ast::{self, AstNode, HasIdent, HasLabel as _},
-    cst::TreeItem,
-};
+use dt_parser::ast::{self, AstNode, HasLabel as _, HasName};
 
 use crate::{EarlyLintPass, LintId, LintSeverity};
 
@@ -30,15 +27,15 @@ fn valid_label_name(s: &str) -> bool {
 
 impl EarlyLintPass for KernelCodingStyle {
     fn check_node(&mut self, cx: &mut crate::EarlyContext<'_>, node: &ast::DtNode) {
-        if let Some(ident) = node.ident() {
-            if let Some(text) = ident.text(cx.src) {
+        if let Some(name) = node.name() {
+            if let Some(text) = name.text(cx.src) {
                 if node.is_extension() {
                     if !valid_label_name(text) {
                         cx.add_lint_from_cst(
                             LintId::KernelCodingStyle,
                             format!("Label name `{text}` should match `[a-z0-9_]+`"),
                             LintSeverity::Warn,
-                            *ident.syntax().text_range(),
+                            name.syntax().text_range(),
                         );
                     }
                 } else if !valid_node_name(text) {
@@ -46,7 +43,7 @@ impl EarlyLintPass for KernelCodingStyle {
                         LintId::KernelCodingStyle,
                         format!("Node name `{text}` should match `[a-z0-9-]+`"),
                         LintSeverity::Warn,
-                        *ident.syntax().text_range(),
+                        name.syntax().text_range(),
                     );
                 }
             }
@@ -61,7 +58,7 @@ impl EarlyLintPass for KernelCodingStyle {
                             "Node unit name `{text}` should be a lowercase hex number without leading zeros"
                         ),
                         LintSeverity::Warn,
-                        *ident.syntax().text_range(),
+                        ident.syntax().text_range(),
                     );
                 }
             }
@@ -79,32 +76,32 @@ impl EarlyLintPass for KernelCodingStyle {
         }
     }
     fn check_property(&mut self, cx: &mut crate::EarlyContext<'_>, property: &ast::DtProperty) {
-        if let Some(ident) = property.ident() {
-            if let Some(text) = ident.text(cx.src) {
+        if let Some(name) = property.name() {
+            if let Some(text) = name.text(cx.src) {
                 if text != "device_type" && text != "ddr_device_type" && !valid_prop_name(text) {
                     cx.add_lint_from_cst(
                         LintId::KernelCodingStyle,
                         format!("Property name `{text}` should match `#?[a-z0-9-]+`"),
                         LintSeverity::Warn,
-                        *ident.syntax().text_range(),
+                        name.syntax().text_range(),
                     );
                 }
             }
         }
+
         for value in property.values() {
-            if let ast::PropValue::Cell(cell) = value {
-                for value in cell.values() {
-                    if let TreeItem::Token(dt_number) = value {
-                        if let Some(text) = dt_number.text(cx.src) {
-                            // Hex values in properties, e.g. "reg", shall use lowercase hex.
-                            if text.contains(|c: char| c.is_ascii_uppercase()) {
-                                cx.add_lint_from_cst(
-                                    LintId::KernelCodingStyle,
-                                    "Hex values in properties must use lowercase hex",
-                                    LintSeverity::Warn,
-                                    *dt_number.text_range(),
-                                );
-                            }
+            if let ast::PropValue::CellList(cell_list) = value {
+                for cell in cell_list.cells() {
+                    if let ast::Cell::Number(dt_number) = cell {
+                        let text = dt_number.text();
+                        // Hex values in properties, e.g. "reg", shall use lowercase hex.
+                        if text.contains(|c: char| c.is_ascii_uppercase()) {
+                            cx.add_lint_from_cst(
+                                LintId::KernelCodingStyle,
+                                "Hex values in properties must use lowercase hex",
+                                LintSeverity::Warn,
+                                dt_number.text_range(),
+                            );
                         }
                     }
                 }
@@ -115,14 +112,14 @@ impl EarlyLintPass for KernelCodingStyle {
         }
     }
     fn check_label(&mut self, cx: &mut crate::EarlyContext, label: &ast::DtLabel) {
-        if let Some(ident) = label.ident() {
+        if let Some(ident) = label.name() {
             if let Some(text) = ident.text(cx.src) {
                 if !valid_label_name(text) {
                     cx.add_lint_from_cst(
                         LintId::KernelCodingStyle,
                         format!("Label name `{text}` should match `[a-z0-9_]+`"),
                         LintSeverity::Warn,
-                        *ident.syntax().text_range(),
+                        ident.syntax().text_range(),
                     );
                 }
             }
