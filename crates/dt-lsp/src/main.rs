@@ -27,7 +27,7 @@ mod include;
 #[derive(Debug)]
 pub struct Document {
     pub text: Rope,
-    pub doc: Option<ast::Document>,
+    pub file: Option<ast::SourceFile>,
     pub analyzed: Option<FileDefinition>,
 }
 
@@ -180,7 +180,7 @@ impl Backend {
             source_id.clone(),
             Document {
                 text: rope.clone(),
-                doc: None,
+                file: None,
                 analyzed: None,
             },
         );
@@ -284,12 +284,19 @@ impl Backend {
                 });
             }
 
-            spawn_indirection(this, include_path, new_uri);
+            if !self
+                .state
+                .document_map
+                .contains_key(&SourceId::from(new_uri.to_string()))
+            {
+                spawn_indirection(this, include_path, new_uri);
+            }
         }
 
-        let doc = ast::Document::cast(cst).expect("parser should always return Document");
+        // TODO: use Parse::source_file
+        let file = ast::SourceFile::cast(cst).expect("parser should always return SourceFile");
 
-        diagnostics.extend(dt_lint::default_lint(&doc, &text).iter().flat_map(|lint| {
+        diagnostics.extend(dt_lint::default_lint(&file, &text).iter().flat_map(|lint| {
             lint.span
                 .primary_spans
                 .iter()
@@ -328,7 +335,7 @@ impl Backend {
                 }))
         }));
 
-        let analyzed = analyze_cst(&doc, &text);
+        let analyzed = analyze_cst(&file, &text);
         if analyzed.is_none() {
             // TODO: only analyze or show this message on save
             self.client
@@ -343,7 +350,7 @@ impl Backend {
             source_id.clone(),
             Document {
                 text: rope,
-                doc: Some(doc),
+                file: Some(file),
                 analyzed,
             },
         );

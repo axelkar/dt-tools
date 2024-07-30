@@ -1,6 +1,4 @@
-Use CST2 for test_data/1.dts.expect
-
-~, -, + prefixes
+~, -, + arithmetic prefixes
 Pratt parsing
 
 loop over each property and try to lookup names, but input files need to be fully parsed??
@@ -15,3 +13,7 @@ use less Arc's? Or at least don't clone them when only using from a single threa
 use the lsp-server crate instead of tower_lsp
 
 use bstr more
+
+release VSCode extension
+
+use FxHashMap

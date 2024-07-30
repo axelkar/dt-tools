@@ -9,7 +9,7 @@ pub mod parser;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
-    Document,
+    SourceFile,
     /// A parse error
     ParseError,
     Directive,
@@ -159,7 +159,7 @@ impl GreenToken {
 pub struct RedToken {
     pub parent: Arc<RedNode>,
     pub green: Arc<GreenToken>,
-    /// Offset in the document
+    /// Offset in the source file
     pub text_offset: usize,
 }
 impl std::fmt::Debug for RedToken {
@@ -202,7 +202,7 @@ pub struct RedNode {
     pub parent: Option<Arc<RedNode>>,
     /// The respective [`GreenNode`].
     pub green: Arc<GreenNode>,
-    /// Offset in the document
+    /// Offset in the source file
     pub text_offset: usize,
 }
 
@@ -246,10 +246,40 @@ impl RedNode {
     }
 
     /// Returns an iterator over all children.
-    pub fn children<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = RedItem> + 'a {
-        // TODO: Make the signature self: Arc<RedNode>
-        let arc = Arc::clone(self);
+    ///
+    /// The iterator returned owns `Arc<RedNode>`, and thus the iterator does not have a specific lifetime.
+    pub fn owned_children(self: Arc<RedNode>) -> impl Iterator<Item = RedItem> {
         let mut current_text_offset = self.text_offset;
+
+        let range = 0..self.green.children.len();
+        range.map(move |idx| match &self.green.children[idx] {
+            GreenItem::Node(node) => {
+                let text_offset = current_text_offset;
+                current_text_offset += node.width;
+
+                RedItem::Node(Arc::new(RedNode {
+                    parent: Some(Arc::clone(&self)),
+                    green: Arc::clone(node),
+                    text_offset,
+                }))
+            }
+            GreenItem::Token(token) => {
+                let text_offset = current_text_offset;
+                current_text_offset += token.text.len();
+
+                RedItem::Token(Arc::new(RedToken {
+                    parent: Arc::clone(&self),
+                    green: Arc::clone(token),
+                    text_offset,
+                }))
+            }
+        })
+    }
+
+    /// Returns an iterator over all children.
+    pub fn children<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = RedItem> + 'a {
+        let mut current_text_offset = self.text_offset;
+
         self.green
             .children
             .iter()
@@ -259,7 +289,7 @@ impl RedNode {
                     current_text_offset += node.width;
 
                     RedItem::Node(Arc::new(RedNode {
-                        parent: Some(Arc::clone(&arc)),
+                        parent: Some(Arc::clone(self)),
                         green: Arc::clone(node),
                         text_offset,
                     }))
@@ -269,7 +299,7 @@ impl RedNode {
                     current_text_offset += token.text.len();
 
                     RedItem::Token(Arc::new(RedToken {
-                        parent: Arc::clone(&arc),
+                        parent: Arc::clone(self),
                         green: Arc::clone(token),
                         text_offset,
                     }))
@@ -362,6 +392,17 @@ impl GreenItem {
         match self {
             GreenItem::Node(node) => node.width,
             GreenItem::Token(token) => token.length(),
+        }
+    }
+}
+
+impl RedItem {
+    /// Returns the text range.
+    #[inline(always)]
+    pub fn text_range(&self) -> TextRange {
+        match self {
+            RedItem::Node(node) => node.text_range(),
+            RedItem::Token(token) => token.text_range(),
         }
     }
 }

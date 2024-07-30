@@ -1,11 +1,5 @@
 //! Parses the file at argv 1 and prints the analyzed data
 
-use std::sync::Arc;
-
-use dt_parser::{
-    ast::{AstNode as _, Document},
-    cst2::RedNode,
-};
 use owo_colors::{colors::xterm::Gray, OwoColorize as _};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,6 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let parse = dt_parser::cst2::parser::parse(&text);
     eprintln!("{}", "Parsed!".green());
+
     if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
         eprintln!("{}", "Invalid DTS!".red());
         if !parse.lex_errors.is_empty() {
@@ -26,13 +21,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         eprintln!("{}", "CST tree:".fg::<Gray>());
         eprintln!("{}", parse.green_node.print_tree());
-        std::process::exit(1);
     };
 
-    let cst = RedNode::new(Arc::new(parse.green_node));
-    let doc = Document::cast(cst).unwrap();
+    let file = parse.source_file();
 
-    let Some(def) = dt_analyzer::analyze_cst(&doc, &text) else {
+    let Some(def) = dt_analyzer::analyze_cst(&file, &text) else {
         eprintln!("analyze_cst returned None");
         std::process::exit(1);
     };
@@ -42,6 +35,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (name, value) in vec {
         let name = name.join("/");
         eprintln!("{} -> {:#?}", name, value);
+    }
+
+    if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
+        std::process::exit(1);
     }
     Ok(())
 }

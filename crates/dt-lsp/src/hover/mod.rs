@@ -39,7 +39,7 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
     let source_id = SourceId::from(uri.to_string());
     let document = state.state.document_map.get(&source_id)?;
 
-    let cst = document.doc.clone()?.syntax();
+    let cst = document.file.clone()?.syntax();
     let offset = position_to_offset(params.position, &document.text)?;
 
     // TODO: try prev offset?

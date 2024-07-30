@@ -2,11 +2,9 @@
 //!
 //! Use `--assert` in argv[2] to pretty_assertions::assert_eq
 
-use dt_parser::ast::{AstNode as _, Document};
-use dt_parser::cst2::RedNode;
+use dt_parser::ast::SourceFile;
 use owo_colors::{colors::xterm::Gray, OwoColorize as _};
 use std::process::Command;
-use std::sync::Arc;
 use std::time::Instant;
 
 fn remove_first<T>(vec: &mut Vec<T>) -> Option<T> {
@@ -78,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let total_own_start = Instant::now();
     let text = std::fs::read_to_string(&path)?;
     let start = Instant::now();
-    let parse = dt_parser::cst2::parser::parse(&text);
+    let parse = SourceFile::parse(&text);
     eprintln!(
         "{}{:?}",
         "Parsed in ".fg::<Gray>(),
@@ -98,11 +96,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     };
 
-    let cst = RedNode::new(Arc::new(parse.green_node));
-    let doc = Document::cast(cst).unwrap();
+    let file = parse.source_file();
 
     let start = Instant::now();
-    let Some(def) = dt_analyzer::analyze_cst(&doc, &text) else {
+    let Some(def) = dt_analyzer::analyze_cst(&file, &text) else {
         eprintln!("analyze_cst returned None");
         std::process::exit(1);
     };

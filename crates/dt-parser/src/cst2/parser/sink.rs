@@ -32,7 +32,7 @@ impl<'t, 'input> Sink<'t, 'input> {
             cursor: 0,
             stack: Vec::new(),
             current_node: GreenNode {
-                kind: NodeKind::Document,
+                kind: NodeKind::SourceFile,
                 width: 0,
                 children: Vec::new(),
             },

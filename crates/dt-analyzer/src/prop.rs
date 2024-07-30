@@ -59,6 +59,14 @@ impl DefinitionTree {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DefinitionTreeNode {
+    // Vec1 can have multiple elements due to multiple definitions.
+    // For example, the following would result in 3 items.
+    // TODO: error and return the last one defined
+    // ```
+    // foo = <1>;
+    // foo {};
+    // foo = <2>;
+    // ```
     pub children: HashMap<String, Vec1<DefinitionTree>>,
 }
 impl DefinitionTreeNode {
@@ -159,8 +167,7 @@ pub fn analyze_node(node: ast::DtNode, src: &str) -> Option<DefinitionTreeNode> 
             Some((
                 prop.name()?.text(src)?.to_owned(),
                 DefinitionTree::Prop {
-                    value: Value::from_ast(&prop.values()?.values().collect::<Vec<_>>(), src)
-                        .ok()?,
+                    value: Value::from_ast(&prop.values().collect::<Vec<_>>(), src).ok()?,
                     ast: prop,
                 },
             ))

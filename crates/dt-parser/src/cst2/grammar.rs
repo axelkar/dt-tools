@@ -126,9 +126,12 @@ fn dt_cell_list(p: &mut Parser) {
             dt_expr::<false>(p);
         } else if p.at(TokenKind::RAngle) {
             break;
+        } else if p.silent_at_set(&[TokenKind::Semicolon, TokenKind::LCurly, TokenKind::RCurly]) {
+            p.emit_expect_error();
+            m.complete(p, NodeKind::ParseError);
+            return;
         } else {
             p.error2();
-            break;
         }
     }
     p.expect(TokenKind::RAngle);
@@ -138,11 +141,12 @@ fn dt_cell_list(p: &mut Parser) {
 
 const ITEM_RECOVERY_SET: &[TokenKind] = &[
     TokenKind::Slash,
-    // Name
+    // Name {
     TokenKind::Ident,
     TokenKind::Number,
     TokenKind::Comma,
     TokenKind::Minus,
+    // }
     TokenKind::Ampersand,
     TokenKind::Equals,
     TokenKind::LCurly,
@@ -153,7 +157,7 @@ const ITEM_RECOVERY_SET: &[TokenKind] = &[
     TokenKind::MemreserveDirective,
     TokenKind::DeleteNodeDirective,
     TokenKind::DeletePropertyDirective,
-    // ?
+    // RCurly should be conditionally here?
     TokenKind::RCurly,
 ];
 
@@ -168,22 +172,16 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
 
     assert!(p.eat(TokenKind::Equals));
 
-    const PROPERTY_VALUE_FIRST_SET: &[TokenKind] = &[
+    const PROPERTY_VALUE_RECOVERY_SET: &[TokenKind] = &[
         TokenKind::String,
         TokenKind::LAngle,
         TokenKind::DtBytestring,
-        // Should be in LAngle
-        TokenKind::Number,
-        TokenKind::Ident,
         TokenKind::Ampersand,
-        TokenKind::LParen,
     ];
 
     if p.eat(TokenKind::BitsDirective) {
         p.expect(TokenKind::Number);
     }
-
-    // TODO: a = <1 2 3> <4>; to only produce one error!
 
     let list_m = p.start();
     while !p.at(TokenKind::Semicolon) && !p.at_end() {
@@ -193,7 +191,7 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
             dt_cell_list(p);
         } else if p.at(TokenKind::Ampersand) {
             dt_phandle(p);
-        } else if p.at(TokenKind::DtBytestring) {
+        } else if p.at_set(&[TokenKind::DtBytestring, TokenKind::Ident]) {
             p.bump();
         } else {
             p.error2();
@@ -202,11 +200,9 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
 
         if p.at(TokenKind::Comma) {
             p.bump();
-        } else if p.silent_at_set(ITEM_RECOVERY_SET) {
-            break;
-        } else if p.at_set(PROPERTY_VALUE_FIRST_SET) {
+        } else if p.silent_at_set(PROPERTY_VALUE_RECOVERY_SET) {
             // Missing comma but can be recovered
-            p.simple_error("Expected comma".into());
+            p.emit_expect_error();
         } else {
             break;
         }
@@ -282,6 +278,7 @@ fn item(p: &mut Parser) {
 
         if p.at(TokenKind::Colon) {
             // label
+            // TODO: include this in the DtNode or DtProperty
             p.bump();
             m.complete(p, NodeKind::DtLabel);
             m = p.start();

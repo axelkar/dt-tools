@@ -1,13 +1,18 @@
+use std::cell::Cell;
+
 use crate::{
     cst2::lexer::{Token, TokenKind},
     TextRange,
 };
+
+const PARSER_STEP_LIMIT: u32 = 15_000_000;
 
 #[derive(Debug)]
 pub(super) struct Source<'t, 'input> {
     tokens: &'t [Token<'input>],
     prev_cursor: usize,
     cursor: usize,
+    steps: Cell<u32>,
     // for debugger:
     #[cfg(debug_assertions)]
     byte_offset: usize,
@@ -21,6 +26,7 @@ impl<'t, 'input> Source<'t, 'input> {
             tokens,
             prev_cursor: 0,
             cursor: 0,
+            steps: Cell::new(0),
             #[cfg(debug_assertions)]
             byte_offset: 0,
             #[cfg(debug_assertions)]
@@ -37,7 +43,7 @@ impl<'t, 'input> Source<'t, 'input> {
                 self.following_src.push_str(token.text);
             }
             if self.following_src.len() > 25 {
-                let boundary = (1..4)
+                let boundary = (0..4)
                     .find(|num| self.following_src.is_char_boundary(25 - num))
                     .expect("should have a boundary max 4 bytes down");
                 self.following_src.truncate(boundary);
@@ -52,6 +58,7 @@ impl<'t, 'input> Source<'t, 'input> {
 
         let token = self.tokens.get(self.cursor)?;
         self.cursor += 1;
+        self.steps.set(0);
 
         #[cfg(debug_assertions)]
         self.update_debug();
@@ -88,6 +95,7 @@ impl<'t, 'input> Source<'t, 'input> {
             .map_or(false, TokenKind::is_trivia)
         {
             self.cursor += 1;
+            self.steps.set(0);
         }
 
         #[cfg(debug_assertions)]
@@ -100,8 +108,13 @@ impl<'t, 'input> Source<'t, 'input> {
     ///
     /// Returns None on EOF.
     pub(super) fn peek_kind_immediate(&self) -> Option<TokenKind> {
+        let steps = self.steps.get();
+        assert!(steps < PARSER_STEP_LIMIT, "the parser seems stuck");
+        self.steps.set(steps + 1);
+
         // We can ignore the error when peeking
         Some(
+            // TODO: TokenKind::LexError
             self.peek_token_immediate()?
                 .kind
                 .unwrap_or(TokenKind::Unrecognized),

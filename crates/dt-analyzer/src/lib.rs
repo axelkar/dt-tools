@@ -24,9 +24,9 @@
 //!   c = <3>;
 //! };
 //! ";
-//! let parse = dt_parser::cst2::parser::parse(text);
-//! let doc = ast::Document::cast(RedNode::new(Arc::new(parse.green_node))).unwrap();
-//! let hm: HashMap<_, _> = analyze_cst(&doc, text).unwrap().tree
+//! let parse = ast::SourceFile::parse(text);
+//! let file = parse.source_file();
+//! let hm: HashMap<_, _> = analyze_cst(&file, text).unwrap().tree
 //!     .dfs_iter()
 //!     .map(|(path, value)| (path.join("/"), value))
 //!     .collect();
@@ -62,17 +62,17 @@ pub struct Label {
     pub label_ast: ast::DtLabel,
 }
 
-/// Analyzes an [`ast::Document`]
+/// Analyzes an [`ast::SourceFile`]
 ///
-/// Returns none if the root node cannot be casted to an [`ast::Document`] or if the root (`/`)
+/// Returns none if the root node cannot be casted to an [`ast::SourceFile`] or if the root (`/`)
 /// dt-node cannot be found.
 ///
 /// # Examples
 ///
 /// See [crate root](crate).
-pub fn analyze_cst(doc: &ast::Document, src: &str) -> Option<FileDefinition> {
-    let root_node = doc.nodes().find(|node| node.is_root())?;
-    let extensions = doc.nodes().filter(ast::DtNode::is_extension);
+pub fn analyze_cst(file: &ast::SourceFile, src: &str) -> Option<FileDefinition> {
+    let root_node = file.nodes().find(|node| node.is_root())?;
+    let extensions = file.nodes().filter(ast::DtNode::is_extension);
     // TODO: check includes for extension labels?
     let labels = {
         let labels = find_labels(&root_node, src); // TODO: do find_labels for extensions too

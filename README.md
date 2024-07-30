@@ -76,15 +76,12 @@
   * Currently the schemas aren't stored in the binary and are looked up at runtime
   * Add a small cache with a list of matching `compatible` items for simple definitions or whole `select` JSON schemas
     along with the root binding documentation
-* VSCode extension to provide the LSP client
 * Take care of code containing `TODO`, `FIXME`, `todo!`, `unimplemented!` or similar
-* Add `/bits/` (used in Linux kernel tree) <http://web.mit.edu/freebsd/head/contrib/dtc/Documentation/dts-format.txt>
-* Make parser faster!! One fairly large example with 2738 lines took 2ms to read file + 16ms to parse + 3ms to analyze compared to 8ms with a subprocess running `dtc -O yaml`
 * Use arena for allocating the tree(?)
   * <https://www.cs.cornell.edu/~asampson/blog/flattening.html>
   * <https://github.com/saschagrunert/indextree>
-* Use SmallVec for GreenItem children
-* Return ast::document from dt_parser::parse
+  * I'll need a mutable normally allocated tree as well
+* Use SmallVec for GreenNode's children
 * A good and correct way to to get YAML file offsets from JSON Schema
   * The easiest way would be with just the [schema path](https://docs.rs/jsonschema/latest/jsonschema/error/struct.ValidationError.html#structfield.schema_path), but I think it could lead to incorrect positions
   * I'll need a YAML parser in Rust that can reverse paths to file offsets to make LSP integration work
@@ -116,7 +113,7 @@
 
 ## LSP
 
-The language server is currently only packaged for Neovim with the `./crates/dt-lsp/lsp.lua` script. I'd appreciate efforts to make a plugin for VSCode.
+The language server is currently only packaged for Neovim with the `./crates/dt-lsp/lsp.lua` script.
 
 ```sh
 cd ./crates/dt-lsp

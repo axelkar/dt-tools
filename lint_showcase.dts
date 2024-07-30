@@ -3,6 +3,8 @@
 /dts-v1/;
 
 / {
+  foo@0a4 = <1>;
+  unit@0001 {};
   My_Label: Foo@0xA4 {
     MyProp = "";
     hex-value = <0xAAA>;

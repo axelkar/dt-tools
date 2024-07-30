@@ -2,7 +2,6 @@ use dt_parser::{
     ast::{self, AstNode, AstNodeOrToken, HasLabel as _},
     cst2::{lexer::TokenKind, NodeKind},
 };
-use itertools::Itertools as _;
 
 use crate::{EarlyLintPass, LintId, LintSeverity};
 

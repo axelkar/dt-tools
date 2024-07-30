@@ -13,4 +13,3 @@ pub mod cst2;
 mod span;
 
 pub type SourceId = Arc<str>;
-

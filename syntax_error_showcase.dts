@@ -1,16 +1,12 @@
-// This file showcases the many recoverable syntax errors dt-parser+dt-lint support
+// This file showcases the many recoverable syntax errors dt-parser supports
 /dts-v1/;
 
-/foo/ a
-/foo/
-/ foo/;
-/ foo /;
-/ /;
 #include
 #define
 
 / {
   a = <2>
+  ascii-unexpected` = <0>;
   b = <2 (3))>;
   c "AA";
   d = ;
@@ -21,19 +17,14 @@
   i = <1> <2>;
   j = <&LABEL, &{ /path } & LABEL>; // TODO: warn for `&LABEL,`
   k a b k = <1>;
-  l = <1 , 2  , 3 ,>;
-  m = <unexpected>;
+  l = <0b1 , 0o2  , 0x3 ,>;
+  m = <1 "unexpected" 1>;
 
-  bar {
-    forgot-next-id;
-    {
-      yep = <1>;
-    };
+  // forgot node's name
+  {
+    foo = <1>;
   };
-
-  utf-8ö = <0>;
   utf-8ä = <0>;
-  ascii-unexpected` = <0>;
 };
 
 

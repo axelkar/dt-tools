@@ -1,7 +1,9 @@
 //! - <https://rust-analyzer.github.io/blog/2020/09/16/challeging-LR-parsing.html#error-resilience>
 //! - <https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html>
 
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
+
+use crate::{ast, TextRange};
 
 use self::event::Event;
 use self::source::Source;
@@ -10,6 +12,8 @@ use itertools::Itertools;
 pub use marker::{CompletedMarker, Marker};
 use smallvec::SmallVec;
 use tracing::debug;
+#[cfg(feature = "grammar-tracing")]
+use tracing::error;
 
 use super::{grammar, lexer::TokenKind, GreenNode, NodeKind};
 
@@ -47,11 +51,22 @@ const PREPROCESSOR_DIRECTIVE_SET: [TokenKind; 9] = [
 // > new parse.
 // kinda like duct-taping different parts of the parse tree together
 
+// TODO: take inspiration from rust-analyzer syntax::Parse
+// TODO: rust-analyzer syntax::validation
+// TODO: Parse::ok
+// TODO: remove 'input bound so I can just clone this wherever
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parse<'input> {
     pub green_node: GreenNode,
     pub lex_errors: Vec<WrappedLexError<'input>>,
     pub errors: Vec<ParseError>,
+}
+impl Parse<'_> {
+    pub fn source_file(&self) -> ast::SourceFile {
+        use ast::AstNode as _;
+        ast::SourceFile::cast(super::RedNode::new(Arc::new(self.green_node.clone())))
+            .expect("parser should only output SourceFile")
+    }
 }
 
 pub fn parse(input: &str) -> Parse {
@@ -65,8 +80,7 @@ pub fn parse(input: &str) -> Parse {
 
     let sink = sink::Sink::new(&tokens, parser.events);
 
-    let parse = sink.finish();
-    parse
+    sink.finish()
 }
 
 /// CST parser.
@@ -169,6 +183,9 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Bumps when `set` contains the current token's kind and errors otherwise.
     pub fn expect_bump_set(&mut self, set: &[TokenKind]) {
+        #[cfg(feature = "grammar-tracing")]
+        debug!(?set, "expect_bump_set");
+
         if self.at_set(set) {
             self.bump();
         } else {
@@ -178,6 +195,9 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Bumps when `kind` is the current token's kind and errors otherwise.
     pub fn expect(&mut self, kind: TokenKind) {
+        #[cfg(feature = "grammar-tracing")]
+        debug!(?kind, "expect");
+
         if self.at(kind) {
             self.bump();
         } else {
@@ -186,6 +206,9 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
 
     pub fn emit_expect_error(&mut self) {
+        #[cfg(feature = "grammar-tracing")]
+        error!("emit_expect_error");
+
         use std::fmt::Write;
         let mut message = "Expected ".to_owned();
 
@@ -223,6 +246,9 @@ impl<'t, 'input> Parser<'t, 'input> {
     ///
     /// - Doesn't bump when at `recovery_set`.
     pub fn expect_recoverable(&mut self, kind: TokenKind, recovery_set: &[TokenKind]) {
+        #[cfg(feature = "grammar-tracing")]
+        debug!(?kind, ?recovery_set, "expect_recoverable");
+
         if self.at(kind) {
             self.bump();
         } else if self.silent_at_set(recovery_set) {
@@ -233,11 +259,13 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
 
     /// Reports the current token as an expect error.
-    // TODO: better name
+    // TODO: rename this function
     pub fn error2(&mut self) {
+        #[cfg(feature = "grammar-tracing")]
+        error!("error2");
+
         self.emit_expect_error();
 
-        // TODO: make grammar use this
         if !self.at_end() {
             let e = self.start();
             self.bump();
@@ -263,10 +291,15 @@ impl<'t, 'input> Parser<'t, 'input> {
                 start: pos,
                 end: pos,
             }
-        } else if self.expected.len() == 1
-            && self.expected.first() == Some(&Expected::Kind(TokenKind::Semicolon))
+        } else if let [Expected::Kind(TokenKind::Semicolon | TokenKind::Comma)]
+        | [Expected::Kind(TokenKind::Comma), Expected::Kind(TokenKind::Semicolon)] =
+            self.expected.as_slice()
         {
-            self.source.prev_next_range().unwrap()
+            let pos = self.source.prev_next_range().unwrap().start;
+            TextRange {
+                start: pos,
+                end: pos + 1,
+            }
         } else {
             self.source.range().unwrap()
         };
@@ -314,6 +347,9 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Bumps name tokens into [`NodeKind::Name`].
     pub fn bump_name(&mut self) -> Option<CompletedMarker> {
+        #[cfg(feature = "grammar-tracing")]
+        tracing::info!("bump_name");
+
         if !self.silent_at_set(&NAME_SET) {
             self.expected.push(Expected::Name);
             return None;
@@ -321,10 +357,11 @@ impl<'t, 'input> Parser<'t, 'input> {
 
         fn bump_notrivia(p: &mut Parser) {
             p.expected.clear();
-            assert!(p.source.next_token().is_some(), "Tried to bump at EOF");
 
             #[cfg(feature = "grammar-tracing")]
             debug!(pos = p.events.len(), kind = ?p.source.peek_kind_immediate(), "push token");
+
+            assert!(p.source.next_token().is_some(), "Tried to bump at EOF");
 
             // This makes sure the whitespace only gets eaten when name_m is completed
             p.events.push(Event::AddTokenNoTrivia)
@@ -348,6 +385,9 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Bumps name tokens into [`NodeKind::Name`] or error otherwise.
     pub fn expect_name(&mut self) {
+        #[cfg(feature = "grammar-tracing")]
+        debug!("expect_name");
+
         if self.at_name() {
             self.bump_name();
         } else {
@@ -402,7 +442,7 @@ mod tests {
             output,
             Parse {
                 green_node: GreenNode {
-                    kind: NodeKind::Document,
+                    kind: NodeKind::SourceFile,
                     width: "\"abc".len(),
                     children: vec![dynamic_token(TokenKind::Unrecognized, "\"abc")]
                 },
@@ -438,7 +478,7 @@ mod tests {
         assert_eq!(
             output.green_node,
             GreenNode {
-                kind: NodeKind::Document,
+                kind: NodeKind::SourceFile,
                 width: "ident".len(),
                 children: vec![node(
                     NodeKind::DtNode,
@@ -482,7 +522,7 @@ mod tests {
         assert_eq!(
             output.green_node,
             GreenNode {
-                kind: NodeKind::Document,
+                kind: NodeKind::SourceFile,
                 width: "hello world".len(),
                 children: vec![node(
                     NodeKind::DtNode,

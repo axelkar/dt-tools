@@ -49,9 +49,9 @@ impl PPInclude {
     }
 
     // TODO: child_tokens that returns just GreenNode and the text_offset, no need for Arcs
-    //pub fn gather_includes(doc: &ast::Document) -> impl Iterator<Item = PPInclude> {
-    pub fn gather_includes(doc: &Arc<RedNode>) -> impl Iterator<Item = PPInclude> + '_ {
-        doc.child_tokens()
+    //pub fn gather_includes(file: &ast::SourceFile) -> impl Iterator<Item = PPInclude> {
+    pub fn gather_includes(file: &Arc<RedNode>) -> impl Iterator<Item = PPInclude> + '_ {
+        file.child_tokens()
             .filter(|tok| tok.green.kind == TokenKind::IncludeDirective)
             .filter_map(|tok| Self::parse(tok.text_range(), &tok.green.text))
     }

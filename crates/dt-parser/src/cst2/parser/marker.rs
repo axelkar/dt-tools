@@ -30,7 +30,7 @@ impl Marker {
         };
 
         #[cfg(feature = "grammar-tracing")]
-        tracing::debug!(pos = p.events.len(), "end node");
+        tracing::debug!(?kind, pos = p.events.len(), "end node");
 
         p.events.push(Event::FinishNode);
 
