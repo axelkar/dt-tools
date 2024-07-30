@@ -115,7 +115,7 @@ pub enum TokenKind {
     IfdefDirective,
     #[regex(r"#( |\t)*if[^\n]*")]
     IfDirective,
-    #[regex(r"#( |\t)*define[^\n\\]*", callback = lex_preprocessor_directive)]
+    #[regex(r#"#( |\t)*define[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
     DefineDirective,
     #[regex(r"#( |\t)*include[^\n]*")]
     IncludeDirective,
@@ -339,46 +339,147 @@ fn lex_block_comment(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> 
         }
 
         if c == '/' && asterisk_found {
-            lex.bump(remainder[0..total_len].as_bytes().len());
+            lex.bump(total_len);
             return Ok(());
         }
 
         asterisk_found = false;
     }
-    lex.bump(remainder[0..total_len].as_bytes().len());
+    lex.bump(total_len);
     Err(LexError::UnexpectedEofBlockComment)
 }
 
 fn lex_preprocessor_directive(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
     let remainder: &str = lex.remainder();
 
-    if remainder.as_bytes().first() == Some(&b'\\') {
-        let mut escaped = false;
+    match remainder.as_bytes().first() {
+        Some(b'\\') => {
+            let mut escaped = false;
+            let mut total_len = 0;
+
+            for c in remainder.chars() {
+                total_len += c.len_utf8();
+
+                if c == '\\' {
+                    escaped = !escaped;
+                    continue;
+                }
+
+                if c == '\n' && !escaped {
+                    lex.bump(total_len);
+                    return Ok(());
+                }
+
+                escaped = false;
+            }
+            lex.bump(total_len);
+        }
+        Some(b'\'') => {
+            lex.bump(1);
+            // This makes sure /* inside character literals don't get parsed as block comments
+            lex_char(lex)?;
+
+            take(lex);
+            return lex_preprocessor_directive(lex);
+        }
+        Some(b'"') => {
+            lex.bump(1);
+            // This makes sure /* inside strings don't get parsed as block comments
+            lex_preprocessor_string(lex)?;
+
+            take(lex);
+            return lex_preprocessor_directive(lex);
+        }
+        Some(b'/') => match remainder.as_bytes().get(1) {
+            Some(&b'*') => {
+                lex.bump(2);
+                lex_block_comment(lex)?;
+
+                take(lex);
+                return lex_preprocessor_directive(lex);
+            }
+            Some(&b'/') => {
+                lex.bump(2);
+                take_line_comment(lex);
+            }
+            _ => {
+                lex.bump(1);
+
+                take(lex);
+                return lex_preprocessor_directive(lex);
+            }
+        },
+        _ => {}
+    }
+
+    return Ok(());
+
+    /// take [^\n\\"'/]*
+    fn take(lex: &mut logos::Lexer<TokenKind>) {
+        let remainder: &str = lex.remainder();
         let mut total_len = 0;
 
         for c in remainder.chars() {
+            if let '\n' | '\\' | '"' | '\'' | '/' = c {
+                lex.bump(total_len);
+                break;
+            }
+
             total_len += c.len_utf8();
-
-            if c == '\\' {
-                escaped = !escaped;
-                continue;
-            }
-
-            if c == '\n' && !escaped {
-                lex.bump(remainder[0..total_len].as_bytes().len());
-                return Ok(());
-            }
-
-            escaped = false;
         }
-        eprintln!("lex: {lex:#?}");
-        lex.bump(remainder[0..total_len].as_bytes().len());
     }
+    /// take [^\n\r]+
+    fn take_line_comment(lex: &mut logos::Lexer<TokenKind>) {
+        let remainder: &str = lex.remainder();
+        let mut total_len = 0;
 
-    // Otherwise either newline or end-of-file
-    Ok(())
+        for c in remainder.chars() {
+            if let '\n' | '\r' = c {
+                lex.bump(total_len);
+                break;
+            }
+
+            total_len += c.len_utf8();
+        }
+    }
 }
 
+// preprocessor to dtc:
+// in quotes = "a\\\nb" -> ab
+// in quotes = "a\nb" -> only "a gets expanded and b" gets left at macro definition
+// in quotes = a\nb -> a\nb
+// in quotes = a\\"b -> a\\"b
+// in quotes = a\"b -> a\"b
+// in quotes = "a\\\\\nb" -> a\b
+// NOTE: this lexes "a\nb" succesfully, but it should be a deny error
+fn lex_preprocessor_string(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
+    let remainder: &str = lex.remainder();
+    let mut escaped = false;
+    let mut total_len = 0;
+
+    for c in remainder.chars() {
+        total_len += c.len_utf8();
+
+        if c == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        if c == '"' && !escaped {
+            lex.bump(total_len);
+            return Ok(());
+        }
+
+        escaped = false;
+    }
+    lex.bump(total_len);
+    Err(LexError::UnexpectedEofString)
+}
+
+// dtc:
+// in quotes = "a\\\nb" -> syntax error
+// in quotes = "a\nb" -> "a\nb"
+// in quotes = "a\\nb" -> "a\nb"
 fn lex_string(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
     let remainder: &str = lex.remainder();
     let mut escaped = false;
@@ -393,13 +494,13 @@ fn lex_string(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
         }
 
         if c == '"' && !escaped {
-            lex.bump(remainder[0..total_len].as_bytes().len());
+            lex.bump(total_len);
             return Ok(());
         }
 
         escaped = false;
     }
-    lex.bump(remainder[0..total_len].as_bytes().len());
+    lex.bump(total_len);
     Err(LexError::UnexpectedEofString)
 }
 
@@ -412,11 +513,11 @@ fn lex_bytestring(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
         total_len += c.len_utf8();
 
         if c == ']' {
-            lex.bump(remainder[0..total_len].as_bytes().len());
+            lex.bump(total_len);
             return Ok(());
         }
     }
-    lex.bump(remainder[0..total_len].as_bytes().len());
+    lex.bump(total_len);
     Err(LexError::UnexpectedEofBytestring)
 }
 
@@ -434,13 +535,13 @@ fn lex_char(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
         }
 
         if c == '\'' && !escaped {
-            lex.bump(remainder[0..total_len].as_bytes().len());
+            lex.bump(total_len);
             return Ok(());
         }
 
         escaped = false;
     }
-    lex.bump(remainder[0..total_len].as_bytes().len());
+    lex.bump(total_len);
     Err(LexError::UnexpectedEofChar)
 }
 
@@ -559,6 +660,14 @@ mod tests {
     fn lex_from_test_data_1() {
         let src = include_str!("../../test_data/1.dts");
         let expected = include_str!("../../test_data/1.lex.expected");
+
+        test_expected(src, expected);
+    }
+
+    #[test]
+    fn lex_from_test_data_2_macros() {
+        let src = include_str!("../../test_data/2-macros.dts");
+        let expected = include_str!("../../test_data/2-macros.lex.expected");
 
         test_expected(src, expected);
     }

@@ -1,0 +1,28 @@
+/dts-v1/;
+
+// Try line comment
+#define SQUARE(x) ((x) * (x)) // This macro squares a number
+
+// Try block comment
+#define MULTIPLY(a, b) /* Multiplies two numbers */ \
+                       ((a) * (b))
+
+// Real macro from the Linux kernel, try multiline block comment
+#define KEY_SWITCHVIDEOMODE	227	/* Cycle between available video
+					   outputs (Monitor/LCD/TV-out/etc) */
+
+// This is invalid in GCC
+#define FOO "a
+b"
+// Try multiline strings
+#define FOO "a\
+b"
+#define FOO "a\\
+b"
+#define FOO "a\"b"
+#define FOO "a\\"b"
+// Try starting comments in literals
+#define FOO "/*"
+#define FOO "//"
+#define FOO '/*'
+#define FOO '//'
