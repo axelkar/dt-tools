@@ -378,8 +378,6 @@ fn item(p: &mut Parser) {
         p.bump();
 
         p.expect(TokenKind::String);
-
-        p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::Directive);
     } else if p.at(TokenKind::MemreserveDirective) {
         p.bump();
@@ -466,6 +464,7 @@ pub(super) mod tests {
         }))
     }
 
+    #[track_caller]
     fn check(input: &str, expected_children: Vec<GreenItem>, expected_errors: Vec<ParseError>) {
         let parse_output = parse(input);
         assert_eq!(parse_output.errors, expected_errors);
