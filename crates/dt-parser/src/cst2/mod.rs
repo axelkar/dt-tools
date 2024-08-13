@@ -13,12 +13,6 @@ pub enum NodeKind {
     /// A parse error
     ParseError,
     Directive,
-    /// A property or node name.
-    ///
-    /// Name = 'Ident' | 'Number' | ',' | '-'
-    ///
-    /// NOTE: parsed using `Parser::bump_name` without whitespace
-    Name,
     /// A directive's parameters, if any.
     DirectiveParams,
     PreprocessorDirective,

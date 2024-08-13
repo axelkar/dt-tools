@@ -1,4 +1,4 @@
-use crate::cst2::NodeKind;
+use crate::cst2::{lexer::TokenKind, NodeKind};
 
 use super::ParseError;
 
@@ -9,7 +9,15 @@ pub(crate) enum Event {
         forward_parent: Option<usize>,
     },
     AddToken,
-    AddTokenNoTrivia,
+    AddCombinedToken {
+        kind: TokenKind,
+        /// The number of raw tokens to be replaced.
+        n_raw_tokens: usize,
+        /// The combined text of the tokens.
+        ///
+        /// This is stored here and not computed for performance.
+        text: String
+    },
     FinishNode,
     Placeholder,
     Error(ParseError),

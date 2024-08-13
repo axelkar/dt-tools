@@ -1,5 +1,7 @@
 use std::{mem, sync::Arc};
 
+// TODO: && and || as joined https://nnethercote.github.io/2022/10/05/quirks-of-rusts-token-representation.html
+
 use crate::cst2::{
     lexer::{Token, TokenKind},
     GreenItem, GreenNode, GreenToken, NodeKind, TokenText,
@@ -12,7 +14,10 @@ pub(crate) struct Sink<'t, 'input> {
     tokens: &'t [Token<'input>],
     /// The incoming events.
     events: Vec<Event>,
-    /// Token index for trivia handling.
+    /// Source token index.
+    ///
+    /// This is used to automatically get the token kind and text so I don't have to add them to
+    /// [`Event::AddToken`]
     cursor: usize,
     /// Stack of parent nodes.
     stack: Vec<GreenNode>,
@@ -80,20 +85,26 @@ impl<'t, 'input> Sink<'t, 'input> {
                     for kind in kinds.into_iter().rev() {
                         self.start_node(kind);
                     }
-
-                    // TODO: remove this:
-                    // Somehow breaks dt-binding-matcher
-                    // TODO: manually AddTokenNoTrivia for all trivia tokens before Name?
-                    // see n_attached_trivias in rust-analyzer/crates/parser/src/shortcuts.rs
-                    self.eat_trivia();
                 }
                 Event::AddToken => {
                     self.eat_trivia();
                     self.token()
                 }
-                // TODO: make this better?
-                // https://nnethercote.github.io/2022/10/05/quirks-of-rusts-token-representation.html ?
-                Event::AddTokenNoTrivia => self.token(),
+                Event::AddCombinedToken { kind, n_raw_tokens, text } => {
+                    self.eat_trivia();
+                    #[cfg(feature = "grammar-tracing")]
+                    tracing::debug!(cursor = self.cursor, ?kind, "add combined token");
+                    self.current_node.width += text.len();
+
+                    self.current_node
+                        .children
+                        .push(GreenItem::Token(Arc::new(GreenToken {
+                            kind,
+                            text: TokenText::Dynamic(text),
+                        })));
+
+                    self.cursor += n_raw_tokens;
+                },
                 Event::FinishNode => {
                     #[cfg(feature = "grammar-tracing")]
                     tracing::debug!(kind = ?self.current_node.kind, "finish node");

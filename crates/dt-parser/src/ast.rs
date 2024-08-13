@@ -16,15 +16,9 @@
 //! #     kind: NodeKind::DtNode,
 //! #     width: 6,
 //! #     children: vec! [
-//! #         GreenItem::Node(Arc::new(GreenNode {
-//! #             kind: NodeKind::Name,
-//! #             width: 3,
-//! #             children: vec! [
-//! #                 GreenItem::Token(Arc::new(GreenToken {
-//! #                     kind: TokenKind::Ident,
-//! #                     text: dt_parser::cst2::TokenText::Static("foo"),
-//! #                 }))
-//! #             ]
+//! #         GreenItem::Token(Arc::new(GreenToken {
+//! #             kind: TokenKind::Name,
+//! #             text: dt_parser::cst2::TokenText::Static("foo"),
 //! #         })),
 //! #         GreenItem::Token(Arc::new(GreenToken {
 //! #             kind: TokenKind::LCurly,
@@ -86,6 +80,11 @@ pub trait AstToken: Sized {
 
     /// Returns a reference to the syntax token.
     fn syntax_ref(&self) -> &RedToken;
+
+    /// Returns the green token's kind.
+    fn kind(&self) -> TokenKind {
+        self.syntax_ref().green.kind
+    }
 }
 
 /// Trait used for downcasting from [`RedToken`]s and [`RedNode`]s to AST nodes and tokens.
@@ -136,7 +135,6 @@ pub trait AstNodeOrToken: Sized {
 ///     match node {
 ///         ast::DtNode(it) => { .. },
 ///         ast::DtProperty(it) => { .. },
-///         ast::Name(it) => { .. },
 ///         _ => { .. },
 ///     }
 /// }
@@ -160,7 +158,7 @@ macro_rules! match_ast {
 pub trait HasName: AstNode {
     /// Returns the [`Name`] if it exists.
     fn name(&self) -> Option<Name> {
-        self.syntax().child_nodes().find_map(Name::cast)
+        self.syntax().child_tokens().find_map(Name::cast)
     }
 }
 
@@ -302,7 +300,7 @@ impl DtProperty {
         }
     }
 
-    /// Returns the unit addresses ident.
+    /// Returns the unit addresses.
     ///
     /// # Example
     ///
@@ -325,7 +323,7 @@ impl DtProperty {
         self.syntax
             .child_nodes()
             .find(|node| node.green.kind == NodeKind::UnitAddress)?
-            .child_nodes()
+            .child_tokens()
             .find_map(Name::cast)
     }
 }
@@ -533,7 +531,7 @@ impl DtNode {
         self.syntax.child_nodes().filter_map(DtNode::cast)
     }
 
-    /// Returns the unit addresses ident.
+    /// Returns the unit addresses.
     ///
     /// # Example
     ///
@@ -556,7 +554,7 @@ impl DtNode {
         self.syntax
             .child_nodes()
             .find(|node| node.green.kind == NodeKind::UnitAddress)?
-            .child_nodes()
+            .child_tokens()
             .find_map(Name::cast)
     }
 
@@ -700,30 +698,34 @@ impl DtNode {
 impl HasName for DtNode {}
 impl HasLabel for DtNode {}
 
-/// A name composed of different kinds of tokens.
+/// A generic name.
 ///
-/// Kind: [`NodeKind::Name`]
+/// This can only be found in property and node names currently. TODO: update
+///
+/// This cannot be found in expressions, they use `TokenKind::Ident`.
+///
+/// Kind: [`TokenKind::Name`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Name {
-    syntax: Arc<RedNode>,
+    syntax: Arc<RedToken>,
 }
-impl AstNode for Name {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
+impl AstToken for Name {
+    fn cast(syntax: Arc<RedToken>) -> Option<Self> {
         match syntax.green.kind {
-            NodeKind::Name => Some(Self { syntax }),
+            TokenKind::Name => Some(Self { syntax }),
             _ => None,
         }
     }
-    fn syntax(&self) -> Arc<RedNode> {
+    fn syntax(&self) -> Arc<RedToken> {
         self.syntax.clone()
     }
-    fn syntax_ref(&self) -> &RedNode {
+    fn syntax_ref(&self) -> &RedToken {
         &self.syntax
     }
 }
 impl Name {
     pub fn text<'i>(&self, src: &'i str) -> Option<&'i str> {
-        src.get(self.syntax.text_offset..(self.syntax.text_offset + self.syntax.green.width))
+        src.get(self.syntax.text_offset..(self.syntax.text_offset + self.syntax.green.text.len()))
     }
 }
 

@@ -146,6 +146,9 @@ pub enum TokenKind {
     /// A lex error!!
     Unrecognized,
 
+    /// Combined token only generated in the parser.
+    Name,
+
     #[regex(r#"[^ \t\r\n"'/*+%|{}<>\[()?;:&=@,0-9-]+"#)]
     Ident,
 
@@ -299,6 +302,7 @@ impl core::fmt::Display for TokenKind {
             TokenKind::V1Directive => "‘/dts-v1/‘",
             TokenKind::PluginDirective => "‘/plugin/‘",
             TokenKind::Unrecognized => "unrecognized token",
+            TokenKind::Name => "name",
             TokenKind::Ident => "identifier",
             TokenKind::Equals => "‘=’",
             TokenKind::Semicolon => "‘;’",
@@ -550,6 +554,7 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
+    #[track_caller]
     fn check(input: &str, kind: TokenKind) {
         let lexer = Lexer::new(input);
         assert_eq!(
@@ -639,6 +644,7 @@ mod tests {
         assert_eq!(lexer.slice(), "[1234");
     }
 
+    #[track_caller]
     fn test_expected(src: &str, expected: &str) {
         use std::fmt::Write as _;
 

@@ -345,53 +345,51 @@ impl<'t, 'input> Parser<'t, 'input> {
         }
     }
 
-    /// Bumps name tokens into [`NodeKind::Name`].
-    pub fn bump_name(&mut self) -> Option<CompletedMarker> {
+    /// Bumps name tokens into [`TokenKind::Name`].
+    pub fn bump_name(&mut self) {
         #[cfg(feature = "grammar-tracing")]
         tracing::info!("bump_name");
 
-        if !self.silent_at_set(&NAME_SET) {
-            self.expected.push(Expected::Name);
-            return None;
-        }
+        assert!(self.silent_at_set(&NAME_SET));
 
-        fn bump_notrivia(p: &mut Parser) {
-            p.expected.clear();
-
-            #[cfg(feature = "grammar-tracing")]
-            debug!(pos = p.events.len(), kind = ?p.source.peek_kind_immediate(), "push token");
-
-            assert!(p.source.next_token().is_some(), "Tried to bump at EOF");
-
-            // This makes sure the whitespace only gets eaten when name_m is completed
-            p.events.push(Event::AddTokenNoTrivia)
-        }
-
+        // Make sure no trivia tokens get into the combined token
         self.source.skip_trivia();
 
-        let name_m = self.start();
-
-        bump_notrivia(self);
+        //let name_m = self.start();
+        let mut n_raw_tokens = 0;
+        let mut text = String::new();
 
         while self
             .peek_immediate()
             .map_or(false, |k| NAME_SET.contains(&k))
         {
-            bump_notrivia(self);
+            let token = self.source.next_token().expect("Tried to bump at EOF");
+            n_raw_tokens += 1;
+            text.push_str(token.text);
         }
 
-        Some(name_m.complete(self, NodeKind::Name))
+        self.events.push(Event::AddCombinedToken {
+            kind: TokenKind::Name,
+            n_raw_tokens,
+            text
+        });
+
+        // Not cleared at any other point
+        self.expected.clear();
     }
 
-    /// Bumps name tokens into [`NodeKind::Name`] or error otherwise.
-    pub fn expect_name(&mut self) {
+    /// Bumps and returns true if at a name token.
+    ///
+    /// Basically a combination of [`Parser::at_name`] and [`Parser::bump_name`]
+    pub fn eat_name(&mut self) -> bool {
         #[cfg(feature = "grammar-tracing")]
-        debug!("expect_name");
+        debug!("eat_name");
 
         if self.at_name() {
             self.bump_name();
+            true
         } else {
-            self.emit_expect_error();
+            false
         }
     }
 

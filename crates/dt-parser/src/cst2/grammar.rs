@@ -97,10 +97,10 @@ fn dt_phandle(p: &mut Parser) {
             p.expect(TokenKind::Ident);
         }
         p.expect(TokenKind::RCurly);
-    } else {
+    } else if !p.eat_name() {
         // According to the DT spec v0.4, labels can only match [0-9a-zA-Z_], but for the IDE
         // use-case I'll just match a name
-        p.expect_name()
+        p.emit_expect_error();
     }
 
     m.complete(p, NodeKind::DtPhandle);
@@ -271,9 +271,8 @@ fn item(p: &mut Parser) {
             p.emit_expect_error();
             m.complete(p, NodeKind::ParseError);
         }
-    } else if p.at_name() {
+    } else if p.eat_name() {
         let mut m = m;
-        p.bump_name();
         // parse a node or a property
 
         if p.at(TokenKind::Colon) {
@@ -283,8 +282,7 @@ fn item(p: &mut Parser) {
             m.complete(p, NodeKind::DtLabel);
             m = p.start();
 
-            while p.at_name() {
-                p.bump_name();
+            while p.eat_name() {
                 if p.at(TokenKind::Colon) {
                     p.bump();
 
@@ -305,7 +303,9 @@ fn item(p: &mut Parser) {
             let m = p.start();
             // unit address
             p.bump();
-            p.expect_name();
+            if !p.eat_name() {
+                p.emit_expect_error()
+            }
             m.complete(p, NodeKind::UnitAddress);
         }
 
@@ -399,8 +399,8 @@ fn item(p: &mut Parser) {
         let m_params = p.start();
         if p.at(TokenKind::Ampersand) {
             dt_phandle(p);
-        } else {
-            p.expect_name();
+        } else if !p.eat_name() {
+            p.emit_expect_error()
         }
         m_params.complete(p, NodeKind::DirectiveParams);
 
@@ -507,14 +507,7 @@ pub(super) mod tests {
                         NodeKind::DirectiveParams,
                         vec![
                             dynamic_token(TokenKind::Whitespace, " "),
-                            node(
-                                NodeKind::Name,
-                                vec![
-                                    dynamic_token(TokenKind::Ident, "node"),
-                                    static_token(TokenKind::Minus),
-                                    dynamic_token(TokenKind::Ident, "name"),
-                                ],
-                            ),
+                            dynamic_token(TokenKind::Name, "node-name"),
                         ],
                     ),
                     static_token(TokenKind::Semicolon),
@@ -532,15 +525,12 @@ pub(super) mod tests {
                     node(
                         NodeKind::DirectiveParams,
                         vec![
-                            dynamic_token(TokenKind::Whitespace, " "),
                             node(
                                 NodeKind::DtPhandle,
                                 vec![
+                                    dynamic_token(TokenKind::Whitespace, " "),
                                     static_token(TokenKind::Ampersand),
-                                    node(
-                                        NodeKind::Name,
-                                        vec![dynamic_token(TokenKind::Ident, "label")],
-                                    ),
+                                    dynamic_token(TokenKind::Name, "label"),
                                 ],
                             ),
                         ],
@@ -588,6 +578,20 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn parse_from_test_data_2() {
+        let src = include_str!("../../test_data/2-macros.dts");
+
+        let parse_output = parse(src);
+        assert_eq!(parse_output.lex_errors, Vec::new());
+        assert_eq!(parse_output.errors, Vec::new());
+
+        assert_eq!(
+            parse_output.green_node.print_tree(),
+            include_str!("../../test_data/2-macros.dts.expect")
+        );
+    }
+
+    #[test]
     fn parse_node() {
         check(
             "/ {};",
@@ -616,16 +620,16 @@ pub(super) mod tests {
                         NodeKind::DtProperty,
                         vec![
                             dynamic_token(TokenKind::Whitespace, " "),
-                            node(NodeKind::Name, vec![dynamic_token(TokenKind::Ident, "a")]),
+                            dynamic_token(TokenKind::Name, "a"),
                             dynamic_token(TokenKind::Whitespace, " "),
                             static_token(TokenKind::Equals),
                             node(
                                 NodeKind::PropValueList,
                                 vec![
-                                    dynamic_token(TokenKind::Whitespace, " "),
                                     node(
                                         NodeKind::DtCellList,
                                         vec![
+                                            dynamic_token(TokenKind::Whitespace, " "),
                                             static_token(TokenKind::LAngle),
                                             static_token(TokenKind::RAngle),
                                         ],
@@ -652,10 +656,7 @@ pub(super) mod tests {
             vec![node(
                 NodeKind::DtProperty,
                 vec![
-                    node(
-                        NodeKind::Name,
-                        vec![dynamic_token(TokenKind::Number, "123")],
-                    ),
+                    dynamic_token(TokenKind::Name, "123"),
                     dynamic_token(TokenKind::Whitespace, " "),
                     static_token(TokenKind::Equals),
                     node(
@@ -676,13 +677,7 @@ pub(super) mod tests {
             vec![node(
                 NodeKind::DtProperty,
                 vec![
-                    node(
-                        NodeKind::Name,
-                        vec![
-                            dynamic_token(TokenKind::Number, "123"),
-                            static_token(TokenKind::Comma),
-                        ],
-                    ),
+                    dynamic_token(TokenKind::Name, "123,"),
                     dynamic_token(TokenKind::Whitespace, " "),
                     static_token(TokenKind::Equals),
                     node(
@@ -703,14 +698,7 @@ pub(super) mod tests {
             vec![node(
                 NodeKind::DtProperty,
                 vec![
-                    node(
-                        NodeKind::Name,
-                        vec![
-                            static_token(TokenKind::Comma),
-                            static_token(TokenKind::Comma),
-                            static_token(TokenKind::Comma),
-                        ],
-                    ),
+                    dynamic_token(TokenKind::Name, ",,,"),
                     dynamic_token(TokenKind::Whitespace, " "),
                     static_token(TokenKind::Equals),
                     node(
