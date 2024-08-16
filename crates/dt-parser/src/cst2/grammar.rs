@@ -503,10 +503,10 @@ pub(super) mod tests {
                 NodeKind::Directive,
                 vec![
                     static_token(TokenKind::DeleteNodeDirective),
+                    dynamic_token(TokenKind::Whitespace, " "),
                     node(
                         NodeKind::DirectiveParams,
                         vec![
-                            dynamic_token(TokenKind::Whitespace, " "),
                             dynamic_token(TokenKind::Name, "node-name"),
                         ],
                     ),
@@ -522,13 +522,13 @@ pub(super) mod tests {
                 NodeKind::Directive,
                 vec![
                     static_token(TokenKind::DeleteNodeDirective),
+                    dynamic_token(TokenKind::Whitespace, " "),
                     node(
                         NodeKind::DirectiveParams,
                         vec![
                             node(
                                 NodeKind::DtPhandle,
                                 vec![
-                                    dynamic_token(TokenKind::Whitespace, " "),
                                     static_token(TokenKind::Ampersand),
                                     dynamic_token(TokenKind::Name, "label"),
                                 ],
@@ -547,10 +547,10 @@ pub(super) mod tests {
                 NodeKind::Directive,
                 vec![
                     static_token(TokenKind::MemreserveDirective),
+                    dynamic_token(TokenKind::Whitespace, " "),
                     node(
                         NodeKind::DirectiveParams,
                         vec![
-                            dynamic_token(TokenKind::Whitespace, " "),
                             dynamic_token(TokenKind::Number, "0x10000000"),
                             dynamic_token(TokenKind::Whitespace, " "),
                             dynamic_token(TokenKind::Number, "0x4000"),
@@ -616,20 +616,20 @@ pub(super) mod tests {
                     static_token(TokenKind::Slash),
                     dynamic_token(TokenKind::Whitespace, " "),
                     static_token(TokenKind::LCurly),
+                    dynamic_token(TokenKind::Whitespace, " "),
                     node(
                         NodeKind::DtProperty,
                         vec![
-                            dynamic_token(TokenKind::Whitespace, " "),
                             dynamic_token(TokenKind::Name, "a"),
                             dynamic_token(TokenKind::Whitespace, " "),
                             static_token(TokenKind::Equals),
+                            dynamic_token(TokenKind::Whitespace, " "),
                             node(
                                 NodeKind::PropValueList,
                                 vec![
                                     node(
                                         NodeKind::DtCellList,
                                         vec![
-                                            dynamic_token(TokenKind::Whitespace, " "),
                                             static_token(TokenKind::LAngle),
                                             static_token(TokenKind::RAngle),
                                         ],
@@ -659,10 +659,10 @@ pub(super) mod tests {
                     dynamic_token(TokenKind::Name, "123"),
                     dynamic_token(TokenKind::Whitespace, " "),
                     static_token(TokenKind::Equals),
+                    dynamic_token(TokenKind::Whitespace, " "),
                     node(
                         NodeKind::PropValueList,
                         vec![
-                            dynamic_token(TokenKind::Whitespace, " "),
                             dynamic_token(TokenKind::String, "\"foo\""),
                         ],
                     ),
@@ -680,10 +680,10 @@ pub(super) mod tests {
                     dynamic_token(TokenKind::Name, "123,"),
                     dynamic_token(TokenKind::Whitespace, " "),
                     static_token(TokenKind::Equals),
+                    dynamic_token(TokenKind::Whitespace, " "),
                     node(
                         NodeKind::PropValueList,
                         vec![
-                            dynamic_token(TokenKind::Whitespace, " "),
                             dynamic_token(TokenKind::String, "\"foo\""),
                         ],
                     ),
@@ -701,10 +701,10 @@ pub(super) mod tests {
                     dynamic_token(TokenKind::Name, ",,,"),
                     dynamic_token(TokenKind::Whitespace, " "),
                     static_token(TokenKind::Equals),
+                    dynamic_token(TokenKind::Whitespace, " "),
                     node(
                         NodeKind::PropValueList,
                         vec![
-                            dynamic_token(TokenKind::Whitespace, " "),
                             dynamic_token(TokenKind::String, "\"foo\""),
                         ],
                     ),

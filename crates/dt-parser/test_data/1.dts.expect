@@ -2,29 +2,27 @@ SourceFile@0..582
   Directive@0..9
     V1Directive@0..8 "/dts-v1/"
     Semicolon@8..9 ";"
-  DtNode@9..581
-    Whitespace@9..11 "\n\n"
+  Whitespace@9..11 "\n\n"
+  DtNode@11..581
     Slash@11..12 "/"
     Whitespace@12..13 " "
     LCurly@13..14 "{"
-    DtProperty@14..71
-      Whitespace@14..17 "\n  "
-      Name@17..22
-        Ident@17..22 "model"
+    Whitespace@14..17 "\n  "
+    DtProperty@17..71
+      Name@17..22 "model"
       Whitespace@22..23 " "
       Equals@23..24 "="
-      PropValueList@24..70
-        Whitespace@24..25 " "
+      Whitespace@24..25 " "
+      PropValueList@25..70
         String@25..70 "\"Qualcomm Technologies, Inc. Lagoon MTP Ebba\""
       Semicolon@70..71 ";"
-    DtProperty@71..131
-      Whitespace@71..73 "\n\t"
-      Name@73..83
-        Ident@73..83 "compatible"
+    Whitespace@71..73 "\n\t"
+    DtProperty@73..131
+      Name@73..83 "compatible"
       Whitespace@83..84 " "
       Equals@84..85 "="
-      PropValueList@85..130
-        Whitespace@85..86 " "
+      Whitespace@85..86 " "
+      PropValueList@86..130
         String@86..103 "\"qcom,lagoon-mtp\""
         Comma@103..104 ","
         Whitespace@104..105 " "
@@ -33,18 +31,13 @@ SourceFile@0..582
         Whitespace@119..120 " "
         String@120..130 "\"qcom,mtp\""
       Semicolon@130..131 ";"
-    DtProperty@131..176
-      Whitespace@131..133 "\n\t"
-      Name@133..144
-        Ident@133..137 "qcom"
-        Comma@137..138 ","
-        Ident@138..141 "msm"
-        Minus@141..142 "-"
-        Ident@142..144 "id"
+    Whitespace@131..133 "\n\t"
+    DtProperty@133..176
+      Name@133..144 "qcom,msm-id"
       Whitespace@144..145 " "
       Equals@145..146 "="
-      PropValueList@146..175
-        Whitespace@146..147 " "
+      Whitespace@146..147 " "
+      PropValueList@147..175
         DtCellList@147..160
           LAngle@147..148 "<"
           Number@148..151 "434"
@@ -52,71 +45,57 @@ SourceFile@0..582
           Number@152..159 "0x10000"
           RAngle@159..160 ">"
         Comma@160..161 ","
-        DtCellList@161..175
-          Whitespace@161..162 " "
+        Whitespace@161..162 " "
+        DtCellList@162..175
           LAngle@162..163 "<"
           Number@163..166 "459"
           Whitespace@166..167 " "
           Number@167..174 "0x10000"
           RAngle@174..175 ">"
       Semicolon@175..176 ";"
-    DtProperty@176..204
-      Whitespace@176..178 "\n\t"
-      Name@178..194
-        Ident@178..187 "interrupt"
-        Minus@187..188 "-"
-        Ident@188..194 "parent"
+    Whitespace@176..178 "\n\t"
+    DtProperty@178..204
+      Name@178..194 "interrupt-parent"
       Whitespace@194..195 " "
       Equals@195..196 "="
-      PropValueList@196..203
-        Whitespace@196..197 " "
+      Whitespace@196..197 " "
+      PropValueList@197..203
         DtCellList@197..203
           LAngle@197..198 "<"
           Number@198..202 "0x01"
           RAngle@202..203 ">"
       Semicolon@203..204 ";"
-    DtProperty@204..230
-      Whitespace@204..206 "\n\t"
-      Name@206..220
-        Ident@206..214 "#address"
-        Minus@214..215 "-"
-        Ident@215..220 "cells"
+    Whitespace@204..206 "\n\t"
+    DtProperty@206..230
+      Name@206..220 "#address-cells"
       Whitespace@220..221 " "
       Equals@221..222 "="
-      PropValueList@222..229
-        Whitespace@222..223 " "
+      Whitespace@222..223 " "
+      PropValueList@223..229
         DtCellList@223..229
           LAngle@223..224 "<"
           Number@224..228 "0x02"
           RAngle@228..229 ">"
       Semicolon@229..230 ";"
-    DtProperty@230..253
-      Whitespace@230..232 "\n\t"
-      Name@232..243
-        Ident@232..237 "#size"
-        Minus@237..238 "-"
-        Ident@238..243 "cells"
+    Whitespace@230..232 "\n\t"
+    DtProperty@232..253
+      Name@232..243 "#size-cells"
       Whitespace@243..244 " "
       Equals@244..245 "="
-      PropValueList@245..252
-        Whitespace@245..246 " "
+      Whitespace@245..246 " "
+      PropValueList@246..252
         DtCellList@246..252
           LAngle@246..247 "<"
           Number@247..251 "0x02"
           RAngle@251..252 ">"
       Semicolon@252..253 ";"
-    DtProperty@253..277
-      Whitespace@253..255 "\n\t"
-      Name@255..268
-        Ident@255..259 "qcom"
-        Comma@259..260 ","
-        Ident@260..265 "board"
-        Minus@265..266 "-"
-        Ident@266..268 "id"
+    Whitespace@253..255 "\n\t"
+    DtProperty@255..277
+      Name@255..268 "qcom,board-id"
       Whitespace@268..269 " "
       Equals@269..270 "="
-      PropValueList@270..276
-        Whitespace@270..271 " "
+      Whitespace@270..271 " "
+      PropValueList@271..276
         DtCellList@271..276
           LAngle@271..272 "<"
           Number@272..273 "8"
@@ -124,58 +103,51 @@ SourceFile@0..582
           Number@274..275 "0"
           RAngle@275..276 ">"
       Semicolon@276..277 ";"
-    DtProperty@277..303
-      Whitespace@277..279 "\n\t"
-      Name@279..292
-        Ident@279..284 "oplus"
-        Comma@284..285 ","
-        Ident@285..292 "dtsi_no"
+    Whitespace@277..279 "\n\t"
+    DtProperty@279..303
+      Name@279..292 "oplus,dtsi_no"
       Whitespace@292..293 " "
       Equals@293..294 "="
-      PropValueList@294..302
-        Whitespace@294..295 " "
+      Whitespace@294..295 " "
+      PropValueList@295..302
         DtCellList@295..302
           LAngle@295..296 "<"
           Number@296..301 "20813"
           RAngle@301..302 ">"
       Semicolon@302..303 ";"
-    DtNode@303..473
-      Whitespace@303..306 "\n\n\t"
-      Name@306..312
-        Ident@306..312 "memory"
+    Whitespace@303..306 "\n\n\t"
+    DtNode@306..473
+      Name@306..312 "memory"
       Whitespace@312..313 " "
       LCurly@313..314 "{"
-      DtProperty@314..342
-        Whitespace@314..317 "\n\t\t"
-        Name@317..332
-          Ident@317..332 "ddr_device_type"
+      Whitespace@314..317 "\n\t\t"
+      DtProperty@317..342
+        Name@317..332 "ddr_device_type"
         Whitespace@332..333 " "
         Equals@333..334 "="
-        PropValueList@334..341
-          Whitespace@334..335 " "
+        Whitespace@334..335 " "
+        PropValueList@335..341
           DtCellList@335..341
             LAngle@335..336 "<"
             Number@336..340 "0x07"
             RAngle@340..341 ">"
         Semicolon@341..342 ";"
-      DtProperty@342..368
-        Whitespace@342..345 "\n\t\t"
-        Name@345..356
-          Ident@345..356 "device_type"
+      Whitespace@342..345 "\n\t\t"
+      DtProperty@345..368
+        Name@345..356 "device_type"
         Whitespace@356..357 " "
         Equals@357..358 "="
-        PropValueList@358..367
-          Whitespace@358..359 " "
+        Whitespace@358..359 " "
+        PropValueList@359..367
           String@359..367 "\"memory\""
         Semicolon@367..368 ";"
-      DtProperty@368..469
-        Whitespace@368..371 "\n\t\t"
-        Name@371..374
-          Ident@371..374 "reg"
+      Whitespace@368..371 "\n\t\t"
+      DtProperty@371..469
+        Name@371..374 "reg"
         Whitespace@374..375 " "
         Equals@375..376 "="
-        PropValueList@376..468
-          Whitespace@376..377 " "
+        Whitespace@376..377 " "
+        PropValueList@377..468
           DtCellList@377..468
             LAngle@377..378 "<"
             Number@378..382 "0x00"
@@ -206,25 +178,22 @@ SourceFile@0..582
       Whitespace@469..471 "\n\t"
       RCurly@471..472 "}"
       Semicolon@472..473 ";"
-    DtLabel@473..479
-      Whitespace@473..477 "\n\n  "
-      Name@477..478
-        Ident@477..478 "a"
+    Whitespace@473..477 "\n\n  "
+    DtLabel@477..479
+      Name@477..478 "a"
       Colon@478..479 ":"
-    DtNode@479..509
-      Whitespace@479..480 " "
-      Name@480..483
-        Ident@480..483 "foo"
+    Whitespace@479..480 " "
+    DtNode@480..509
+      Name@480..483 "foo"
       Whitespace@483..484 " "
       LCurly@484..485 "{"
-      DtProperty@485..504
-        Whitespace@485..490 "\n    "
-        Name@490..497
-          Ident@490..497 "setting"
+      Whitespace@485..490 "\n    "
+      DtProperty@490..504
+        Name@490..497 "setting"
         Whitespace@497..498 " "
         Equals@498..499 "="
-        PropValueList@499..503
-          Whitespace@499..500 " "
+        Whitespace@499..500 " "
+        PropValueList@500..503
           DtCellList@500..503
             LAngle@500..501 "<"
             Number@501..502 "2"
@@ -233,36 +202,28 @@ SourceFile@0..582
       Whitespace@504..507 "\n  "
       RCurly@507..508 "}"
       Semicolon@508..509 ";"
-    DtNode@509..557
-      Whitespace@509..513 "\n\n  "
-      Name@513..516
-        Ident@513..516 "bar"
+    Whitespace@509..513 "\n\n  "
+    DtNode@513..557
+      Name@513..516 "bar"
       Whitespace@516..517 " "
       LCurly@517..518 "{"
-      DtProperty@518..541
-        Whitespace@518..523 "\n    "
-        Name@523..533
-          Ident@523..526 "ref"
-          Minus@526..527 "-"
-          Ident@527..529 "to"
-          Minus@529..530 "-"
-          Ident@530..533 "foo"
+      Whitespace@518..523 "\n    "
+      DtProperty@523..541
+        Name@523..533 "ref-to-foo"
         Whitespace@533..534 " "
         Equals@534..535 "="
-        PropValueList@535..540
-          Whitespace@535..536 " "
+        Whitespace@535..536 " "
+        PropValueList@536..540
           DtCellList@536..540
             LAngle@536..537 "<"
             DtPhandle@537..539
               Ampersand@537..538 "&"
-              Name@538..539
-                Ident@538..539 "a"
+              Name@538..539 "a"
             RAngle@539..540 ">"
         Semicolon@540..541 ";"
-      DtProperty@541..552
-        Whitespace@541..546 "\n    "
-        Name@546..551
-          Ident@546..551 "empty"
+      Whitespace@541..546 "\n    "
+      DtProperty@546..552
+        Name@546..551 "empty"
         Semicolon@551..552 ";"
       Whitespace@552..555 "\n  "
       RCurly@555..556 "}"

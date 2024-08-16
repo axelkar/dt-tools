@@ -56,6 +56,10 @@ impl<'t, 'input> Sink<'t, 'input> {
                     kind,
                     forward_parent,
                 } => {
+                    // Eat trivia before starting the node
+                    // If trivia is attached, the node's range won't be what you expect
+                    self.eat_trivia();
+
                     #[cfg(feature = "grammar-tracing")]
                     tracing::debug!(?kind, "start node");
                     let mut kinds = vec![kind];
