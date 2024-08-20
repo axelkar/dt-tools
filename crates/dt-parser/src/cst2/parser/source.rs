@@ -5,12 +5,13 @@ use crate::{
     TextRange,
 };
 
-const PARSER_STEP_LIMIT: u32 = 15_000_000;
+const PARSER_STEP_LIMIT: u32 = 1_000;
 
 #[derive(Debug)]
 pub(super) struct Source<'t, 'input> {
     tokens: &'t [Token<'input>],
-    prev_cursor: usize,
+    prev_next_cursor: usize,
+    /// From which index the next immediate token will be read from.
     cursor: usize,
     steps: Cell<u32>,
     // for debugger:
@@ -77,8 +78,16 @@ impl<'t, 'input> Source<'t, 'input> {
     }
 
     /// Returns the range of the first (possibly trivia) token after the previous non-trivia token if it exists.
+    ///
+    /// Unless `cursor` is 0 (meaning no bumps have occurred), this will always return `Some`.
     pub(crate) fn prev_next_range(&self) -> Option<TextRange> {
-        Some(self.tokens.get(self.prev_cursor + 1)?.text_range)
+        Some(self.tokens.get(self.prev_next_cursor)?.text_range)
+    }
+    /// Returns the text of the first (possibly trivia) token after the previous non-trivia token if it exists.
+    ///
+    /// Unless `cursor` is 0 (meaning no bumps have occurred), this will always return `Some`.
+    pub(crate) fn prev_next_text(&self) -> Option<&str> {
+        Some(self.tokens.get(self.prev_next_cursor)?.text)
     }
 
     /// Peeks ahead at the current token's kind.
@@ -98,6 +107,12 @@ impl<'t, 'input> Source<'t, 'input> {
             self.steps.set(0);
         }
 
+        #[cfg(feature = "visualize")]
+        super::visualizer::Event::SkippedTrivia {
+            cursor: self.cursor,
+        }
+        .visualize();
+
         #[cfg(debug_assertions)]
         self.update_debug();
     }
@@ -110,7 +125,11 @@ impl<'t, 'input> Source<'t, 'input> {
     pub(super) fn peek_kind_immediate(&self) -> Option<TokenKind> {
         let steps = self.steps.get();
         assert!(steps < PARSER_STEP_LIMIT, "the parser seems stuck");
+        // TODO: remove Cell and make this function take &mut self
         self.steps.set(steps + 1);
+
+        #[cfg(feature = "visualize")]
+        super::visualizer::Event::PeekKindImmediate.visualize();
 
         // We can ignore the error when peeking
         Some(
@@ -128,5 +147,92 @@ impl<'t, 'input> Source<'t, 'input> {
     /// Returns None on EOF.
     fn peek_token_immediate(&self) -> Option<&Token> {
         self.tokens.get(self.cursor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::cst2::lexer::Lexer;
+
+    use super::*;
+
+    #[track_caller]
+    fn expect_text(source: &mut Source, expected: &str) {
+        let tok = source.next_token().expect("should have a token");
+        assert_eq!(tok.text, expected);
+    }
+
+    #[test]
+    fn prev_cursor() {
+        let tokens: Vec<_> = Lexer::new("a /*a*/b\t/*b*/c").collect();
+        assert_eq!(tokens.len(), 7);
+        let mut source = Source::new(&tokens);
+
+        assert_eq!(source.cursor, 0);
+        assert_eq!(source.prev_next_cursor, 0);
+        //assert_eq!(source.prev_next_text(), None);
+        assert_eq!(source.prev_next_text(), Some("a"));
+
+        expect_text(&mut source, "a");
+
+        assert_eq!(source.cursor, 1);
+        assert_eq!(source.prev_next_cursor, 1);
+        assert_eq!(source.prev_next_text(), Some(" "));
+
+        expect_text(&mut source, "b");
+
+        assert_eq!(source.cursor, 4);
+        assert_eq!(source.prev_next_cursor, 4);
+        assert_eq!(source.prev_next_text(), Some("\t"));
+
+        expect_text(&mut source, "c");
+
+        assert_eq!(source.cursor, 7);
+        assert_eq!(source.prev_next_cursor, 7);
+        assert_eq!(source.prev_next_text(), None);
+
+        // parser will only peek at EOF
+        assert_eq!(source.peek_kind(), None);
+
+        assert_eq!(source.cursor, 7);
+        assert_eq!(source.prev_next_cursor, 7);
+        assert_eq!(source.prev_next_text(), None);
+    }
+
+    #[test]
+    fn prev_cursor_trailing_trivia() {
+        let tokens: Vec<_> = Lexer::new("a /*a*/b\t/*b*/c\n").collect();
+        assert_eq!(tokens.len(), 8);
+        let mut source = Source::new(&tokens);
+
+        assert_eq!(source.cursor, 0);
+        assert_eq!(source.prev_next_cursor, 0);
+        //assert_eq!(source.prev_next_text(), None);
+        assert_eq!(source.prev_next_text(), Some("a"));
+
+        expect_text(&mut source, "a");
+
+        assert_eq!(source.cursor, 1);
+        assert_eq!(source.prev_next_cursor, 1);
+        assert_eq!(source.prev_next_text(), Some(" "));
+
+        expect_text(&mut source, "b");
+
+        assert_eq!(source.cursor, 4);
+        assert_eq!(source.prev_next_cursor, 4);
+        assert_eq!(source.prev_next_text(), Some("\t"));
+
+        expect_text(&mut source, "c");
+
+        assert_eq!(source.cursor, 7);
+        assert_eq!(source.prev_next_cursor, 7);
+        assert_eq!(source.prev_next_text(), Some("\n"));
+
+        // parser will only peek at EOF
+        assert_eq!(source.peek_kind(), None);
+
+        assert_eq!(source.cursor, 8);
+        assert_eq!(source.prev_next_cursor, 7);
+        assert_eq!(source.prev_next_text(), Some("\n"));
     }
 }

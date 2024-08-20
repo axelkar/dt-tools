@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DT-tools parser visualizer</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  display: flex;
+  flex-direction: column;
+  background-color: #f0f0f0;
+}
+
+/* input 320 + gap 8 + output 320 + body margin 8+8 = 664px */
+
+#tokenlist {
+  display: flex;
+  gap: 4px;
+  overflow-x: scroll;
+  overflow-y: clip;
+}
+
+.token {
+  display: flex;
+  flex-direction: column;
+  background-color: #ffd967;
+  align-items: center;
+
+  padding: 10px 20px;
+  border: 2px solid #333;
+  border-radius: 4px;
+  font-family: Arial, sans-serif;
+  font-size: 1rem;
+  color: #333;
+}
+.tokenkind, .tokentext {
+  font-family: monospace;
+}
+
+.cursor {
+    background-color: #333;
+    color: white;
+    width: 80px;
+    height: 60px;
+    clip-path: polygon(50% 0, 0% 100%, 100% 100%);
+    white-space: preserve; /* easy line-break in JS */
+    font-size: 0.75rem;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+#control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.counter {
+  background-color: #ff7f00;
+  color: white;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+h3 {
+  margin: 0;
+}
+
+</style>
+  </head>
+  <body>
+    <div id="control">
+      <h3>Tokens</h3>
+      <input type="file" id="fileinput">
+      <button id="step_button">Step</button>
+      <div id="vars" style="display: none;">
+        <span id="var_steps" class="counter"></span>
+        <span id="var_text_range" class="counter"></span>
+      </div>
+    </div>
+    <div id="tokenlist">
+    </div>
+    <ul id="grammartree">
+      <h3>
+        Grammar tree
+      </h3>
+    </ul>
+    <script type="module">
+      function h(tag, attrs = {}, ...children) {
+        // Create an element with the specified tag
+        const element = document.createElement(tag);
+
+        // Set attributes on the element
+        for (const [key, value] of Object.entries(attrs)) {
+          if (key === 'classList') {
+            // Handle class using classList
+            if (Array.isArray(value)) {
+              value.forEach(className => element.classList.add(className));
+            } else {
+              element.classList.add(value);
+            }
+            break;
+            // Handle event listeners
+            element.addEventListener(key.substring(2).toLowerCase(), value);
+          } else {
+            element.setAttribute(key, value);
+          }
+        }
+
+        // Append child elements or text nodes
+        children.forEach(child => {
+          if (typeof child === 'string') {
+            element.appendChild(document.createTextNode(child));
+          } else {
+            element.appendChild(child);
+          }
+        });
+
+        return element;
+      }
+
+      const tokenlist = document.getElementById("tokenlist");
+      const grammartree = document.getElementById("grammartree");
+
+      let tokens = [];
+
+      let var_steps = 0;
+      let var_cursor = 0;
+      let var_prev_next_cursor = 0;
+      const vars_el = document.getElementById("vars");
+      const var_steps_el = document.getElementById("var_steps");
+      const var_text_range_el = document.getElementById("var_text_range");
+
+      let events = [];
+      let next_event = 0;
+      const step_button = document.getElementById("step_button");
+      step_button.addEventListener("click", () => {
+        let old_cursor = var_cursor;
+        while (old_cursor == var_cursor && events[next_event]) step();
+      });
+
+      function step() {
+        let event = events[next_event];
+        next_event += 1;
+
+        switch (event.kind) {
+          case "init":
+            console.info('init', event);
+
+            tokens = event.tokens;
+            var_steps = 0;
+            vars_el.style.display = null;
+            var_steps_el.textContent = 'Steps: ' + var_steps;
+            var_text_range_el.textContent = '0..0';
+            var_cursor = 0;
+            var_prev_next_cursor = 0;
+
+            tokenlist.replaceChildren(...tokens.map(token => h(
+              'div',
+              { classList: 'token' },
+              token.kind !== null
+                ? h('div', { classList: 'tokenkind' }, token.kind)
+                : h('div', { classList: 'tokenerror' }, token.error),
+              h('div', { classList: 'tokentext' }, token.text)
+            )));
+            tokenlist.children.length !== 0 && addCursorsInitial();
+            break;
+
+          case "next_token":
+            console.info('next_token', event);
+
+            setCursor(event.cursor, var_cursor, '\nCursor', 'current-cursor', 'prev-next-cursor');
+            var_cursor = event.cursor;
+            setCursor(event.prev_next_cursor, var_prev_next_cursor, '\nPrev\nnext\ncursor', 'prev-next-cursor');
+            var_prev_next_cursor = event.prev_next_cursor;
+
+            tokenlist.children[var_cursor].scrollIntoView({ inline: "center" });
+
+            let text_range = tokens[event.cursor].text_range;
+            var_text_range_el.textContent = `${text_range.start}..${text_range.end}`;
+            break;
+
+          case "peek_kind_immediate":
+
+            var_steps += 1;
+            var_steps_el.textContent = 'Steps: ' + var_steps;
+            break;
+
+          case "skipped_trivia":
+            console.info('skipped_trivia', event);
+            if (event.cursor != var_cursor) {
+              var_steps = 0;
+              var_steps_el.textContent = 'Steps: ' + var_steps;
+
+              setCursor(event.cursor, var_cursor, '\nCursor', 'current-cursor', 'prev-next-cursor');
+              var_cursor = event.cursor;
+
+              tokenlist.children[var_cursor].scrollIntoView({ inline: "center" });
+
+              let text_range = tokens[event.cursor].text_range;
+              var_text_range_el.textContent = `${text_range.start}..${text_range.end}`;
+            }
+            break;
+
+          case "grammar_begin":
+            console.info(event);
+            grammartree.appendChild(h('li', {}, event.name));
+            break;
+
+          case "grammar_end":
+            console.info(event);
+            grammartree.lastChild.remove();
+            break;
+        }
+      }
+
+      const fileinput = document.getElementById("fileinput");
+      fileinput.addEventListener("change", async () => {
+        const [file] = fileinput.files;
+        if (!file) return;
+
+        events = JSON.parse(await file.text());
+        next_event = 0;
+        step(); // Skip init event
+        if (tokenlist.children[0]) tokenlist.children[0].scrollIntoView(true);
+      });
+
+      function addCursorsInitial() {
+        const tokenElement = tokenlist.children[0];
+        tokenElement.append(
+          h('div', { classList: ['cursor', 'current-cursor'] }, '\nCursor'),
+          h('div', { classList: ['cursor', 'prev-next-cursor'] }, '\nPrev\nnext\ncursor')
+        );
+      }
+
+      function setCursor(newIndex, prevIndex, label, className, beforeClassName) {
+        const prevTokenElement = tokenlist.children[prevIndex];
+        const newTokenElement = tokenlist.children[newIndex];
+        if (!newTokenElement) return;
+
+        console.debug(prevTokenElement, Array.from(prevTokenElement.children).map(child => Array.from(child.classList)), className);
+        prevTokenElement.getElementsByClassName(className)[0].remove()
+
+        const newCursorElement = h('div', { classList: ['cursor', className] }, label);
+        if (typeof beforeClassName !== "undefined") {
+          const beforeElement = newTokenElement.getElementsByClassName(beforeClassName)[0];
+          if (typeof beforeElement !== "undefined") {
+            newTokenElement.insertBefore(newCursorElement, beforeElement)
+          } else {
+            newTokenElement.appendChild(newCursorElement)
+          }
+        } else {
+          newTokenElement.appendChild(newCursorElement)
+        }
+      }
+    </script>
+  </body>
+</html>

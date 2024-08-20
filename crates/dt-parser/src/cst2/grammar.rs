@@ -3,6 +3,29 @@ use std::borrow::Cow;
 #[cfg(feature = "grammar-tracing")]
 use tracing::debug;
 
+macro_rules! vis {
+    (begin) => {
+        #[cfg(feature = "visualize")]
+        crate::cst2::parser::visualizer::Event::GramBegin(vis!(@function_name)).visualize();
+    };
+    (end) => {
+        #[cfg(feature = "visualize")]
+        crate::cst2::parser::visualizer::Event::GramEnd(vis!(@function_name)).visualize();
+    };
+    (@function_name) => {{
+        // Okay, this is ugly, I get it. However, this is the best we can get on a stable rust.
+        fn f() {}
+        fn type_name_of<T>(_: T) -> &'static str {
+            std::any::type_name::<T>()
+        }
+        let name = type_name_of(f);
+        // `3` is the length of the `::f`.
+        &name[..name.len() - 3]
+    }};
+}
+
+use crate::cst2::parser::Expected;
+
 use super::{
     lexer::TokenKind,
     parser::{CompletedMarker, Marker, Parser, SpanLabel},
@@ -14,6 +37,7 @@ use super::{
 /// - Form: `(1 + 2 + PREPROCESSOR_CONST)`.
 /// - When IN_MACRO is true, form: `1 + CONST)` | `1 + CONST`, ending at comma
 fn dt_expr<const IN_MACRO: bool>(p: &mut Parser) {
+    vis!(begin);
     let m = p.start();
 
     // TODO: https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
@@ -75,6 +99,7 @@ fn dt_expr<const IN_MACRO: bool>(p: &mut Parser) {
     p.expect(TokenKind::RParen);
 
     m.complete(p, NodeKind::DtExpr);
+    vis!(end);
 }
 
 /// Parses a Devicetree phandle.
@@ -82,6 +107,7 @@ fn dt_expr<const IN_MACRO: bool>(p: &mut Parser) {
 /// - Form: `&foo` | `&{/path}`.
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn dt_phandle(p: &mut Parser) {
+    vis!(begin);
     #[cfg(feature = "grammar-tracing")]
     debug!("dt_phandle start");
 
@@ -137,6 +163,8 @@ fn dt_cell_list(p: &mut Parser) {
     p.expect(TokenKind::RAngle);
 
     m.complete(p, NodeKind::DtCellList);
+    vis!(end);
+    Ok(())
 }
 
 const ITEM_RECOVERY_SET: &[TokenKind] = &[
@@ -165,6 +193,7 @@ const ITEM_RECOVERY_SET: &[TokenKind] = &[
 ///
 /// - Form: `= "foo", <1>;` | `;`.
 fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
+    vis!(begin);
     if p.at(TokenKind::Semicolon) {
         p.bump();
         return m.complete(p, NodeKind::DtProperty);
@@ -211,6 +240,7 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
 
     p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
 
+    vis!(end);
     m.complete(p, NodeKind::DtProperty)
 }
 
@@ -219,6 +249,7 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
 /// - Form: `{ foo = "bar"; baz {}; };`.
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn dt_node_body(p: &mut Parser, m: Marker) {
+    vis!(begin);
     #[cfg(feature = "grammar-tracing")]
     debug!("dt_node_body start");
 
@@ -253,11 +284,13 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
 
     #[cfg(feature = "grammar-tracing")]
     debug!("dt_node_body end");
+    vis!(end);
 }
 
 /// TODO: mod_contents: while !(p.at(EOF) || (p.at(T!['}']) && stop_on_r_curly)) {
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn item(p: &mut Parser) {
+    vis!(begin);
     #[cfg(feature = "grammar-tracing")]
     debug!("item start");
 
@@ -413,6 +446,7 @@ fn item(p: &mut Parser) {
 
     #[cfg(feature = "grammar-tracing")]
     debug!("item end");
+    vis!(end);
 }
 
 pub(super) fn root(p: &mut Parser) {

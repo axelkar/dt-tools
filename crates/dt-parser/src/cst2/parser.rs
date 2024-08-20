@@ -73,6 +73,20 @@ pub fn parse(input: &str) -> Parse {
     use super::lexer::Lexer;
 
     let tokens: Vec<_> = Lexer::new(input).collect();
+
+    #[cfg(feature = "visualize")]
+    visualizer::Event::Init {
+        tokens: tokens
+            .iter()
+            .map(|tok| visualizer::OwnedToken {
+                kind: tok.kind,
+                text: tok.text.to_owned(),
+                text_range: tok.text_range,
+            })
+            .collect(),
+    }
+    .visualize();
+
     let source = Source::new(&tokens);
     let mut parser = Parser::new(source);
 
@@ -410,6 +424,54 @@ impl<'t, 'input> Parser<'t, 'input> {
 
         assert!(self.source.next_token().is_some(), "Tried to bump at EOF");
         self.events.push(Event::AddToken)
+    }
+}
+
+#[cfg(feature = "visualize")]
+pub mod visualizer {
+    use super::*;
+    use std::cell::RefCell;
+
+    use crate::cst2::lexer::{LexError, TokenKind};
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct OwnedToken {
+        pub kind: Result<TokenKind, LexError>,
+        pub text: String,
+        pub text_range: TextRange,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Event {
+        Init {
+            tokens: Vec<OwnedToken>,
+        },
+        /// Always clears steps
+        NextToken {
+            cursor: usize,
+            prev_next_cursor: usize,
+        },
+        /// Always increases steps
+        PeekKindImmediate,
+        /// Clears steps if cursor has increased
+        SkippedTrivia {
+            cursor: usize,
+        },
+        GramBegin(&'static str),
+        GramEnd(&'static str),
+    }
+    impl Event {
+        pub fn visualize(self) {
+            VEC.with_borrow_mut(|vec| vec.push(self));
+        }
+    }
+
+    thread_local! {
+        static VEC: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub fn take_events() -> Vec<Event> {
+        VEC.with_borrow_mut(std::mem::take)
     }
 }
 
