@@ -2,6 +2,8 @@
 name = "dt-parser"
 edition = "2021"
 description = "Error-resilient Devicetree parser"
+keywords = ["devicetree"]
+categories = ["parser-implementations"]
 
 version.workspace = true
 authors.workspace = true
@@ -11,16 +13,17 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-bstr = "1.9.1"
-drop_bomb = "0.1.5"
-either = "1.13.0"
-enum-as-inner = "0.6.0"
-itertools = "0.13.0"
-logos = "0.14.0"
+bstr = "1.10"
+drop_bomb = "0.1"
+either = "1.13"
+enum-as-inner = "0.6"
+itertools.workspace = true
+logos = "0.14.1"
 #logos = { git = "https://github.com/maciejhirsz/logos.git", rev = "640882a0351f76803787153f863fcbd725fd3395", features = ["debug"] }
-smallvec = "1.13.2"
-thiserror = "1.0.61"
-tracing = "0.1.40"
+smallvec = "1.13"
+thiserror = "1.0"
+tracing.workspace = true
+dt-diagnostic.workspace = true
 
 [dev-dependencies]
 notify = "6.1.1"

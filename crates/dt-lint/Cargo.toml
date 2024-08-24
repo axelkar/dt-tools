@@ -2,6 +2,8 @@
 name = "dt-lint"
 edition = "2021"
 description = "Devicetree linter"
+keywords = ["devicetree"]
+categories = ["development-tools"]
 
 version.workspace = true
 authors.workspace = true
@@ -12,5 +14,5 @@ license.workspace = true
 
 [dependencies]
 dt-parser.workspace = true
-itertools = "0.13.0"
-tracing = "0.1.40"
+tracing.workspace = true
+dt-diagnostic.workspace = true

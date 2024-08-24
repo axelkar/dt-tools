@@ -6,7 +6,7 @@ use jsonschema::JSONSchema;
 use metaschemas::{CompilerMetaSchemaExt, SCHEMA_VALIDATOR};
 use serde_yaml::{Mapping, Value};
 
-pub mod fixups;
+mod fixups;
 mod metaschemas;
 mod resolver;
 
@@ -103,13 +103,19 @@ pub fn find_select(tree: DefinitionTreeNode, select: &JSONSchema) -> Option<Defi
 }
 
 #[cfg(test)]
-#[test]
-fn test_compile() {
-    use dt_parser::ast::{self, AstNode as _};
+mod tests {
+    use super::*;
+    use dt_parser::ast;
 
     fn compile_example(example: &str, schema: &BindingSchema) {
-        let example = format!("/dts-v1/;\n\n/ {{\n{example}\n}};");
-        let parse = ast::SourceFile::parse(&example);
+        // Hack for examples that already have root nodes like simple-framebuffer.yaml
+        let example = if example.contains("/ {") {
+            example
+        } else {
+            &format!("/dts-v1/;\n\n/ {{\n{example}\n}};")
+        };
+
+        let parse = ast::SourceFile::parse(example);
 
         if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
             eprintln!("Invalid DTS!");
@@ -117,28 +123,45 @@ fn test_compile() {
         };
 
         let file = parse.source_file();
-        eprintln!("{}", file.syntax_ref().green.print_tree());
+        //eprintln!("Parsed tree: {}", file.syntax().green.print_tree());
 
-        let def = dt_analyzer::analyze_cst(&file, &example).unwrap();
-        let json = find_select(def.tree, &schema.select).unwrap().into_json();
+        let def = dt_analyzer::analyze_cst(&file, example).unwrap();
+        println!(
+            "tree: {:#?} parsed from {}, json = {}",
+            def.tree,
+            example,
+            serde_json::to_string_pretty(&def.tree.clone().into_json()).unwrap()
+        );
+        let json = find_select(def.tree, &schema.select)
+            .expect("Couldn't find selected")
+            .into_json();
         eprintln!("{:#?}", json);
         if let Err(e) = schema.schema.validate(&json) {
             eprintln!("{:#?}", e.collect::<Vec<_>>());
         };
     }
-    let schema = BindingSchema::compile("./example.yaml").unwrap();
-    if let Err(e) = schema.select.validate(&serde_json::json!({
-        "compatible": ["vendor,soc4-ip"]
-    })) {
-        eprintln!("{:#?}", e.collect::<Vec<_>>());
-    };
-    compile_example(schema.raw_schema["examples"][0].as_str().unwrap(), &schema);
 
-    // FIXME: fix errors with top-level `reg`
-    /*let schema = BindingSchema::compile(
-        "/home/axel/dev/mainlining/linux/Documentation/devicetree/bindings/leds/leds-bcm6328.yaml",
-    )
-    .unwrap();
-    println!("Fixed schema: {:#?}", schema.raw_schema);
-    compile_example(schema.raw_schema["examples"][0].as_str().unwrap(), &schema);*/
+    #[test]
+    fn test_example() {
+        let schema = BindingSchema::compile("./example.yaml").unwrap();
+        compile_example(schema.raw_schema["examples"][0].as_str().unwrap(), &schema);
+    }
+
+    #[test]
+    fn test_leds() {
+        let schema = BindingSchema::compile(
+            "/home/axel/dev/mainlining/linux/Documentation/devicetree/bindings/leds/leds-bcm6328.yaml",
+        )
+        .unwrap();
+        compile_example(schema.raw_schema["examples"][0].as_str().unwrap(), &schema);
+    }
+
+    #[test]
+    fn test_simplefb() {
+        let schema = BindingSchema::compile(
+            "/home/axel/dev/mainlining/linux/Documentation/devicetree/bindings/display/simple-framebuffer.yaml",
+        )
+        .unwrap();
+        compile_example(schema.raw_schema["examples"][0].as_str().unwrap(), &schema);
+    }
 }

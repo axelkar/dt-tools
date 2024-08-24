@@ -2,6 +2,8 @@
 name = "dt-fmt"
 edition = "2021"
 description = "Devicetree formatter"
+keywords = ["devicetree"]
+categories = ["development-tools"]
 
 version.workspace = true
 authors.workspace = true

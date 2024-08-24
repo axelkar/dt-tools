@@ -1,5 +1,6 @@
-use dashmap::DashMap;
-use dt_analyzer::{analyze_cst, FileDefinition};
+use axka_rcu::{triomphe, Rcu};
+use dt_analyzer::new::stage1::AnalyzedToplevel;
+use dt_diagnostic::DiagnosticCollector;
 use dt_parser::{
     ast::{self, AstNode},
     cst2::{
@@ -8,9 +9,8 @@ use dt_parser::{
     },
     SourceId, TextRange,
 };
-use include::PPInclude;
 use ropey::Rope;
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -22,22 +22,29 @@ use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 
 mod hover;
-mod include;
+
+/// A fast map that can be sent between threads
+pub type FxDashMap<K, V> =
+    dashmap::DashMap<K, V, std::hash::BuildHasherDefault<rustc_hash::FxHasher>>;
 
 #[derive(Debug)]
 pub struct Document {
     pub text: Rope,
     pub file: Option<ast::SourceFile>,
-    pub analyzed: Option<FileDefinition>,
+    pub analyzed: Option<Vec<AnalyzedToplevel>>,
 }
 
 #[derive(Debug)]
 struct SharedState {
-    document_map: DashMap<SourceId, Document>,
+    document_map: FxDashMap<SourceId, Document>,
     workspace_folders: Mutex<Vec<WorkspaceFolder>>,
+    /// The file where evaluation will start from
+    ///
+    /// Files not (recursively) included in this file must not be analyzed
+    main_file: Rcu<Option<SourceId>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct Backend {
     client: Client,
     state: Arc<SharedState>,
@@ -134,12 +141,23 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "file opened!")
             .await;
+
+        let source_id = SourceId::from(params.text_document.uri.as_str());
+
+        if self.state.main_file.read().is_none() {
+            self.state
+                .main_file
+                .write(triomphe::Arc::new(Some(source_id)));
+        }
+
+        // TODO: warn files that aren't included by main_file
+
         self.on_change(
             params.text_document.uri,
             params.text_document.text,
             Some(params.text_document.version),
-        )
-        .await
+            tokio::runtime::Handle::current(),
+        );
     }
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
         assert_eq!(
@@ -150,8 +168,8 @@ impl LanguageServer for Backend {
             params.text_document.uri,
             std::mem::take(&mut params.content_changes[0].text),
             Some(params.text_document.version),
-        )
-        .await
+            tokio::runtime::Handle::current(),
+        );
     }
     async fn did_save(&self, _: DidSaveTextDocumentParams) {
         self.client
@@ -160,6 +178,9 @@ impl LanguageServer for Backend {
     }
     async fn did_close(&self, _: DidCloseTextDocumentParams) {
         debug!("file closed");
+
+        // TODO: remove main file?
+
         self.client
             .log_message(MessageType::INFO, "file closed!")
             .await;
@@ -172,10 +193,16 @@ impl LanguageServer for Backend {
 
 impl Backend {
     #[tracing::instrument(skip_all, fields(uri = %uri))]
-    async fn on_change(&self, uri: Url, text: String, version: Option<i32>) {
+    fn on_change(
+        &self,
+        uri: Url,
+        text: String,
+        version: Option<i32>,
+        tokio_handle: tokio::runtime::Handle,
+    ) {
         debug!(version, "File with URI `{uri}` was changed");
         let rope = ropey::Rope::from_str(&text);
-        let source_id = SourceId::from(uri.to_string());
+        let source_id = SourceId::from(uri.as_str());
         self.state.document_map.insert(
             source_id.clone(),
             Document {
@@ -184,6 +211,10 @@ impl Backend {
                 analyzed: None,
             },
         );
+        // TODO: Check if it exists already, with equal text
+        // It may be an included file or a reopened file
+
+        let is_main_file = self.state.main_file.read().as_deref() == Some(&source_id);
 
         let Parse {
             green_node,
@@ -218,7 +249,7 @@ impl Backend {
                     Some(DiagnosticSeverity::HINT),
                     None,
                     None,
-                    span_label.message.into_owned(),
+                    span_label.msg.into_owned(),
                     None,
                     None,
                 ));
@@ -227,6 +258,69 @@ impl Backend {
 
         let cst = RedNode::new(Arc::new(green_node));
 
+        // TODO: use Parse::source_file
+        let file = ast::SourceFile::cast(cst).expect("parser should always return SourceFile");
+
+        diagnostics.extend(
+            dt_lint::default_lint(&file, &text, is_main_file)
+                .iter()
+                .flat_map(|lint| {
+                    lint.span
+                        .primary_spans
+                        .iter()
+                        .filter_map(|span| {
+                            let range = Range::new(
+                                offset_to_position(span.start, &rope)?,
+                                offset_to_position(span.end, &rope)?,
+                            );
+                            Some(Diagnostic::new(
+                                range,
+                                Some(match lint.severity {
+                                    dt_lint::LintSeverity::Warn => DiagnosticSeverity::WARNING,
+                                    dt_lint::LintSeverity::Error => DiagnosticSeverity::ERROR,
+                                }),
+                                None,
+                                None,
+                                format!("{} [{}]", lint.msg, lint.id),
+                                None,
+                                None,
+                            ))
+                        })
+                        .chain(lint.span.span_labels.iter().filter_map(|(span, hint)| {
+                            let range = Range::new(
+                                offset_to_position(span.start, &rope)?,
+                                offset_to_position(span.end, &rope)?,
+                            );
+                            Some(Diagnostic::new(
+                                range,
+                                Some(DiagnosticSeverity::HINT),
+                                None,
+                                None,
+                                format!("{} [{}.hint]", hint, lint.id),
+                                None,
+                                None,
+                            ))
+                        }))
+                }),
+        );
+
+        let mut new_diagnostics = Vec::new();
+        let diag = parking_lot::Mutex::new(&mut new_diagnostics);
+
+        let analyzed = dt_analyzer::new::stage1::analyze_file(&file, &text, &diag);
+        let includes = &[]; // TODO
+        let analyzed2 = dt_analyzer::new::stage2::compute(
+            analyzed.iter().filter_map(|a| a.as_node()),
+            includes,
+            &diag,
+        );
+        //if is_main_file {
+        if false {
+            use std::io::Write;
+            let mut f = std::fs::File::create("analyzed2.dbg").unwrap();
+            write!(f, "analyzed2={:#?}", analyzed2).unwrap();
+        }
+
         let parent_path = uri
             .to_file_path()
             .expect("LSP should only allow file: URIs")
@@ -234,132 +328,91 @@ impl Backend {
             .expect("a file always has a parent")
             .to_owned();
 
+        // Linux kernel DTC include path:
+        // - include (for #define's in header files)
+        // - scripts/dtc/include-prefixes
+
+        let include_dirs = &[
+            PathBuf::from("/home/axel/dev/mainlining/linux/include"),
+            PathBuf::from("/home/axel/dev/mainlining/linux/scripts/dtc/include-prefixes"),
+        ];
+
         // TODO: only re-check when includes are updated or include config is changed
-        for include in PPInclude::gather_includes(&cst) {
-            // Linux kernel DTC include path:
-            // - include (for #define's in header files)
-            // - scripts/dtc/include-prefixes
-
-            // TODO: don't resolve symlinks! use std::path::absolute once 1.80.0 is stable
-
-            let include_dirs = [
-                PathBuf::from("/home/axel/dev/mainlining/linux/include"),
-                PathBuf::from("/home/axel/dev/mainlining/linux/scripts/dtc/include-prefixes"),
-            ];
-
-            let include_path = include
-                .relative
-                .then(|| {
-                    let relative_path = parent_path.join(&include.path).canonicalize().ok()?;
-                    relative_path.exists().then_some(relative_path)
-                })
-                .flatten()
-                .or_else(|| {
-                    include_dirs.iter().find_map(|base_path| {
-                        let new_path = base_path.join(&include.path).canonicalize().ok()?;
-                        new_path.exists().then_some(new_path)
-                    })
-                });
+        for include in analyzed.iter().filter_map(AnalyzedToplevel::as_include) {
+            let include_path = include.find_file(&parent_path, include_dirs);
 
             let Some(include_path) = include_path else {
-                diagnostics.push(Diagnostic::new_simple(
-                    range_to_lsp(include.text_range, &rope).unwrap(),
-                    "Couldn't find file to include".to_owned(),
+                diag.emit(dt_diagnostic::Diagnostic::new(
+                    include.text_range,
+                    Cow::Borrowed("Couldn't find file to include"),
+                    dt_diagnostic::Severity::Error,
                 ));
                 continue;
             };
 
-            let new_uri = Url::from_file_path(include_path.canonicalize().unwrap()).unwrap();
-
-            let this = self.clone();
+            let new_uri = Url::from_file_path(include_path.clone()).unwrap();
 
             tracing::info!("dot {:?} -> {:?}", uri.to_string(), new_uri.to_string());
-
-            /// <https://github.com/tokio-rs/tokio/issues/2394>
-            fn spawn_indirection(this: Backend, include_path: PathBuf, new_uri: Url) {
-                tokio::spawn(async move {
-                    if let Ok(text) = tokio::fs::read_to_string(include_path).await {
-                        this.on_change(new_uri, text, None).await;
-                    }
-                });
-            }
 
             if !self
                 .state
                 .document_map
                 .contains_key(&SourceId::from(new_uri.to_string()))
             {
-                spawn_indirection(this, include_path, new_uri);
+                let this = self.clone();
+                let tokio_handle = tokio_handle.clone();
+                rayon::spawn(move || {
+                    // AnalyzedInclude::find_file made sure it exists
+                    if let Ok(text) = std::fs::read_to_string(include_path) {
+                        this.on_change(new_uri, text, None, tokio_handle);
+                    }
+                });
             }
         }
 
-        // TODO: use Parse::source_file
-        let file = ast::SourceFile::cast(cst).expect("parser should always return SourceFile");
+        for new_diagnostic in new_diagnostics {
+            // TODO: level
+            for primary_span in new_diagnostic.span.primary_spans {
+                diagnostics.push(Diagnostic::new_simple(
+                    range_to_lsp(primary_span, &rope).unwrap(),
+                    new_diagnostic.msg.clone().into_owned(),
+                ));
+            }
 
-        diagnostics.extend(dt_lint::default_lint(&file, &text).iter().flat_map(|lint| {
-            lint.span
-                .primary_spans
-                .iter()
-                .filter_map(|span| {
-                    let range = Range::new(
-                        offset_to_position(span.start, &rope)?,
-                        offset_to_position(span.end, &rope)?,
-                    );
-                    Some(Diagnostic::new(
-                        range,
-                        Some(match lint.severity {
-                            dt_lint::LintSeverity::Warn => DiagnosticSeverity::WARNING,
-                            dt_lint::LintSeverity::Error => DiagnosticSeverity::ERROR,
-                        }),
-                        None,
-                        None,
-                        format!("{} [{}]", lint.msg, lint.id),
-                        None,
-                        None,
-                    ))
-                })
-                .chain(lint.span.span_labels.iter().filter_map(|(span, hint)| {
-                    let range = Range::new(
-                        offset_to_position(span.start, &rope)?,
-                        offset_to_position(span.end, &rope)?,
-                    );
-                    Some(Diagnostic::new(
-                        range,
-                        Some(DiagnosticSeverity::HINT),
-                        None,
-                        None,
-                        format!("{} [{}.hint]", hint, lint.id),
-                        None,
-                        None,
-                    ))
-                }))
-        }));
-
-        let analyzed = analyze_cst(&file, &text);
-        if analyzed.is_none() {
-            // TODO: only analyze or show this message on save
-            self.client
-                .show_message(MessageType::ERROR, "failed to analyze document")
-                .await;
-        } else {
-            self.client
-                .show_message(MessageType::INFO, "analyzed document!")
-                .await;
+            // TODO: relatedInformation instead of HINT
+            // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#diagnosticRelatedInformation
+            for span_label in new_diagnostic.span.span_labels {
+                diagnostics.push(Diagnostic::new(
+                    range_to_lsp(span_label.span, &rope).unwrap(),
+                    Some(DiagnosticSeverity::HINT),
+                    None,
+                    None,
+                    span_label.msg.into_owned(),
+                    None,
+                    None,
+                ));
+            }
         }
+
         self.state.document_map.insert(
             source_id.clone(),
             Document {
                 text: rope,
                 file: Some(file),
-                analyzed,
+                analyzed: Some(analyzed),
             },
         );
 
         // TODO: special highlighting for known special names?
+        // phandle, #*-cells, #*-size, pinctrl-*, etc.
 
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, version)
-            .await;
+        diagnostics.dedup();
+        let client = self.client.clone();
+        tokio_handle.spawn(async move {
+            client
+                .publish_diagnostics(uri.clone(), diagnostics, version)
+                .await;
+        });
     }
 }
 
@@ -370,8 +423,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (service, socket) = LspService::new(|client| Backend {
         client,
         state: Arc::new(SharedState {
-            document_map: DashMap::new(),
+            document_map: FxDashMap::default(),
             workspace_folders: Mutex::new(Vec::new()),
+            main_file: Rcu::new(triomphe::Arc::new(None)),
         }),
     });
 

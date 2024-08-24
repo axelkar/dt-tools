@@ -16,7 +16,7 @@ pub(crate) enum Event {
         /// The combined text of the tokens.
         ///
         /// This is stored here and not computed for performance.
-        text: String
+        text: String,
     },
     FinishNode,
     Placeholder,

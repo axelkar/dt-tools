@@ -47,11 +47,13 @@ fn visualize() {
     use serde_json::json;
 
     let Ok(path) = std::env::var("EXPORT_VISUALIZATION") else {
-        return
+        return;
     };
 
-    let events = visualizer::take_events().into_iter().map(|event| match event {
-        visualizer::Event::Init { tokens } => json!({
+    let events = visualizer::take_events()
+        .into_iter()
+        .map(|event| match event {
+            visualizer::Event::Init { tokens } => json!({
                 "kind": "init",
                 "tokens": tokens.into_iter().map(|tok| json!({
                     "error": tok.kind.err().map(|err| err.to_string()),
@@ -63,33 +65,38 @@ fn visualize() {
                     }
                 })).collect::<Vec<_>>()
             }),
-        visualizer::Event::NextToken {
-            cursor,
-            prev_next_cursor,
-        } => json!({
+            visualizer::Event::NextToken {
+                cursor,
+                prev_next_cursor,
+            } => json!({
                 "kind": "next_token",
                 "cursor": cursor,
                 "prev_next_cursor": prev_next_cursor
             }),
-        visualizer::Event::PeekKindImmediate => json!({ "kind": "peek_kind_immediate" }),
-        visualizer::Event::SkippedTrivia { cursor } => json!({
+            visualizer::Event::PeekKindImmediate => json!({ "kind": "peek_kind_immediate" }),
+            visualizer::Event::SkippedTrivia { cursor } => json!({
                 "kind": "skipped_trivia",
                 "cursor": cursor,
             }),
-        visualizer::Event::GramBegin(name) => json!({
+            visualizer::Event::GramBegin(name) => json!({
                 "kind": "grammar_begin",
                 "name": name,
             }),
-        visualizer::Event::GramEnd(name) => json!({
+            visualizer::Event::GramEnd(name) => json!({
                 "kind": "grammar_end",
                 "name": name,
             }),
-    }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
     let file = std::fs::File::create(path).unwrap();
 
     serde_json::to_writer(&file, &events).unwrap();
-    println!("{}{}", "Visualized! ".green().bold(), "Open it with ./examples/visualizer.html".green());
+    println!(
+        "{}{}",
+        "Visualized! ".green().bold(),
+        "Open it with ./examples/visualizer.html".green()
+    );
 }
 
 #[cfg(not(feature = "visualize"))]

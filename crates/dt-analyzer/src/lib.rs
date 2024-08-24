@@ -36,19 +36,23 @@
 //! //assert_eq!(hm["foo/c"], Value::U32(3));
 //! assert_eq!(hm.len(), 3);
 //! ```
-// TODO: fix extensions!
 
 use std::{borrow::Cow, collections::HashMap};
 
-use dt_parser::ast::{self, AstNode, HasLabel as _, HasName as _};
+use dt_parser::ast::{self, AstNode, AstToken as _, HasLabel as _, HasName as _};
 pub use prop::{
     analyze_node, CustomValue, CustomValueCellItem, DefinitionTree, DefinitionTreeNode,
     PhandleTarget, PropDefinition, Value, ValueFromAstError,
 };
 pub use string::StringParseError;
 
+mod macros;
+pub mod new;
 mod prop;
+pub mod resolved_prop;
 mod string;
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDefinition {
@@ -93,13 +97,15 @@ pub fn analyze_cst(file: &ast::SourceFile, src: &str) -> Option<FileDefinition> 
     let mut tree = analyze_node(root_node, src)?;
     for extension in extensions {
         // TODO: path-based phandles
-        let label = extension.extension_name()?.name()?.text(src)?;
+        let label = extension.extension_name()?.name()?;
+        let label = label.syntax().text().as_str();
+
         let label = match labels.get(label) {
             Some(labels) => labels,
             None => {
                 tracing::warn!(
                     "Couldn't find label {label} for extension at {:?}!",
-                    extension.syntax_ref().text_range()
+                    extension.syntax().text_range()
                 );
                 continue;
             }
@@ -123,7 +129,7 @@ pub fn find_labels<'i>(node: &ast::DtNode, src: &'i str) -> Vec<(&'i str, Label)
     node.label()
         .and_then(|label| {
             Some((
-                label.name()?.text(src)?,
+                label.name()?.syntax().text_from_source(src),
                 Label {
                     node_ast: node.clone(),
                     label_ast: label,

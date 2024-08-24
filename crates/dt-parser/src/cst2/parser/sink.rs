@@ -94,7 +94,11 @@ impl<'t, 'input> Sink<'t, 'input> {
                     self.eat_trivia();
                     self.token()
                 }
-                Event::AddCombinedToken { kind, n_raw_tokens, text } => {
+                Event::AddCombinedToken {
+                    kind,
+                    n_raw_tokens,
+                    text,
+                } => {
                     self.eat_trivia();
                     #[cfg(feature = "grammar-tracing")]
                     tracing::debug!(cursor = self.cursor, ?kind, "add combined token");
@@ -108,7 +112,7 @@ impl<'t, 'input> Sink<'t, 'input> {
                         })));
 
                     self.cursor += n_raw_tokens;
-                },
+                }
                 Event::FinishNode => {
                     #[cfg(feature = "grammar-tracing")]
                     tracing::debug!(kind = ?self.current_node.kind, "finish node");

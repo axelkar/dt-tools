@@ -1,4 +1,4 @@
-use dt_parser::ast::{self, AstNode, HasLabel as _, HasName};
+use dt_parser::ast::{self, AstToken, HasLabel as _, HasName};
 
 use crate::{EarlyLintPass, LintId, LintSeverity};
 
@@ -28,39 +28,37 @@ fn valid_label_name(s: &str) -> bool {
 impl EarlyLintPass for KernelCodingStyle {
     fn check_node(&mut self, cx: &mut crate::EarlyContext<'_>, node: &ast::DtNode) {
         if let Some(name) = node.name() {
-            if let Some(text) = name.text(cx.src) {
-                if node.is_extension() {
-                    if !valid_label_name(text) {
-                        cx.add_lint_from_cst(
-                            LintId::KernelCodingStyle,
-                            format!("Label name `{text}` should match `[a-z0-9_]+`"),
-                            LintSeverity::Warn,
-                            name.syntax().text_range(),
-                        );
-                    }
-                } else if !valid_node_name(text) {
+            let text = name.syntax().text();
+            if node.is_extension() {
+                if !valid_label_name(text) {
                     cx.add_lint_from_cst(
                         LintId::KernelCodingStyle,
-                        format!("Node name `{text}` should match `[a-z0-9-]+`"),
+                        format!("Label name `{text}` should match `[a-z0-9_]+`"),
                         LintSeverity::Warn,
                         name.syntax().text_range(),
                     );
                 }
+            } else if !valid_node_name(text) {
+                cx.add_lint_from_cst(
+                    LintId::KernelCodingStyle,
+                    format!("Node name `{text}` should match `[a-z0-9-]+`"),
+                    LintSeverity::Warn,
+                    name.syntax().text_range(),
+                );
             }
         }
-        if let Some(ident) = node.unit_address() {
-            if let Some(text) = ident.text(cx.src) {
-                // TODO: "Unless a bus defines differently,"
-                if !valid_node_unit_name(text) {
-                    cx.add_lint_from_cst(
-                        LintId::KernelCodingStyle,
-                        format!(
-                            "Node unit name `{text}` should be a lowercase hex number without leading zeros"
-                        ),
-                        LintSeverity::Warn,
-                        ident.syntax().text_range(),
-                    );
-                }
+        if let Some(name) = node.unit_address() {
+            let text = name.syntax().text();
+            // TODO: "Unless a bus defines differently,"
+            if !valid_node_unit_name(text) {
+                cx.add_lint_from_cst(
+                    LintId::KernelCodingStyle,
+                    format!(
+                        "Node unit name `{text}` should be a lowercase hex number without leading zeros"
+                    ),
+                    LintSeverity::Warn,
+                    name.syntax().text_range(),
+                );
             }
         }
 
@@ -77,15 +75,14 @@ impl EarlyLintPass for KernelCodingStyle {
     }
     fn check_property(&mut self, cx: &mut crate::EarlyContext<'_>, property: &ast::DtProperty) {
         if let Some(name) = property.name() {
-            if let Some(text) = name.text(cx.src) {
-                if text != "device_type" && text != "ddr_device_type" && !valid_prop_name(text) {
-                    cx.add_lint_from_cst(
-                        LintId::KernelCodingStyle,
-                        format!("Property name `{text}` should match `#?[a-z0-9-]+`"),
-                        LintSeverity::Warn,
-                        name.syntax().text_range(),
-                    );
-                }
+            let text = name.syntax().text().as_str();
+            if text != "device_type" && text != "ddr_device_type" && !valid_prop_name(text) {
+                cx.add_lint_from_cst(
+                    LintId::KernelCodingStyle,
+                    format!("Property name `{text}` should match `#?[a-z0-9-]+`"),
+                    LintSeverity::Warn,
+                    name.syntax().text_range(),
+                );
             }
         }
 
@@ -112,16 +109,15 @@ impl EarlyLintPass for KernelCodingStyle {
         }
     }
     fn check_label(&mut self, cx: &mut crate::EarlyContext, label: &ast::DtLabel) {
-        if let Some(ident) = label.name() {
-            if let Some(text) = ident.text(cx.src) {
-                if !valid_label_name(text) {
-                    cx.add_lint_from_cst(
-                        LintId::KernelCodingStyle,
-                        format!("Label name `{text}` should match `[a-z0-9_]+`"),
-                        LintSeverity::Warn,
-                        ident.syntax().text_range(),
-                    );
-                }
+        if let Some(name) = label.name() {
+            let text = name.syntax().text();
+            if !valid_label_name(text) {
+                cx.add_lint_from_cst(
+                    LintId::KernelCodingStyle,
+                    format!("Label name `{text}` should match `[a-z0-9_]+`"),
+                    LintSeverity::Warn,
+                    name.syntax().text_range(),
+                );
             }
         }
     }

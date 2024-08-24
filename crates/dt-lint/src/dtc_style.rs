@@ -20,24 +20,43 @@ pub struct DtcStyle;
 
 impl EarlyLintPass for DtcStyle {
     fn check_document(&mut self, cx: &mut crate::EarlyContext<'_>, file: &ast::SourceFile) {
-        if let Some(first) = file.items().next() {
-            let is_v1_directive = first.clone().into_directive().ok().map_or(false, |dir| {
-                dir.syntax()
-                    .child_tokens()
-                    .any(|tok| tok.green.kind == TokenKind::V1Directive)
-            });
+        if cx.is_main_file {
+            if let Some(first) = file.items().next() {
+                let is_v1_directive = first.clone().into_directive().ok().map_or(false, |dir| {
+                    dir.syntax()
+                        .child_tokens()
+                        .any(|tok| tok.green.kind == TokenKind::V1Directive)
+                });
 
-            if !is_v1_directive {
-                cx.add_lint_from_cst(
-                    LintId::DtcStyle,
-                    "First item must be `/dts-v1/;` directive",
-                    LintSeverity::Error,
-                    first.syntax().text_range(),
-                );
+                if !is_v1_directive {
+                    cx.add_lint_from_cst(
+                        LintId::DtcStyle,
+                        "First item must be `/dts-v1/;` directive",
+                        LintSeverity::Error,
+                        first.syntax().text_range(),
+                    );
+                }
             }
         }
 
+        for prop in file.properties() {
+            cx.add_lint_from_cst(
+                LintId::DtcStyle,
+                "Properties must not be defined outside nodes",
+                LintSeverity::Error,
+                prop.syntax().text_range(),
+            );
+        }
+
         for node in file.nodes() {
+            if !node.is_root() && !node.is_extension() {
+                cx.add_lint_from_cst(
+                    LintId::DtcStyle,
+                    "Subnodes must be defined inside other nodes",
+                    LintSeverity::Error,
+                    node.syntax().text_range(),
+                );
+            }
             self.check_node(cx, &node)
         }
     }

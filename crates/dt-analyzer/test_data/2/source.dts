@@ -1,0 +1,7 @@
+/dts-v1/;
+
+#include "include.dtsi"
+
+&foo {
+  baz = <2>;
+};

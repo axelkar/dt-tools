@@ -1,0 +1,19 @@
+[package]
+name = "dt-diagnostic"
+edition = "2021"
+description = "dt-tools diagnostic library"
+keywords = ["devicetree"]
+
+version.workspace = true
+authors.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+parking_lot = { workspace = true, optional = true }
+
+[features]
+## Enables implements DiagnosticCollector for parking_lot::Mutex<Vec<Diagnostic>>
+parking_lot = ["dep:parking_lot"]

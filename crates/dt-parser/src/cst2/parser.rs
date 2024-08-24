@@ -8,8 +8,7 @@ use crate::{ast, TextRange};
 use self::event::Event;
 use self::source::Source;
 use itertools::Itertools;
-#[allow(unused_imports)]
-pub use marker::{CompletedMarker, Marker};
+pub(crate) use marker::{CompletedMarker, Marker};
 use smallvec::SmallVec;
 use tracing::debug;
 #[cfg(feature = "grammar-tracing")]
@@ -23,7 +22,8 @@ mod marker;
 mod sink;
 mod source;
 
-pub use errors::{Expected, ParseError, SpanLabel, WrappedLexError};
+pub(crate) use errors::Expected;
+pub use errors::{ParseError, WrappedLexError};
 
 // TODO: axka style naming naming lints
 const NAME_SET: [TokenKind; 4] = [
@@ -99,7 +99,7 @@ pub fn parse(input: &str) -> Parse {
 
 /// CST parser.
 #[derive(Debug)]
-pub struct Parser<'t, 'input> {
+pub(crate) struct Parser<'t, 'input> {
     /// The token source.
     source: Source<'t, 'input>,
     /// Events to feed into [`Sink`].
@@ -119,6 +119,7 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
 
     /// Starts a node using a [`Marker`].
+    #[cfg_attr(debug_assertions, track_caller)]
     pub fn start(&mut self) -> Marker {
         let pos = self.events.len();
         self.events.push(Event::Placeholder);
@@ -141,7 +142,7 @@ impl<'t, 'input> Parser<'t, 'input> {
     ///
     /// Returns None on EOF
     #[inline(always)]
-    fn peek(&mut self) -> Option<TokenKind> {
+    pub fn peek(&mut self) -> Option<TokenKind> {
         self.source.peek_kind()
     }
 
@@ -149,6 +150,20 @@ impl<'t, 'input> Parser<'t, 'input> {
     pub fn at(&mut self, kind: TokenKind) -> bool {
         self.expected.push(Expected::Kind(kind));
         self.peek() == Some(kind)
+    }
+
+    /// Returns true if `kind` is the current token's kind.
+    pub fn at_immediate(&mut self, kind: TokenKind) -> bool {
+        self.expected.push(Expected::Kind(kind));
+        self.peek_immediate() == Some(kind)
+    }
+
+    /// Returns true if `first_kind` is the current token's kind and `second_kind` is the immediate
+    /// next token's kind.
+    ///
+    /// - This does not add kinds to `expected_kinds`.
+    pub fn silent_at2(&mut self, first_kind: TokenKind, second_kind: TokenKind) -> bool {
+        self.silent_at(first_kind) && self.source.peek_immediate_next_kind() == Some(second_kind)
     }
 
     /// Bumps and returns true if `kind` is the current token's kind.
@@ -166,17 +181,8 @@ impl<'t, 'input> Parser<'t, 'input> {
     /// Returns true if `kind` is the current token's kind.
     ///
     /// - This does not add `kind` to `expected_kinds`.
-    #[inline(always)]
     pub fn silent_at(&mut self, kind: TokenKind) -> bool {
         self.peek() == Some(kind)
-    }
-
-    /// Returns true if `kind` is the current token's kind.
-    ///
-    /// - This does not add `kind` to `expected_kinds`.
-    #[inline(always)]
-    pub fn silent_at_immediate(&mut self, kind: TokenKind) -> bool {
-        self.peek_immediate() == Some(kind)
     }
 
     /// Returns true if the current token's kind is in `set`.
@@ -193,18 +199,6 @@ impl<'t, 'input> Parser<'t, 'input> {
     /// - This doesn't add `set` to `expected_kinds`.
     pub fn silent_at_set(&mut self, set: &[TokenKind]) -> bool {
         self.peek().map_or(false, |k| set.contains(&k))
-    }
-
-    /// Bumps when `set` contains the current token's kind and errors otherwise.
-    pub fn expect_bump_set(&mut self, set: &[TokenKind]) {
-        #[cfg(feature = "grammar-tracing")]
-        debug!(?set, "expect_bump_set");
-
-        if self.at_set(set) {
-            self.bump();
-        } else {
-            self.emit_expect_error();
-        }
     }
 
     /// Bumps when `kind` is the current token's kind and errors otherwise.
@@ -273,7 +267,7 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
 
     /// Reports the current token as an expect error.
-    // TODO: rename this function
+    // TODO: rename this function to expect_error
     pub fn error2(&mut self) {
         #[cfg(feature = "grammar-tracing")]
         error!("error2");
@@ -298,12 +292,29 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
 
     /// Reports the current token as an error.
-    pub fn fancy_error(&mut self, message: Cow<'static, str>, span_labels: Vec<errors::SpanLabel>) {
+    pub fn fancy_error(
+        &mut self,
+        message: Cow<'static, str>,
+        span_labels: Vec<dt_diagnostic::SpanLabel>,
+    ) {
         let primary_span = if self.at_end() {
-            let pos = self.source.last_token_range().unwrap().end;
+            let pos = self.source.last_token_range().unwrap().start;
             crate::TextRange {
                 start: pos,
                 end: pos,
+            }
+        } else if let [Expected::Kind(TokenKind::RCurly)] = self.expected.as_slice() {
+            let offset = self
+                .source
+                .prev_next_text()
+                .unwrap()
+                .find('\n')
+                .map(|offset| offset + 1)
+                .unwrap_or(0);
+            let pos = self.source.prev_next_range().unwrap().start + offset;
+            TextRange {
+                start: pos,
+                end: pos + 1,
             }
         } else if let [Expected::Kind(TokenKind::Semicolon | TokenKind::Comma)]
         | [Expected::Kind(TokenKind::Comma), Expected::Kind(TokenKind::Semicolon)] =
@@ -332,8 +343,8 @@ impl<'t, 'input> Parser<'t, 'input> {
     /// Does nothing if the last event was not an error.
     pub fn add_hint(&mut self, hint: Cow<'static, str>) {
         if let Some(Event::Error(err)) = self.events.last_mut() {
-            err.span_labels.push(errors::SpanLabel {
-                message: hint,
+            err.span_labels.push(dt_diagnostic::SpanLabel {
+                msg: hint,
                 span: err.primary_span,
             });
         }
@@ -344,7 +355,7 @@ impl<'t, 'input> Parser<'t, 'input> {
         if self.silent_at_set(&NAME_SET) {
             true
         } else {
-            self.expected.push(Expected::Name);
+            self.expected.push(Expected::Kind(TokenKind::Name));
             false
         }
     }
@@ -357,6 +368,11 @@ impl<'t, 'input> Parser<'t, 'input> {
             self.expected.push(Expected::PreprocessorDirective);
             false
         }
+    }
+
+    #[inline]
+    pub fn add_expected(&mut self, expected: Expected) {
+        self.expected.push(expected)
     }
 
     /// Bumps name tokens into [`TokenKind::Name`].
@@ -385,7 +401,7 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.events.push(Event::AddCombinedToken {
             kind: TokenKind::Name,
             n_raw_tokens,
-            text
+            text,
         });
 
         // Not cleared at any other point
@@ -478,11 +494,11 @@ pub mod visualizer {
 #[cfg(test)]
 mod tests {
     use super::sink::Sink;
-    use crate::cst2::grammar::tests::{dynamic_token, node};
     use crate::cst2::lexer::{LexError, Lexer};
     use crate::cst2::{GreenNode, NodeKind};
 
     use super::*;
+    use grammar::tests::{dynamic_token, node, static_token};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -598,6 +614,51 @@ mod tests {
                         ]
                     )]
                 )]
+            }
+        );
+    }
+
+    #[test]
+    fn silent_at2() {
+        let tokens: Vec<_> = Lexer::new(" foo (").collect();
+        let mut parser = Parser::new(Source::new(&tokens));
+
+        assert!(parser.silent_at2(TokenKind::Ident, TokenKind::Whitespace));
+
+        let tokens: Vec<_> = Lexer::new(" foo(").collect();
+        let mut parser = Parser::new(Source::new(&tokens));
+
+        assert!(parser.silent_at2(TokenKind::Ident, TokenKind::LParen));
+    }
+
+    #[test]
+    fn builder_api_prev_next() {
+        let tokens: Vec<_> = Lexer::new("{\n  // foo").collect();
+        let mut parser = Parser::new(Source::new(&tokens));
+
+        parser.eat(TokenKind::LCurly);
+        parser.expect(TokenKind::RCurly);
+
+        let output = Sink::new(&tokens, parser.events).finish();
+
+        assert_eq!(
+            output,
+            Parse {
+                green_node: GreenNode {
+                    kind: NodeKind::SourceFile,
+                    width: "{\n  // foo".len(),
+                    children: vec![
+                        static_token(TokenKind::LCurly),
+                        dynamic_token(TokenKind::Whitespace, "\n  "),
+                        dynamic_token(TokenKind::LineComment, "// foo"),
+                    ]
+                },
+                lex_errors: Vec::new(),
+                errors: vec![ParseError {
+                    message: Cow::Borrowed("Expected ‘}’, but found end-of-file"),
+                    primary_span: TextRange::new(4, 4),
+                    span_labels: Vec::new(),
+                }]
             }
         );
     }

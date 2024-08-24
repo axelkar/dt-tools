@@ -2,6 +2,8 @@
 /plugin/;
 /dts-v1/;
 
+prop = <1>;
+
 / {
   foo@0a4 = <1>;
   unit@0001 {};

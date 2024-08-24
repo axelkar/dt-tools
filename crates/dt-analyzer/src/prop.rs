@@ -1,10 +1,11 @@
-use std::{collections::HashMap, num::ParseIntError, sync::Arc};
+use std::{num::ParseIntError, sync::Arc};
 
 use dt_parser::{
-    ast::{self, DtNode, HasName},
+    ast::{self, AstToken, DtNode, HasName},
     cst2::RedToken,
 };
 use either::Either;
+use rustc_hash::FxHashMap;
 use vec1::Vec1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -27,7 +28,7 @@ impl DefinitionTree {
         if let Some(name) = prefix.next() {
             Self::Node(DefinitionTreeNode {
                 children: {
-                    let mut hm = HashMap::new();
+                    let mut hm = FxHashMap::default();
                     hm.insert(name, vec1::vec1![self.prefix(prefix)]);
                     hm
                 },
@@ -67,7 +68,7 @@ pub struct DefinitionTreeNode {
     // foo {};
     // foo = <2>;
     // ```
-    pub children: HashMap<String, Vec1<DefinitionTree>>,
+    pub children: FxHashMap<String, Vec1<DefinitionTree>>,
 }
 impl DefinitionTreeNode {
     /// Wraps self in another node until `prefix` returns none
@@ -75,7 +76,7 @@ impl DefinitionTreeNode {
         if let Some(name) = prefix.next() {
             Self {
                 children: {
-                    let mut hm = HashMap::new();
+                    let mut hm = FxHashMap::default();
                     hm.insert(name, vec1::vec1![DefinitionTree::Node(self.prefix(prefix))]);
                     hm
                 },
@@ -165,9 +166,9 @@ pub fn analyze_node(node: ast::DtNode, src: &str) -> Option<DefinitionTreeNode> 
         .properties()
         .flat_map(|prop| {
             Some((
-                prop.name()?.text(src)?.to_owned(),
+                prop.name()?.syntax().text().to_owned(),
                 DefinitionTree::Prop {
-                    value: Value::from_ast(&prop.values().collect::<Vec<_>>(), src).ok()?,
+                    value: Value::from_ast(&prop.values().collect::<Vec<_>>()).ok()?,
                     ast: prop,
                 },
             ))
@@ -190,7 +191,7 @@ pub fn analyze_node(node: ast::DtNode, src: &str) -> Option<DefinitionTreeNode> 
         )
         .collect::<Vec<_>>();
     let children = {
-        let mut hm: HashMap<String, Vec1<DefinitionTree>> = HashMap::new();
+        let mut hm: FxHashMap<String, Vec1<DefinitionTree>> = FxHashMap::default();
         for (name, child) in children {
             let name = name.to_owned();
             if let Some(vec) = hm.get_mut(&name) {
@@ -244,13 +245,11 @@ pub enum ValueFromAstError {
     ParseIntError(#[from] ParseIntError),
     #[error("failed to parse number: missing hex prefix")]
     MissingHexPrefix,
-    #[error("cannot find text - make sure AST matches source text")]
-    CannotFindText,
     #[error("AST is missing items")]
     MissingAst,
 }
 use crate::string::StringParseError;
-use ValueFromAstError::{CannotFindText, MissingAst};
+use ValueFromAstError::MissingAst;
 
 impl Value {
     pub fn into_custom_value(self) -> Vec<CustomValue> {
@@ -269,18 +268,13 @@ impl Value {
             Self::Stringlist(vec) => return vec.into_iter().map(CustomValue::String).collect(),
         }]
     }
-    fn from_ast(ast: &[ast::PropValue], src: &str) -> Result<Self, ValueFromAstError> {
+    fn from_ast(ast: &[ast::PropValue]) -> Result<Self, ValueFromAstError> {
         Ok(match ast {
             [] => Value::Empty,
             [ast::PropValue::CellList(cell_list)] => {
                 match &cell_list.cells().collect::<Vec<_>>()[..] {
                     [ast::Cell::Phandle(phandle)] => Value::Phandle({
-                        let ident = phandle
-                            .name()
-                            .ok_or(MissingAst)?
-                            .text(src)
-                            .ok_or(CannotFindText)?
-                            .to_owned();
+                        let ident = phandle.name().ok_or(MissingAst)?.syntax().text().to_owned();
                         if phandle.is_path() {
                             PhandleTarget::Path(ident)
                         } else {
@@ -293,7 +287,7 @@ impl Value {
                     ),
                     [..] => Value::PropEncodedArray(
                         ast.iter()
-                            .map(|ast| CustomValue::from_ast(ast, src))
+                            .map(CustomValue::from_ast)
                             .collect::<Result<_, _>>()?,
                     ),
                 }
@@ -322,14 +316,14 @@ impl Value {
             other => Value::PropEncodedArray(
                 other
                     .iter()
-                    .map(|ast| CustomValue::from_ast(ast, src))
+                    .map(CustomValue::from_ast)
                     .collect::<Result<_, _>>()?,
             ),
         })
     }
 }
 
-fn parse_u32(src: &str) -> Result<u32, ValueFromAstError> {
+pub(crate) fn parse_u32(src: &str) -> Result<u32, ValueFromAstError> {
     src.parse().or_else(|_| {
         src.strip_prefix("0x")
             .or_else(|| src.strip_prefix("0X"))
@@ -361,7 +355,7 @@ impl CustomValue {
             Self::Bytestring(_bytes) => todo!(),
         }
     }
-    fn from_ast(ast: &ast::PropValue, src: &str) -> Result<Self, ValueFromAstError> {
+    fn from_ast(ast: &ast::PropValue) -> Result<Self, ValueFromAstError> {
         Ok(match ast {
             ast::PropValue::String(tok) => CustomValue::String(common_string(tok)?),
             ast::PropValue::CellList(cell_list) => CustomValue::Cell(
@@ -370,12 +364,8 @@ impl CustomValue {
                     .map(|cell| {
                         Ok(Some(match cell {
                             ast::Cell::Phandle(phandle) => CustomValueCellItem::Phandle({
-                                let ident = phandle
-                                    .name()
-                                    .ok_or(MissingAst)?
-                                    .text(src)
-                                    .ok_or(CannotFindText)?
-                                    .to_owned();
+                                let ident =
+                                    phandle.name().ok_or(MissingAst)?.syntax().text().to_owned();
                                 if phandle.is_path() {
                                     PhandleTarget::Path(ident)
                                 } else {
@@ -385,6 +375,7 @@ impl CustomValue {
                             ast::Cell::Number(token) => {
                                 CustomValueCellItem::U32(parse_u32(token.text())?)
                             }
+                            ast::Cell::Macro(_) => todo!(),
                         }))
                     })
                     .filter_map(|v| match v {
@@ -394,6 +385,9 @@ impl CustomValue {
                     })
                     .collect::<Result<_, ValueFromAstError>>()?,
             ),
+            ast::PropValue::Phandle(_) => todo!(),
+            ast::PropValue::Bytestring(_) => todo!(),
+            ast::PropValue::Macro(_) => todo!(),
         })
     }
 }

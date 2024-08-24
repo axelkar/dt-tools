@@ -179,11 +179,11 @@ SourceFile@0..582
       RCurly@471..472 "}"
       Semicolon@472..473 ";"
     Whitespace@473..477 "\n\n  "
-    DtLabel@477..479
-      Name@477..478 "a"
-      Colon@478..479 ":"
-    Whitespace@479..480 " "
-    DtNode@480..509
+    DtNode@477..509
+      DtLabel@477..479
+        Name@477..478 "a"
+        Colon@478..479 ":"
+      Whitespace@479..480 " "
       Name@480..483 "foo"
       Whitespace@483..484 " "
       LCurly@484..485 "{"

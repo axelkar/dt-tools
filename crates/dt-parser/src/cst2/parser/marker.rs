@@ -10,10 +10,21 @@ pub struct Marker {
 }
 
 impl Marker {
+    #[cfg_attr(debug_assertions, track_caller)]
     pub(super) fn new(pos: usize) -> Self {
         Self {
             pos,
-            bomb: DropBomb::new("Markers must be completed!"),
+            bomb: if cfg!(debug_assertions) {
+                let callsite = std::panic::Location::caller();
+                DropBomb::new(format!(
+                    "Marker defined at {} {}:{} must be completed!",
+                    callsite.file(),
+                    callsite.line(),
+                    callsite.column()
+                ))
+            } else {
+                DropBomb::new("Markers must be completed!")
+            },
         }
     }
 

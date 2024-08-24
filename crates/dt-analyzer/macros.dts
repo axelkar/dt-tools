@@ -1,0 +1,72 @@
+#define EXYNOS_PIN_PULL_NONE		0
+#define EXYNOS_PIN_PULL_DOWN		1
+#define EXYNOS_PIN_PULL_UP		3
+#define EXYNOS_PIN_FUNC_INPUT		0
+#define EXYNOS5433_PIN_DRV_FAST_SR1	0
+
+#define PIN(_pin, _func, _pull, _drv)					\
+	pin- ## _pin {							\
+		samsung,pins = #_pin;					\
+		samsung,pin-function = <EXYNOS_PIN_FUNC_ ##_func>;	\
+		samsung,pin-pud = <EXYNOS_PIN_PULL_ ##_pull>;		\
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_ ##_drv>;		\
+	}
+
+#define PIN_IN(_pin, _pull, _drv)					\
+	PIN(_pin, INPUT, _pull, _drv)
+
+#define CROS_STD_MAIN_KEYMAP    \
+  MATRIX_KEY(0x00, 0x01, KEY_LEFTMETA)    \
+  MATRIX_KEY(0x00, 0x03, KEY_B)        \
+  MATRIX_KEY(0x00, 0x05, KEY_RO)        \
+  MATRIX_KEY(0x00, 0x06, KEY_N)        \
+  MATRIX_KEY(0x00, 0x08, KEY_EQUAL)    \
+  MATRIX_KEY(0x00, 0x0a, KEY_RIGHTALT)
+
+#include "/home/axel/dev/mainlining/linux/include/dt-bindings/input/input.h"
+
+#define MATRIX_KEY(row, col, code)    \
+    ((((row) & 0xFF) << 24) | (((col) & 0xFF) << 16) | ((code) & 0xFFFF))
+
+/ {
+  interrupts-extended = <&tlmm 59 IRQ_TYPE_EDGE_RISING>;
+  reg = <0 0xa0000000 0 (2400 * 1080 * 4)>;
+
+  timer {
+    compatible = "arm,armv8-timer";
+    clock-frequency = <19200000>;
+    interrupts = <GIC_PPI 1 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
+                 <GIC_PPI 2 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
+                 <GIC_PPI 3 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
+                 <GIC_PPI 0 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>;
+  };
+
+  source-pdos = <PDO_FIXED(5000, 3000,
+                           PDO_FIXED_DUAL_ROLE |
+                           PDO_FIXED_USB_COMM |
+                           PDO_FIXED_DATA_SWAP)>;
+
+  initial_alive: initial-state {
+    PIN_IN(gpa0-0, DOWN, FAST_SR1);
+    /*PIN_IN(gpa0-1, NONE, FAST_SR1);
+    PIN_IN(gpa0-2, DOWN, FAST_SR1);
+    PIN_IN(gpa0-3, NONE, FAST_SR1);
+    PIN_IN(gpa0-4, NONE, FAST_SR1);
+    PIN_IN(gpa0-5, DOWN, FAST_SR1);
+    PIN_IN(gpa0-6, NONE, FAST_SR1);
+    PIN_IN(gpa0-7, NONE, FAST_SR1);*/
+  };
+  linux,keymap = <
+      MATRIX_KEY(0x00, 0x02, KEY_BACK)
+      MATRIX_KEY(0x03, 0x02, KEY_REFRESH)
+      MATRIX_KEY(0x02, 0x02, KEY_ZOOM)
+      MATRIX_KEY(0x01, 0x02, KEY_SCALE)
+      MATRIX_KEY(0x03, 0x04, KEY_SYSRQ)
+      MATRIX_KEY(0x02, 0x04, KEY_BRIGHTNESSDOWN)
+      MATRIX_KEY(0x01, 0x04, KEY_BRIGHTNESSUP)
+      MATRIX_KEY(0x02, 0x09, KEY_MUTE)
+      MATRIX_KEY(0x01, 0x09, KEY_VOLUMEDOWN)
+      MATRIX_KEY(0x00, 0x04, KEY_VOLUMEUP)
+      CROS_STD_MAIN_KEYMAP
+  >;
+};

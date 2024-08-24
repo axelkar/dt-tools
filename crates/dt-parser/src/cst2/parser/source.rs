@@ -25,7 +25,7 @@ impl<'t, 'input> Source<'t, 'input> {
     pub(super) fn new(tokens: &'t [Token<'input>]) -> Self {
         Self {
             tokens,
-            prev_cursor: 0,
+            prev_next_cursor: 0,
             cursor: 0,
             steps: Cell::new(0),
             #[cfg(debug_assertions)]
@@ -53,16 +53,22 @@ impl<'t, 'input> Source<'t, 'input> {
     }
 
     pub(super) fn next_token(&mut self) -> Option<&'t Token<'input>> {
-        self.prev_cursor = self.cursor;
-
         self.skip_trivia();
 
         let token = self.tokens.get(self.cursor)?;
         self.cursor += 1;
         self.steps.set(0);
+        self.prev_next_cursor = self.cursor;
 
         #[cfg(debug_assertions)]
         self.update_debug();
+
+        #[cfg(feature = "visualize")]
+        super::visualizer::Event::NextToken {
+            cursor: self.cursor,
+            prev_next_cursor: self.prev_next_cursor,
+        }
+        .visualize();
 
         Some(token)
     }
@@ -135,6 +141,20 @@ impl<'t, 'input> Source<'t, 'input> {
         Some(
             // TODO: TokenKind::LexError
             self.peek_token_immediate()?
+                .kind
+                .unwrap_or(TokenKind::Unrecognized),
+        )
+    }
+
+    /// Peeks ahead at the immediate next token's kind.
+    ///
+    /// Doesn't skip trivia.
+    ///
+    /// Returns None on EOF.
+    pub(super) fn peek_immediate_next_kind(&self) -> Option<TokenKind> {
+        Some(
+            self.tokens
+                .get(self.cursor + 1)?
                 .kind
                 .unwrap_or(TokenKind::Unrecognized),
         )

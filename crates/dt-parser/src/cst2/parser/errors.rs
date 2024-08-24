@@ -1,3 +1,4 @@
+use dt_diagnostic::SpanLabel;
 use std::borrow::Cow;
 
 use super::super::TokenKind;
@@ -7,15 +8,17 @@ use crate::{cst2::lexer::LexError, TextRange};
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum Expected {
     Kind(TokenKind),
-    Name,
     PreprocessorDirective,
+    Value,
+    Cell,
 }
 impl core::fmt::Display for Expected {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Expected::Kind(kind) => kind.fmt(f),
-            Expected::Name => f.write_str("item name"),
             Expected::PreprocessorDirective => f.write_str("preprocessor directive"),
+            Expected::Value => f.write_str("value"),
+            Expected::Cell => f.write_str("cell"),
         }
     }
 }
@@ -23,12 +26,6 @@ impl From<TokenKind> for Expected {
     fn from(value: TokenKind) -> Self {
         Self::Kind(value)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SpanLabel {
-    pub span: TextRange,
-    pub message: Cow<'static, str>,
 }
 
 /// CST parser error

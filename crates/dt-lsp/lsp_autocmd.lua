@@ -8,7 +8,7 @@ local augroup_id = vim.api.nvim_create_augroup("DtsLSP", {
 
 vim.api.nvim_create_autocmd("FileType", {
   group = augroup_id,
-  pattern = {"dts", "dtsi", "dtso", "cpp"},
+  pattern = {"dts", "dtsi", "dtso"},
   callback = function(args)
     print("Launching LSP")
     vim.lsp.start({

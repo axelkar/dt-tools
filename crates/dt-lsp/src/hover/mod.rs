@@ -25,7 +25,7 @@ use tower_lsp::lsp_types::*;
 // {doc}
 // {fi}
 
-fn node_definition(node: &ast::DtNode, src: &str) -> String {
+fn _node_definition(node: &ast::DtNode, src: &str) -> String {
     let path = node.path(src).join("/");
 
     // TODO: get documentation by `compatible`
@@ -39,7 +39,7 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
     let source_id = SourceId::from(uri.to_string());
     let document = state.state.document_map.get(&source_id)?;
 
-    let cst = document.file.clone()?.syntax();
+    let cst = document.file.as_ref()?.syntax();
     let offset = position_to_offset(params.position, &document.text)?;
 
     // TODO: try prev offset?
@@ -66,15 +66,15 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
     }
 
     let rope = &document.text;
-    let src: String = rope.into();
-    let analyzed = document.analyzed.as_ref()?;
 
     // definition
     {
         let parent = token.parent.clone();
         tracing::debug!("analyzed, direct parent #1 kind = {:?}", parent.green.kind);
 
-        if let Some(name) = ast::Name::cast(parent) {
+        // FIXME: NameRef, NameDef
+        // TODO: search for node at offset directly
+        if let Some(name) = ast::NameRef::cast(parent) {
             let parent = name.syntax().parent.clone()?;
             match_ast! {
                 match parent {
@@ -104,9 +104,10 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
                         } else {
                             let label_name = token.text();
                             // TODO: to_string is a HACK
-                            let label_defs = analyzed.exported_labels.get(&label_name.to_string())?;
-                            let label = label_defs.last()?; // TODO: show all label defs
-                            Some((format!("{}\n---\nlabel `{label_name}`", node_definition(&label.node_ast, &src)), None))
+                            //let label_defs = analyzed.exported_labels.get(&label_name.to_string())?;
+                            //let label = label_defs.last()?; // TODO: show all label defs
+                            //Some((format!("{}\n---\nlabel `{label_name}`", node_definition(&label.node_ast, &src)), None))
+                            Some((format!("aaa\n---\nlabel `{label_name}`"), None))
                         }
                     },
                     _ => None
@@ -121,15 +122,15 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
         Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: markdown
+                value: markdown,
             }),
             range: span.and_then(|span: &dt_parser::TextRange| {
                 // TODO: proper Span type with file IDs and more
                 Some(Range::new(
                     offset_to_position(span.start, rope)?,
-                    offset_to_position(span.end, rope)?
+                    offset_to_position(span.end, rope)?,
                 ))
-            })
+            }),
         }
     })
 }

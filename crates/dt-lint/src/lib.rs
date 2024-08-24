@@ -76,6 +76,7 @@ pub struct EarlyLint {
 pub struct EarlyContext<'i> {
     pub lints: Vec<EarlyLint>,
     pub src: &'i str,
+    pub is_main_file: bool,
 }
 impl EarlyContext<'_> {
     pub fn add_lint_from_cst(
@@ -129,10 +130,11 @@ pub trait EarlyLintPass {
     fn check_label(&mut self, _cx: &mut EarlyContext, _label: &ast::DtLabel) {}
 }
 
-pub fn default_lint(file: &ast::SourceFile, src: &str) -> Vec<EarlyLint> {
+pub fn default_lint(file: &ast::SourceFile, src: &str, is_main_file: bool) -> Vec<EarlyLint> {
     let mut cx = EarlyContext {
         lints: Vec::new(),
         src,
+        is_main_file,
     };
     // TODO: go over the tree only once
     crate::lints::KernelCodingStyle.check_document(&mut cx, file);

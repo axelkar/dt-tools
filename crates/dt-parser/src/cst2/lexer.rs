@@ -40,7 +40,7 @@ impl<'input> Iterator for Lexer<'input> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token<'input> {
     pub kind: Result<TokenKind, LexError>,
     pub text: &'input str,
@@ -149,7 +149,7 @@ pub enum TokenKind {
     /// Combined token only generated in the parser.
     Name,
 
-    #[regex(r#"[^ \t\r\n"'/*+%|{}<>\[()?;:&=@,0-9-]+"#)]
+    #[regex(r#"[^ \t\r\n"'/*+%|{}<>\[()?;:&=@,0-9-][^ \t\r\n"'/*+%|{}<>\[()?;:&=@,-]*"#)]
     Ident,
 
     #[token("=")]
@@ -516,6 +516,7 @@ fn lex_bytestring(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
     for c in remainder.chars() {
         total_len += c.len_utf8();
 
+        // TODO: warn about invalid bytestring digits
         if c == ']' {
             lex.bump(total_len);
             return Ok(());
@@ -672,8 +673,8 @@ mod tests {
 
     #[test]
     fn lex_from_test_data_2_macros() {
-        let src = include_str!("../../test_data/2-macros.dts");
-        let expected = include_str!("../../test_data/2-macros.lex.expected");
+        let src = include_str!("../../test_data/2-macro-def.dts");
+        let expected = include_str!("../../test_data/2-macro-def.lex.expected");
 
         test_expected(src, expected);
     }
@@ -717,11 +718,10 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
         assert_eq!(lexer.slice(), "abc");
 
+        // Macro names (which should be only one Ident) are allowed to have numbers
         let mut lexer = TokenKind::lexer("abc123");
         assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
-        assert_eq!(lexer.slice(), "abc");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Number)));
-        assert_eq!(lexer.slice(), "123");
+        assert_eq!(lexer.slice(), "abc123");
     }
 
     #[test]

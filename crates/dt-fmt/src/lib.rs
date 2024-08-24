@@ -39,6 +39,7 @@ fn format_node(mut ctx: FormatterContext, node: &mut Arc<GreenNode>) {
 #[cfg(test)]
 mod tests {
     #[allow(dead_code)]
+    #[track_caller]
     fn check(src: &'static str, expected: &'static str) {
         let parse = dt_parser::cst2::parser::parse(src);
         if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {

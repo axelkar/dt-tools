@@ -6,10 +6,9 @@
 
 use std::sync::Arc;
 
-pub use span::*;
+pub use dt_diagnostic::text_range::TextRange;
 
 pub mod ast;
 pub mod cst2;
-mod span;
 
 pub type SourceId = Arc<str>;

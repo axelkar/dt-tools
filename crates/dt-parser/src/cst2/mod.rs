@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use self::lexer::TokenKind;
 use crate::TextRange;
@@ -26,6 +26,8 @@ pub enum NodeKind {
     PropValueList,
     DtPhandle,
     UnitAddress,
+    MacroInvocation,
+    MacroParameter,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -104,6 +106,28 @@ pub enum TokenText {
     Static(&'static str),
     Dynamic(String),
 }
+impl TokenText {
+    /// Creates a `String` by cloning the current value's reference.
+    pub fn to_owned(&self) -> String {
+        match self {
+            Self::Static(str) => (*str).to_owned(),
+            Self::Dynamic(str) => str.clone(),
+        }
+    }
+    /// Extracts the owned `String`.
+    pub fn into_owned(self) -> String {
+        match self {
+            Self::Static(str) => str.to_owned(),
+            Self::Dynamic(str) => str,
+        }
+    }
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Static(str) => str,
+            Self::Dynamic(str) => str,
+        }
+    }
+}
 impl std::fmt::Display for TokenText {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -173,8 +197,27 @@ impl RedToken {
         }
     }
 
+    /// Returns the text the token represents.
+    #[inline(always)]
     pub fn text(&self) -> &TokenText {
         &self.green.text
+    }
+
+    /// Returns the length of the textual contents.
+    #[inline(always)]
+    pub fn length(&self) -> usize {
+        self.green.length()
+    }
+
+    /// Returns the text the token represents from `src`.
+    pub fn text_from_source<'i>(&self, src: &'i str) -> &'i str {
+        let opt = src.get(self.text_offset..(self.text_offset + self.green.length()));
+
+        if cfg!(debug_assertions) {
+            opt.expect("Invalid text offset, wrong source?")
+        } else {
+            opt.unwrap_or("")
+        }
     }
 
     /// Iterator over all the ancestors of this token excluding itself.
@@ -183,12 +226,12 @@ impl RedToken {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A "red node".
 ///
 /// This references the green nodes and its own parent nodes.
 ///
 /// You basically get a tree you can go up and down in without cyclic references!
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct RedNode {
     /// The parent node if it exists.
     ///
@@ -317,6 +360,15 @@ impl RedNode {
     }
 }
 
+impl fmt::Debug for RedNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RedNode")
+            .field("green", &self.green)
+            .field("text_offset", &self.text_offset)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TreeItem<Node, Token> {
     Node(Node),
@@ -378,14 +430,15 @@ impl<Node, Token> TreeItem<Node, Token> {
 
 pub type GreenItem = TreeItem<Arc<GreenNode>, Arc<GreenToken>>;
 pub type RedItem = TreeItem<Arc<RedNode>, Arc<RedToken>>;
+pub type RedItemRef<'a> = TreeItem<&'a Arc<RedNode>, &'a Arc<RedToken>>;
 
 impl GreenItem {
     /// Returns the length of the textual contents.
     #[inline]
     pub fn length(&self) -> usize {
         match self {
-            GreenItem::Node(node) => node.width,
-            GreenItem::Token(token) => token.length(),
+            TreeItem::Node(node) => node.width,
+            TreeItem::Token(token) => token.length(),
         }
     }
 }
@@ -395,8 +448,19 @@ impl RedItem {
     #[inline(always)]
     pub fn text_range(&self) -> TextRange {
         match self {
-            RedItem::Node(node) => node.text_range(),
-            RedItem::Token(token) => token.text_range(),
+            TreeItem::Node(node) => node.text_range(),
+            TreeItem::Token(token) => token.text_range(),
+        }
+    }
+}
+
+impl RedItemRef<'_> {
+    /// Returns the text range.
+    #[inline(always)]
+    pub fn text_range(&self) -> TextRange {
+        match self {
+            TreeItem::Node(node) => node.text_range(),
+            TreeItem::Token(token) => token.text_range(),
         }
     }
 }

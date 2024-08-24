@@ -1,10 +1,7 @@
 ~, -, + arithmetic prefixes
 Pratt parsing
 
-loop over each property and try to lookup names, but input files need to be fully parsed??
-oh and local #defines and labels too
-
-re-enable lints with cst2
+#define, #if, etc.
 
 rename node to tree in RedNode, GreenNode, AstNode, etc.
 
@@ -14,6 +11,15 @@ use the lsp-server crate instead of tower_lsp
 
 use bstr more
 
+expose LSP JSON config in VSCode extension
 release VSCode extension
 
-use FxHashMap
+use FxHashMap everywhere
+
+NameDef and NameRef nodes
+
+parse this successfully, check for duplicate labels but then ignore them in both `foo = <&bar>;` and `foo = &bar;` references:
+(also needed for /delete-property/)
+    reg = reglabel: <0 sizelabel: 0x1000000>;
+    prop = [ab cd ef byte4: 00 ff fe];
+    str = start: "string value" end: ;
