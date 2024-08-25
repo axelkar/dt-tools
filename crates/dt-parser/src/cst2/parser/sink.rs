@@ -30,14 +30,18 @@ pub(crate) struct Sink<'t, 'input> {
 }
 
 impl<'t, 'input> Sink<'t, 'input> {
-    pub(super) fn new(tokens: &'t [Token<'input>], events: Vec<Event>) -> Self {
+    pub(super) fn new(
+        tokens: &'t [Token<'input>],
+        events: Vec<Event>,
+        root_kind: NodeKind,
+    ) -> Self {
         Self {
             tokens,
             events,
             cursor: 0,
             stack: Vec::new(),
             current_node: GreenNode {
-                kind: NodeKind::SourceFile,
+                kind: root_kind,
                 width: 0,
                 children: Vec::new(),
             },

@@ -69,32 +69,77 @@ impl Parse<'_> {
     }
 }
 
-pub fn parse(input: &str) -> Parse {
-    use super::lexer::Lexer;
+/// Parser entrypoint system to enable parsing macro output
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Entrypoint {
+    /// Parses into an [`ast::SourceFile`]
+    SourceFile,
+    /// Parses into a [`NodeKind::EntryName`]
+    // TODO: labels + name?
+    Name,
+    /// Parses into a [`NodeKind::EntryReferenceNoamp`]
+    ReferenceNoamp,
+    /// Parses into a [`NodeKind::EntryPropValues`] with [`ast::PropValue`]s
+    PropValues,
+    /// Parses into a [`NodeKind::EntryCells`] with [`ast::Cell`]s
+    Cells,
+}
+impl Entrypoint {
+    /// Parses the input according to the entrypoint.
+    pub fn parse(self, input: &str) -> Parse {
+        // TODO: make NodeKind::Root
+        // TODO: typesafe Entrypoint -> correct AST struct
+        use super::lexer::Lexer;
+        let tokens: Vec<_> = Lexer::new(input).collect();
 
-    let tokens: Vec<_> = Lexer::new(input).collect();
+        #[cfg(feature = "visualize")]
+        visualizer::Event::Init {
+            tokens: tokens
+                .iter()
+                .map(|tok| visualizer::OwnedToken {
+                    kind: tok.kind,
+                    text: tok.text.to_owned(),
+                    text_range: tok.text_range,
+                })
+                .collect(),
+        }
+        .visualize();
 
-    #[cfg(feature = "visualize")]
-    visualizer::Event::Init {
-        tokens: tokens
-            .iter()
-            .map(|tok| visualizer::OwnedToken {
-                kind: tok.kind,
-                text: tok.text.to_owned(),
-                text_range: tok.text_range,
-            })
-            .collect(),
+        let source = Source::new(&tokens);
+        let mut parser = Parser::new(source);
+        let p = &mut parser;
+
+        let root_kind = match self {
+            Self::SourceFile => {
+                grammar::entry_sourcefile(p);
+                NodeKind::SourceFile
+            }
+            Self::Name => {
+                grammar::entry_name(p);
+                NodeKind::EntryName
+            }
+            Self::ReferenceNoamp => {
+                grammar::reference_noamp(p);
+                NodeKind::EntryReferenceNoamp
+            }
+            Self::PropValues => {
+                grammar::propvalues(p, &[]).ok();
+                NodeKind::EntryPropValues
+            }
+            Self::Cells => {
+                grammar::cells::<true>(p).ok();
+                NodeKind::EntryCells
+            }
+        };
+
+        let sink = sink::Sink::new(&tokens, parser.events, root_kind);
+
+        sink.finish()
     }
-    .visualize();
+}
 
-    let source = Source::new(&tokens);
-    let mut parser = Parser::new(source);
-
-    grammar::root(&mut parser);
-
-    let sink = sink::Sink::new(&tokens, parser.events);
-
-    sink.finish()
+pub fn parse(input: &str) -> Parse {
+    Entrypoint::SourceFile.parse(input)
 }
 
 /// CST parser.
@@ -512,7 +557,7 @@ mod tests {
 
         assert_eq!(parser.events.len(), 1);
 
-        let output = Sink::new(&tokens, parser.events).finish();
+        let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
 
         assert_eq!(
             output,
@@ -550,7 +595,7 @@ mod tests {
         m_prop.complete(&mut parser, NodeKind::DtProperty);
 
         // FIXME: with Sink code
-        let output = Sink::new(&tokens, parser.events).finish();
+        let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
         assert_eq!(
             output.green_node,
             GreenNode {
@@ -594,7 +639,7 @@ mod tests {
         m_node.complete(&mut parser, NodeKind::DtNode);
 
         // FIXME: with Sink code
-        let output = Sink::new(&tokens, parser.events).finish();
+        let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
         assert_eq!(
             output.green_node,
             GreenNode {
@@ -639,7 +684,7 @@ mod tests {
         parser.eat(TokenKind::LCurly);
         parser.expect(TokenKind::RCurly);
 
-        let output = Sink::new(&tokens, parser.events).finish();
+        let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
 
         assert_eq!(
             output,

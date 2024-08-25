@@ -138,19 +138,8 @@ fn dt_expr(p: &mut Parser) {
     vis!(end);
 }
 
-/// Parses a Devicetree phandle.
-///
-/// - Form: `&foo` | `&{/path}`.
-#[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
-fn dt_phandle(p: &mut Parser) {
-    vis!(begin);
-    #[cfg(feature = "grammar-tracing")]
-    debug!("dt_phandle start");
-
-    let m = p.start();
-
-    assert!(p.eat(TokenKind::Ampersand));
-
+/// Parses a reference without the leading ampersand and a node.
+pub(super) fn reference_noamp(p: &mut Parser) {
     if p.at(TokenKind::LCurly) {
         p.bump();
         while !p.at(TokenKind::RCurly) && !p.at_end() {
@@ -167,12 +156,59 @@ fn dt_phandle(p: &mut Parser) {
         // use-case I'll just match a name
         p.emit_expect_error();
     }
+}
 
+/// Parses a Devicetree reference.
+///
+/// - Form: `&foo` | `&{/path}`.
+#[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
+fn reference(p: &mut Parser) {
+    vis!(begin);
+    #[cfg(feature = "grammar-tracing")]
+    debug!("reference start");
+
+    let m = p.start();
+
+    assert!(p.eat(TokenKind::Ampersand));
+
+    reference_noamp(p);
+
+    // TODO: rename everything phandle to reference
     m.complete(p, NodeKind::DtPhandle);
 
     #[cfg(feature = "grammar-tracing")]
-    debug!("dt_phandle end");
+    debug!("reference end");
     vis!(end);
+}
+
+/// Parses cells.
+///
+/// `AT_EOF`: whether a successful end of cells is determined by a `>` or end-of-file
+pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
+    loop {
+        p.add_expected(Expected::Cell);
+        if p.silent_at_set(&[TokenKind::Number, TokenKind::Char]) {
+            p.bump();
+        } else if p.silent_at(TokenKind::Ident) {
+            macro_invocation(p.start(), p);
+        } else if p.silent_at(TokenKind::Ampersand) {
+            reference(p);
+        } else if p.silent_at(TokenKind::LParen) {
+            // Start a parantesized expression
+            dt_expr(p);
+        } else if (AT_EOF && p.at_end()) || (!AT_EOF && p.at(TokenKind::RAngle)) {
+            break;
+        } else if p.silent_at_set(&[TokenKind::Semicolon, TokenKind::LCurly, TokenKind::RCurly])
+            || p.at_end()
+        {
+            p.emit_expect_error();
+            return Err(());
+        } else {
+            p.error2();
+        }
+    }
+
+    Ok(())
 }
 
 /// Parses a Devicetree cell list.
@@ -184,28 +220,9 @@ fn dt_cell_list(p: &mut Parser) -> Result<(), ()> {
 
     assert!(p.eat(TokenKind::LAngle));
 
-    loop {
-        p.add_expected(Expected::Cell);
-        if p.silent_at_set(&[TokenKind::Number, TokenKind::Char]) {
-            p.bump();
-        } else if p.silent_at(TokenKind::Ident) {
-            macro_invocation(p.start(), p);
-        } else if p.silent_at(TokenKind::Ampersand) {
-            dt_phandle(p);
-        } else if p.silent_at(TokenKind::LParen) {
-            // Start a parantesized expression
-            dt_expr(p);
-        } else if p.at(TokenKind::RAngle) {
-            break;
-        } else if p.silent_at_set(&[TokenKind::Semicolon, TokenKind::LCurly, TokenKind::RCurly])
-            || p.at_end()
-        {
-            p.emit_expect_error();
-            m.complete(p, NodeKind::ParseError);
-            return Err(());
-        } else {
-            p.error2();
-        }
+    if cells::<false>(p).is_err() {
+        m.complete(p, NodeKind::ParseError);
+        return Err(());
     }
     p.expect(TokenKind::RAngle);
 
@@ -236,18 +253,7 @@ const ITEM_RECOVERY_SET: &[TokenKind] = &[
     TokenKind::RCurly,
 ];
 
-/// The caller is expected to handle the label and name.
-///
-/// - Form: `= "foo", <1>;` | `;`.
-fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
-    vis!(begin);
-    if p.at(TokenKind::Semicolon) {
-        p.bump();
-        return m.complete(p, NodeKind::DtProperty);
-    }
-
-    assert!(p.eat(TokenKind::Equals));
-
+pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(), ()> {
     const PROPERTY_VALUE_RECOVERY_SET: &[TokenKind] = &[
         TokenKind::String,
         TokenKind::LAngle,
@@ -255,22 +261,14 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
         TokenKind::Ampersand,
     ];
 
-    if p.eat(TokenKind::BitsDirective) {
-        p.expect(TokenKind::Number);
-    }
-
-    let list_m = p.start();
-    while !p.at(TokenKind::Semicolon) && !p.at_end() {
+    while !p.at_set(ending_kinds) && !p.at_end() {
         p.add_expected(Expected::Value);
         if p.silent_at(TokenKind::String) {
             p.bump();
         } else if p.silent_at(TokenKind::LAngle) {
-            if dt_cell_list(p).is_err() {
-                list_m.complete(p, NodeKind::PropValueList);
-                return m.complete(p, NodeKind::ParseError);
-            }
+            dt_cell_list(p)?
         } else if p.silent_at(TokenKind::Ampersand) {
-            dt_phandle(p);
+            reference(p);
         } else if p.silent_at(TokenKind::Ident) {
             macro_invocation(p.start(), p);
         } else if p.silent_at(TokenKind::DtBytestring) {
@@ -288,6 +286,30 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
         } else {
             break;
         }
+    }
+    Ok(())
+}
+
+/// The caller is expected to handle the label and name.
+///
+/// - Form: `= "foo", <1>;` | `;`.
+fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
+    vis!(begin);
+    if p.at(TokenKind::Semicolon) {
+        p.bump();
+        return m.complete(p, NodeKind::DtProperty);
+    }
+
+    assert!(p.eat(TokenKind::Equals));
+
+    if p.eat(TokenKind::BitsDirective) {
+        p.expect(TokenKind::Number);
+    }
+
+    let list_m = p.start();
+    if propvalues(p, &[TokenKind::Semicolon]).is_err() {
+        list_m.complete(p, NodeKind::PropValueList);
+        return m.complete(p, NodeKind::ParseError);
     }
     list_m.complete(p, NodeKind::PropValueList);
 
@@ -384,7 +406,7 @@ fn item(p: &mut Parser) {
                     m = m.complete(p, NodeKind::DtLabel).precede(p);
                 } else if p.at(TokenKind::Ampersand) {
                     // label + extension e.g. `bar: &foo {};`
-                    dt_phandle(p);
+                    reference(p);
                     break;
                 } else {
                     break;
@@ -425,11 +447,11 @@ fn item(p: &mut Parser) {
     } else if p.at(TokenKind::Ampersand) {
         // parse a node
 
-        dt_phandle(p);
+        reference(p);
 
         if p.at(TokenKind::AtSign) {
             // unit address
-            // FIXME: move to dt_phandle
+            // FIXME: move to reference
             p.bump();
             p.expect(TokenKind::Ident);
         }
@@ -493,7 +515,7 @@ fn item(p: &mut Parser) {
 
         let m_params = p.start();
         if p.at(TokenKind::Ampersand) {
-            dt_phandle(p);
+            reference(p);
         } else if !p.eat_name() {
             p.emit_expect_error()
         }
@@ -511,7 +533,7 @@ fn item(p: &mut Parser) {
     vis!(end);
 }
 
-pub(super) fn root(p: &mut Parser) {
+pub(super) fn entry_sourcefile(p: &mut Parser) {
     while !p.at_end() {
         if p.at_preprocessor_directive() {
             p.bump();
@@ -527,13 +549,24 @@ pub(super) fn root(p: &mut Parser) {
     }
 }
 
+pub(super) fn entry_name(p: &mut Parser) {
+    if p.at_name() {
+        p.bump_name();
+        if !p.at_end() {
+            p.emit_expect_error()
+        }
+    } else {
+        p.error2()
+    }
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use std::sync::Arc;
 
     use crate::cst2::{
         lexer::TokenKind,
-        parser::{parse, ParseError},
+        parser::{parse, Entrypoint, ParseError},
         GreenItem, GreenNode, GreenToken, TokenText,
     };
 
@@ -568,6 +601,55 @@ pub(super) mod tests {
         let parse_output = parse(input);
         assert_eq!(parse_output.errors, expected_errors);
         assert_eq!(parse_output.green_node.children, expected_children);
+    }
+
+    #[track_caller]
+    fn check_ep(
+        ep: Entrypoint,
+        input: &str,
+        expected_children: Vec<GreenItem>,
+        expected_errors: Vec<ParseError>,
+    ) {
+        let parse_output = ep.parse(input);
+        assert_eq!(parse_output.errors, expected_errors);
+        assert_eq!(parse_output.green_node.children, expected_children);
+    }
+
+    #[test]
+    fn try_entrypoint() {
+        check_ep(
+            Entrypoint::Name,
+            "foo",
+            vec![dynamic_token(TokenKind::Name, "foo")],
+            vec![],
+        );
+        check_ep(
+            Entrypoint::ReferenceNoamp,
+            "foo",
+            vec![dynamic_token(TokenKind::Name, "foo")],
+            vec![],
+        );
+        check_ep(
+            Entrypoint::PropValues,
+            "\"foo\", \"bar\"",
+            vec![
+                dynamic_token(TokenKind::String, "\"foo\""),
+                static_token(TokenKind::Comma),
+                ws(" "),
+                dynamic_token(TokenKind::String, "\"bar\""),
+            ],
+            vec![],
+        );
+        check_ep(
+            Entrypoint::Cells,
+            "1 2",
+            vec![
+                dynamic_token(TokenKind::Number, "1"),
+                ws(" "),
+                dynamic_token(TokenKind::Number, "2"),
+            ],
+            vec![],
+        );
     }
 
     #[test]

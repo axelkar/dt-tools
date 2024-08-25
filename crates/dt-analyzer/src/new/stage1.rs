@@ -1,4 +1,4 @@
-//! Per-file stage where everything is parsed down to the names
+//! Per-file stage where a rough outline of the file is parsed
 //!
 //! Nothing is resolved or computed
 use std::{

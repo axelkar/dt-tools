@@ -82,7 +82,7 @@ impl Value {
                                 }
                             }),
                             ast::Cell::Number(token) => Cell::U32(parse_u32(token.text())?),
-                            ast::Cell::Macro(_token) => todo!(), // FIXME!!
+                            ast::Cell::Macro(_macro) => todo!(), // FIXME!!
                         }))
                     })
                     .filter_map(|v| match v {

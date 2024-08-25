@@ -9,7 +9,13 @@ pub mod parser;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
+    // Entrypoints
     SourceFile,
+    EntryName,
+    EntryReferenceNoamp,
+    EntryPropValues,
+    EntryCells,
+
     /// A parse error
     ParseError,
     Directive,

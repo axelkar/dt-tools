@@ -1,6 +1,6 @@
 //! Per-file computed value stage
 //!
-//! Each label and constant is resolved
+//! Each reference and macro is resolved
 //!
 //! There is only one virtual root node
 

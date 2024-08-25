@@ -2,15 +2,29 @@
 //!
 //! Macro substitution, parameters, ternary operator are evaluated here
 
+use dt_parser::cst2::parser::Entrypoint;
+
 pub(crate) enum MacroContext {
-    /// Label definition context, e.g. `FOO(bar): baz {};`
-    LabelDefinition,
-    /// In value context, after ampersand: `foo = &BAR(baz);`
+    /// In value context or extension name context, after ampersand: `foo = &BAR(baz);`
     Reference,
-    /// Item meaning node or property, e.g. `FOO(bar) {};`
-    ItemNameDefinition,
+    /// Node, property or label name, e.g. `FOO(baz): BAR(baz) {};`
+    NameDefinition,
     /// Property value context, e.g. `foo = BAR(baz);`
     Value,
     /// Cell value context, e.g. `foo = <BAR(baz)>;`
     Cell,
+    /// Item context, e.g. `/ { FOO(bar); };`
+    Item,
+}
+impl MacroContext {
+    /// Returns the entrypoint for parsing the macro's output.
+    fn entrypoint(&self) -> Entrypoint {
+        match self {
+            Self::Reference => Entrypoint::ReferenceNoamp,
+            Self::NameDefinition => Entrypoint::Name,
+            Self::Value => Entrypoint::PropValues,
+            Self::Cell => Entrypoint::Cells,
+            Self::Item => Entrypoint::SourceFile,
+        }
+    }
 }
