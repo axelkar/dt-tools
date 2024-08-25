@@ -319,6 +319,8 @@ impl Backend {
             use std::io::Write;
             let mut f = std::fs::File::create("analyzed2.dbg").unwrap();
             write!(f, "analyzed2={:#?}", analyzed2).unwrap();
+            let mut f = std::fs::File::create("analyzed1.dbg").unwrap();
+            write!(f, "analyzed1={:#?}", analyzed).unwrap();
         }
 
         let parent_path = uri

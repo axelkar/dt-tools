@@ -201,7 +201,7 @@ fn merge_root_node(ast: &ast::DtNode, diag: &impl DiagnosticCollector, stage2: &
                     } else {
                         // TODO: pass diag to Value::from_ast
                         if let Ok(values) = prop_ast.values().map(|value_ast|
-                            match Value::from_ast(&value_ast, |_| None) {
+                            match Value::from_ast(&value_ast, |_| None, |_| None) {
                                 Ok(value) => Ok(value),
                                 Err(err) => {
                                     diag.emit(Diagnostic::new(

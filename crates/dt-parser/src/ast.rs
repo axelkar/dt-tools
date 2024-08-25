@@ -48,7 +48,8 @@ use either::Either;
 use enum_as_inner::EnumAsInner;
 
 use crate::cst2::{
-    lexer::TokenKind, parser::Parse, NodeKind, RedItem, RedItemRef, RedNode, RedToken, TreeItem,
+    lexer::TokenKind, parser::Parse, GreenToken, NodeKind, RedItem, RedItemRef, RedNode, RedToken,
+    TreeItem,
 };
 
 /// Trait used for downcasting from [`RedNode`]s to AST nodes.
@@ -145,7 +146,6 @@ macro_rules! match_ast {
         { $catch_all }
     }};
 }
-//pub use match_ast;
 
 /// Trait for [`AstNode`]s with [`Name`]s
 pub trait HasName: AstNode {
@@ -153,6 +153,13 @@ pub trait HasName: AstNode {
     /// Returns the [`Name`] if it exists.
     fn name(&self) -> Option<Name> {
         self.syntax().child_tokens().find_map(Name::cast)
+    }
+    // TODO: make compatible users use this because there are no atomic operations
+    fn green_name(&self) -> Option<&Arc<GreenToken>> {
+        self.syntax()
+            .green
+            .child_tokens()
+            .find(|tok| tok.kind == TokenKind::Name)
     }
 }
 
@@ -443,6 +450,27 @@ impl AstNode for MacroInvocation {
         &self.syntax
     }
 }
+impl MacroInvocation {
+    /// Returns the macro's identifier
+    pub fn ident(&self) -> Option<Arc<RedToken>> {
+        self.syntax
+            .child_tokens()
+            .find(|tok| tok.green.kind == TokenKind::Ident)
+    }
+    /// Returns the macro's identifier
+    pub fn green_ident(&self) -> Option<&Arc<GreenToken>> {
+        self.syntax
+            .green
+            .child_tokens()
+            .find(|tok| tok.kind == TokenKind::Ident)
+    }
+    /// Returns the macro invocation's arguments.
+    pub fn arguments(&self) -> impl Iterator<Item = Arc<RedNode>> + '_ {
+        self.syntax
+            .child_nodes()
+            .filter(|node| node.green.kind == NodeKind::MacroArgument)
+    }
+}
 
 /// A Devicetree cell list.
 ///
@@ -707,9 +735,7 @@ impl HasLabel for DtNode {}
 
 /// A generic name.
 ///
-/// This can only be found in property and node names currently. TODO: update
-///
-/// This cannot be found in expressions, they use `TokenKind::Ident`.
+/// This can only be found in label, property and node names currently. TODO: update
 ///
 /// Kind: [`TokenKind::Name`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -18,8 +18,7 @@ drop_bomb = "0.1"
 either = "1.13"
 enum-as-inner = "0.6"
 itertools.workspace = true
-logos = "0.14.1"
-#logos = { git = "https://github.com/maciejhirsz/logos.git", rev = "640882a0351f76803787153f863fcbd725fd3395", features = ["debug"] }
+logos.workspace = true
 smallvec = "1.13"
 thiserror = "1.0"
 tracing.workspace = true

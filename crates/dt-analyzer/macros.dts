@@ -32,30 +32,11 @@
   interrupts-extended = <&tlmm 59 IRQ_TYPE_EDGE_RISING>;
   reg = <0 0xa0000000 0 (2400 * 1080 * 4)>;
 
-  timer {
-    compatible = "arm,armv8-timer";
-    clock-frequency = <19200000>;
-    interrupts = <GIC_PPI 1 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
-                 <GIC_PPI 2 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
-                 <GIC_PPI 3 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
-                 <GIC_PPI 0 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>;
-  };
-
   source-pdos = <PDO_FIXED(5000, 3000,
                            PDO_FIXED_DUAL_ROLE |
                            PDO_FIXED_USB_COMM |
                            PDO_FIXED_DATA_SWAP)>;
 
-  initial_alive: initial-state {
-    PIN_IN(gpa0-0, DOWN, FAST_SR1);
-    /*PIN_IN(gpa0-1, NONE, FAST_SR1);
-    PIN_IN(gpa0-2, DOWN, FAST_SR1);
-    PIN_IN(gpa0-3, NONE, FAST_SR1);
-    PIN_IN(gpa0-4, NONE, FAST_SR1);
-    PIN_IN(gpa0-5, DOWN, FAST_SR1);
-    PIN_IN(gpa0-6, NONE, FAST_SR1);
-    PIN_IN(gpa0-7, NONE, FAST_SR1);*/
-  };
   linux,keymap = <
       MATRIX_KEY(0x00, 0x02, KEY_BACK)
       MATRIX_KEY(0x03, 0x02, KEY_REFRESH)
@@ -69,4 +50,24 @@
       MATRIX_KEY(0x00, 0x04, KEY_VOLUMEUP)
       CROS_STD_MAIN_KEYMAP
   >;
+
+  timer {
+    compatible = "arm,armv8-timer";
+    clock-frequency = <19200000>;
+    interrupts = <GIC_PPI 1 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
+                 <GIC_PPI 2 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
+                 <GIC_PPI 3 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>,
+                 <GIC_PPI 0 (GIC_CPU_MASK_SIMPLE(8) | IRQ_TYPE_LEVEL_LOW)>;
+  };
+
+  initial_alive: initial-state {
+    PIN_IN(gpa0-0, DOWN, FAST_SR1);
+    /*PIN_IN(gpa0-1, NONE, FAST_SR1);
+    PIN_IN(gpa0-2, DOWN, FAST_SR1);
+    PIN_IN(gpa0-3, NONE, FAST_SR1);
+    PIN_IN(gpa0-4, NONE, FAST_SR1);
+    PIN_IN(gpa0-5, DOWN, FAST_SR1);
+    PIN_IN(gpa0-6, NONE, FAST_SR1);
+    PIN_IN(gpa0-7, NONE, FAST_SR1);*/
+  };
 };

@@ -22,7 +22,7 @@ impl Display for TextRange {
 
 impl TextRange {
     /// Creates a new `TextRange`.
-    pub fn new(start: usize, end: usize) -> TextRange {
+    pub const fn new(start: usize, end: usize) -> TextRange {
         TextRange { start, end }
     }
     /// Returns the length of the span.
@@ -39,8 +39,25 @@ impl TextRange {
     /// assert_eq!(span.length(), 0);
     /// ```
     #[inline(always)]
-    pub fn length(&self) -> usize {
+    pub const fn length(&self) -> usize {
         self.end - self.start
+    }
+    /// Offsets the span by the specified amount
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_diagnostic::text_range::TextRange;
+    ///
+    /// let span = TextRange { start: 4, end: 7 };
+    /// assert_eq!(span.offset(2), TextRange { start: 6, end: 9 });
+    /// ```
+    #[inline(always)]
+    pub const fn offset(self, offset: usize) -> Self {
+        TextRange {
+            start: self.start + offset,
+            end: self.end + offset,
+        }
     }
 
     /// Returns the text as referenced from `source`.
@@ -75,7 +92,7 @@ impl TextRange {
     /// assert_eq!(span.byte_range(), 4..7);
     /// ```
     #[inline(always)]
-    pub fn byte_range(&self) -> Range<usize> {
+    pub const fn byte_range(&self) -> Range<usize> {
         self.start..self.end
     }
 

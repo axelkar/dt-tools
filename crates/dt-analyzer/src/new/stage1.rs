@@ -16,10 +16,16 @@ use enum_as_inner::EnumAsInner;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use rustc_hash::FxHashMap;
 
+use crate::macros::MacroDefinition;
+
 #[derive(Debug, Clone, PartialEq, Eq, EnumAsInner)]
 pub enum AnalyzedToplevel {
     Node(AnalyzedToplevelNode),
     Include(AnalyzedInclude),
+    MacroDefinition {
+        text_range: TextRange,
+        parsed: MacroDefinition,
+    },
 }
 
 impl AnalyzedToplevel {
@@ -28,6 +34,10 @@ impl AnalyzedToplevel {
         match self {
             Self::Node(node) => node.text_range,
             Self::Include(inc) => inc.text_range,
+            Self::MacroDefinition {
+                text_range,
+                parsed: _,
+            } => *text_range,
         }
     }
 }
@@ -42,7 +52,7 @@ pub enum PPIncludeParseError {
     MissingStringTerminator,
 }
 
-fn subslice_offset(this: &str, inner: &str) -> Option<usize> {
+pub(crate) fn subslice_offset(this: &str, inner: &str) -> Option<usize> {
     let self_beg = this.as_ptr() as usize;
     let inner = inner.as_ptr() as usize;
     if inner < self_beg || inner > self_beg.wrapping_add(this.len()) {
@@ -77,7 +87,7 @@ impl AnalyzedInclude {
     /// Parses the preprocessor include directive token's text.
     ///
     /// Returns `Err` when there is invalid (or missing) text after `#include`.
-    pub fn pp_parse(
+    fn pp_parse(
         text_range: TextRange,
         input: &str,
         diag: &impl DiagnosticCollector,
@@ -188,7 +198,6 @@ pub struct LabelDef {
 pub(crate) fn gather_labels<'input>(
     ast: &ast::DtNode,
     src: &'input str,
-    diag: &impl DiagnosticCollector,
     on_label: &mut impl FnMut(&'input str, LabelDef),
 ) {
     if let Some(label) = ast.label() {
@@ -204,16 +213,9 @@ pub(crate) fn gather_labels<'input>(
     }
 
     for ast in ast.subnodes() {
-        if !ast.is_concrete() {
-            // TODO: move this to a stage
-            diag.emit(Diagnostic::new(
-                ast.syntax().text_range(),
-                Cow::Borrowed("Extension nodes may not be defined in other nodes"),
-                Severity::Error,
-            ));
-            continue;
+        if ast.is_concrete() {
+            gather_labels(&ast, src, on_label);
         }
-        gather_labels(&ast, src, diag, on_label);
     }
 }
 
@@ -235,7 +237,7 @@ pub fn analyze_file(
             match item {
                 ast::ToplevelItem::Node(node) => {
                     let mut labels = FxHashMap::default();
-                    gather_labels(&node, src, diag, &mut |name, def| {
+                    gather_labels(&node, src, &mut |name, def| {
                         labels.insert(name.to_owned(), def);
                     });
                     Some(AnalyzedToplevel::Node(AnalyzedToplevelNode {
@@ -295,6 +297,28 @@ pub fn analyze_file(
                             }
                         },
                     ))
+                }
+                ast::ToplevelItem::PreprocessorDirective(dir)
+                    if dir.kind() == TokenKind::DefineDirective =>
+                {
+                    Some(AnalyzedToplevel::MacroDefinition {
+                        text_range: dir.syntax().text_range(),
+                        parsed: match MacroDefinition::parse(dir.syntax().text()) {
+                            Ok(inc) => inc,
+                            Err(err) => {
+                                diag.emit(Diagnostic::new(
+                                    if let Some(local_range) = err.text_range() {
+                                        local_range.offset(dir.syntax().text_offset)
+                                    } else {
+                                        dir.syntax().text_range()
+                                    },
+                                    Cow::Owned(err.to_string()),
+                                    Severity::Error,
+                                ));
+                                return None;
+                            }
+                        },
+                    })
                 }
                 _ => None,
             }

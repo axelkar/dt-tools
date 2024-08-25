@@ -19,8 +19,8 @@ pub enum NodeKind {
     /// A parse error
     ParseError,
     Directive,
-    /// A directive's parameters, if any.
-    DirectiveParams,
+    /// A directive's arguments, if any.
+    DirectiveArguments,
     PreprocessorDirective,
     DtNode,
     DtProperty,
@@ -33,7 +33,7 @@ pub enum NodeKind {
     DtPhandle,
     UnitAddress,
     MacroInvocation,
-    MacroParameter,
+    MacroArgument,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

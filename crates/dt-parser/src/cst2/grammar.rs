@@ -60,7 +60,7 @@ fn macro_invocation(m: Marker, p: &mut Parser) -> CompletedMarker {
                         }
                     }
                     Some(TokenKind::Comma) if level == 0 => {
-                        param_m.complete(p, NodeKind::MacroParameter);
+                        param_m.complete(p, NodeKind::MacroArgument);
                         p.bump();
                         param_m = p.start();
                         continue;
@@ -70,7 +70,7 @@ fn macro_invocation(m: Marker, p: &mut Parser) -> CompletedMarker {
                 }
                 p.bump();
             }
-            param_m.complete(p, NodeKind::MacroParameter);
+            param_m.complete(p, NodeKind::MacroArgument);
         }
         p.expect(TokenKind::RParen);
     }
@@ -502,7 +502,7 @@ fn item(p: &mut Parser) {
         let m_params = p.start();
         p.expect(TokenKind::Number);
         p.expect(TokenKind::Number);
-        m_params.complete(p, NodeKind::DirectiveParams);
+        m_params.complete(p, NodeKind::DirectiveArguments);
 
         p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::Directive);
@@ -519,7 +519,7 @@ fn item(p: &mut Parser) {
         } else if !p.eat_name() {
             p.emit_expect_error()
         }
-        m_params.complete(p, NodeKind::DirectiveParams);
+        m_params.complete(p, NodeKind::DirectiveArguments);
 
         p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::Directive);
@@ -686,7 +686,7 @@ pub(super) mod tests {
                     static_token(TokenKind::DeleteNodeDirective),
                     ws(" "),
                     node(
-                        NodeKind::DirectiveParams,
+                        NodeKind::DirectiveArguments,
                         vec![dynamic_token(TokenKind::Name, "node-name")],
                     ),
                     static_token(TokenKind::Semicolon),
@@ -703,7 +703,7 @@ pub(super) mod tests {
                     static_token(TokenKind::DeleteNodeDirective),
                     ws(" "),
                     node(
-                        NodeKind::DirectiveParams,
+                        NodeKind::DirectiveArguments,
                         vec![node(
                             NodeKind::DtPhandle,
                             vec![
@@ -726,7 +726,7 @@ pub(super) mod tests {
                     static_token(TokenKind::MemreserveDirective),
                     ws(" "),
                     node(
-                        NodeKind::DirectiveParams,
+                        NodeKind::DirectiveArguments,
                         vec![
                             dynamic_token(TokenKind::Number, "0x10000000"),
                             ws(" "),
@@ -922,13 +922,13 @@ pub(super) mod tests {
                                             dynamic_token(TokenKind::Ident, "FOO"),
                                             static_token(TokenKind::LParen),
                                             node(
-                                                NodeKind::MacroParameter,
+                                                NodeKind::MacroArgument,
                                                 vec![dynamic_token(TokenKind::Ident, "bar")],
                                             ),
                                             static_token(TokenKind::Comma),
                                             ws(" "),
                                             node(
-                                                NodeKind::MacroParameter,
+                                                NodeKind::MacroArgument,
                                                 vec![dynamic_token(TokenKind::Number, "1234")],
                                             ),
                                             static_token(TokenKind::RParen),
@@ -945,7 +945,7 @@ pub(super) mod tests {
                                     dynamic_token(TokenKind::Ident, "FOO"),
                                     static_token(TokenKind::LParen),
                                     node(
-                                        NodeKind::MacroParameter,
+                                        NodeKind::MacroArgument,
                                         vec![
                                             static_token(TokenKind::LParen),
                                             static_token(TokenKind::LParen),
@@ -956,7 +956,7 @@ pub(super) mod tests {
                                     static_token(TokenKind::Comma),
                                     ws(" "),
                                     node(
-                                        NodeKind::MacroParameter,
+                                        NodeKind::MacroArgument,
                                         vec![
                                             static_token(TokenKind::LParen),
                                             static_token(TokenKind::RParen),

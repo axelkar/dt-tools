@@ -1,5 +1,7 @@
 use dt_parser::ast::{self, AstToken, HasName};
 
+use crate::macros::macro_invoc;
+
 #[derive(thiserror::Error, Debug)]
 pub enum ValueFromAstError {
     #[error("failed to parse string: {0}")]
@@ -58,6 +60,7 @@ impl Value {
     pub(crate) fn from_ast(
         ast: &ast::PropValue,
         _resolve_label: impl FnMut(&str) -> Option<ast::DtLabel>,
+        _resolve_macro: impl FnMut(&str) -> Option<ast::PreprocessorDirective>,
     ) -> Result<Self, ValueFromAstError> {
         Ok(match ast {
             ast::PropValue::String(tok) => {
@@ -82,7 +85,10 @@ impl Value {
                                 }
                             }),
                             ast::Cell::Number(token) => Cell::U32(parse_u32(token.text())?),
-                            ast::Cell::Macro(_macro) => todo!(), // FIXME!!
+                            ast::Cell::Macro(ast) => {
+                                let s = macro_invoc(ast);
+                                Cell::Phandle(PhandleTarget::Label(s))
+                            } // FIXME!!
                         }))
                     })
                     .filter_map(|v| match v {
