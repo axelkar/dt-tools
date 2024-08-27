@@ -309,11 +309,7 @@ impl Backend {
 
         let analyzed = dt_analyzer::new::stage1::analyze_file(&file, &text, &diag);
         let includes = &[]; // TODO
-        let analyzed2 = dt_analyzer::new::stage2::compute(
-            analyzed.iter().filter_map(|a| a.as_node()),
-            includes,
-            &diag,
-        );
+        let analyzed2 = dt_analyzer::new::stage2::compute(&analyzed, includes, &diag);
         //if is_main_file {
         if false {
             use std::io::Write;

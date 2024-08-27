@@ -8,15 +8,15 @@ use std::borrow::Cow;
 
 use dt_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, SpanLabel};
 use dt_parser::{
-    ast::{self, AstNode, AstToken, HasName},
+    ast::{self, AstNode, AstNodeOrToken, AstToken, HasName},
     match_ast, TextRange,
 };
 use enum_as_inner::EnumAsInner;
 use rustc_hash::FxHashMap;
 
-use crate::resolved_prop::Value;
+use crate::{macros::MacroDefinition, resolved_prop::Value};
 
-use super::stage1::{AnalyzedToplevelNode, LabelDef};
+use super::stage1::{AnalyzedToplevel, LabelDef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedInclude<'a> {
@@ -109,26 +109,37 @@ impl Stage2Property {
 
 /// # Parameters
 ///
-/// * `stage1`: Iterator of stage 1 toplevel nodes
+/// * `outline`: Stage 1 toplevels
 /// * `includes`: List of (potentially transitive) includes
 /// * `diag`: Single-file diagnostic collector
-pub fn compute<'a, I: IntoIterator<Item = &'a AnalyzedToplevelNode>>(
-    stage1: I,
+pub fn compute(
+    outline: &[AnalyzedToplevel],
     _includes: &[ResolvedInclude],
     diag: &impl DiagnosticCollector,
 ) -> Stage2File {
     let mut root_node = Stage2Node::default();
-    for stage1_node in stage1 {
+    let macro_db: FxHashMap<_, _> = outline
+        .iter()
+        .filter_map(AnalyzedToplevel::as_macro_definition)
+        .map(|(tr, macro_def)| (macro_def.name.clone(), (*tr, macro_def)))
+        .collect();
+
+    for stage1_node in outline.iter().filter_map(AnalyzedToplevel::as_node) {
         if stage1_node.is_extension {
             // TODO: cache path in LabelDef
         } else {
-            merge_root_node(&stage1_node.ast, diag, &mut root_node);
+            merge_root_node(&stage1_node.ast, diag, &mut root_node, &macro_db);
         }
     }
     Stage2File { root_node }
 }
 
-fn merge_root_node(ast: &ast::DtNode, diag: &impl DiagnosticCollector, stage2: &mut Stage2Node) {
+fn merge_root_node(
+    ast: &ast::DtNode,
+    diag: &impl DiagnosticCollector,
+    stage2: &mut Stage2Node,
+    macro_db: &FxHashMap<String, (TextRange, &MacroDefinition)>,
+) {
     stage2.asts.push(ast.clone());
 
     //for (name, child) in ast.syntax().child_nodes().filter_map(|node| {
@@ -161,11 +172,11 @@ fn merge_root_node(ast: &ast::DtNode, diag: &impl DiagnosticCollector, stage2: &
                         }
                         Some(Stage2Tree::Node(other)) => {
                             // merge
-                            merge_root_node(&child_ast, diag, other);
+                            merge_root_node(&child_ast, diag, other, macro_db);
                         }
                         None => {
                             let mut child_node = Stage2Node::default();
-                            merge_root_node(&child_ast, diag, &mut child_node);
+                            merge_root_node(&child_ast, diag, &mut child_node, macro_db);
                             stage2.children.insert(name.as_ref().to_owned(), Stage2Tree::Node(child_node));
                         }
                     }
@@ -201,11 +212,11 @@ fn merge_root_node(ast: &ast::DtNode, diag: &impl DiagnosticCollector, stage2: &
                     } else {
                         // TODO: pass diag to Value::from_ast
                         if let Ok(values) = prop_ast.values().map(|value_ast|
-                            match Value::from_ast(&value_ast, |_| None, |_| None) {
+                            match Value::from_ast(&value_ast, &mut |_| None, macro_db) {
                                 Ok(value) => Ok(value),
                                 Err(err) => {
                                     diag.emit(Diagnostic::new(
-                                        prop_ast.syntax().text_range(),
+                                        value_ast.syntax().text_range(),
                                         Cow::Owned(err.to_string()),
                                         Severity::Error,
                                     ));

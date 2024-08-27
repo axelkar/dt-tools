@@ -31,22 +31,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut new_diagnostics = Vec::new();
     let diag = std::sync::Mutex::new(&mut new_diagnostics);
 
-    let analyzed = dt_analyzer::new::stage1::analyze_file(&file, &text, &diag);
+    let outline = dt_analyzer::new::stage1::analyze_file(&file, &text, &diag);
     let includes = &[]; // TODO
-    let analyzed2 = dt_analyzer::new::stage2::compute(
-        analyzed.iter().filter_map(|a| a.as_node()),
-        includes,
-        &diag,
-    );
-    println!("{}={:#?}", "analyzed2".cyan(), analyzed2);
+    let analyzed2 = dt_analyzer::new::stage2::compute(&outline, includes, &diag);
     println!(
         "{}={:#?}",
         "macro defs".cyan(),
-        analyzed
+        outline
             .iter()
             .filter_map(AnalyzedToplevel::as_macro_definition)
             .collect::<Vec<_>>()
     );
+    println!("{}={:#?}", "analyzed2".cyan(), analyzed2);
 
     if !new_diagnostics.is_empty() {
         let mut files = SimpleFiles::new();

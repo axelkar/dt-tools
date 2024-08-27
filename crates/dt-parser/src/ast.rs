@@ -150,11 +150,11 @@ macro_rules! match_ast {
 /// Trait for [`AstNode`]s with [`Name`]s
 pub trait HasName: AstNode {
     // TODO: &'self str text instead of something bound to Name.syntax.green
-    /// Returns the [`Name`] if it exists.
+    /// Returns the first [`Name`] if it exists.
     fn name(&self) -> Option<Name> {
         self.syntax().child_tokens().find_map(Name::cast)
     }
-    // TODO: make compatible users use this because there are no atomic operations
+    // TODO: make compatible users use this because there are no atomic operations or allocationa
     fn green_name(&self) -> Option<&Arc<GreenToken>> {
         self.syntax()
             .green
@@ -163,11 +163,20 @@ pub trait HasName: AstNode {
     }
 }
 
+// FIXME: This should be able to return multiple labels
 /// Trait for [`AstNode`]s with [`DtLabel`]s
 pub trait HasLabel: AstNode {
-    /// Returns the [`DtLabel`] if it exists.
+    /// Returns the first [`DtLabel`] if it exists.
     fn label(&self) -> Option<DtLabel> {
         self.syntax().child_nodes().find_map(DtLabel::cast)
+    }
+}
+
+/// Trait for [`AstNode`]s with [`MacroInvocation`]s
+pub trait HasMacroInvocation: AstNode {
+    /// Returns the first [`MacroInvocation`] if it exists.
+    fn macro_invocation(&self) -> Option<MacroInvocation> {
+        self.syntax().child_nodes().find_map(MacroInvocation::cast)
     }
 }
 
@@ -431,6 +440,7 @@ impl DtPhandle {
     }
 }
 impl HasName for DtPhandle {}
+impl HasMacroInvocation for DtPhandle {}
 
 /// A macro invocation in an expression in a [`Cell`], as a [`PropValue`] or in a name position.
 ///

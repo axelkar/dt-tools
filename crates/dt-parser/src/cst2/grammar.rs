@@ -151,9 +151,11 @@ pub(super) fn reference_noamp(p: &mut Parser) {
             }
         }
         p.expect(TokenKind::RCurly);
-    } else if !p.eat_name() {
-        // According to the DT spec v0.4, labels can only match [0-9a-zA-Z_], but for the IDE
-        // use-case I'll just match a name
+    } else if p.silent_at2(TokenKind::Ident, TokenKind::LParen) {
+        macro_invocation(p.start(), p);
+    } else if p.at_label_name() {
+        p.bump_label_name();
+    } else {
         p.emit_expect_error();
     }
 }
@@ -196,7 +198,11 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
         } else if p.silent_at(TokenKind::LParen) {
             // Start a parantesized expression
             dt_expr(p);
-        } else if (AT_EOF && p.at_end()) || (!AT_EOF && p.at(TokenKind::RAngle)) {
+        } else if (AT_EOF && {
+            p.add_expected(Expected::Eof);
+            p.at_end()
+        }) || (!AT_EOF && p.at(TokenKind::RAngle))
+        {
             break;
         } else if p.silent_at_set(&[TokenKind::Semicolon, TokenKind::LCurly, TokenKind::RCurly])
             || p.at_end()
@@ -621,14 +627,15 @@ pub(super) mod tests {
             Entrypoint::Name,
             "foo",
             vec![dynamic_token(TokenKind::Name, "foo")],
-            vec![],
+            Vec::new(),
         );
         check_ep(
             Entrypoint::ReferenceNoamp,
             "foo",
             vec![dynamic_token(TokenKind::Name, "foo")],
-            vec![],
+            Vec::new(),
         );
+
         check_ep(
             Entrypoint::PropValues,
             "\"foo\", \"bar\"",
@@ -638,8 +645,25 @@ pub(super) mod tests {
                 ws(" "),
                 dynamic_token(TokenKind::String, "\"bar\""),
             ],
-            vec![],
+            Vec::new(),
         );
+        check_ep(
+            Entrypoint::PropValues,
+            "\"foo\";",
+            vec![
+                dynamic_token(TokenKind::String, "\"foo\""),
+                node(
+                    NodeKind::ParseError,
+                    vec![static_token(TokenKind::Semicolon)],
+                ),
+            ],
+            vec![ParseError {
+                message: Cow::Borrowed("Expected ‘,’ or end-of-file, but found ‘;’"),
+                primary_span: (5..6).into(),
+                span_labels: Vec::new(),
+            }],
+        );
+
         check_ep(
             Entrypoint::Cells,
             "1 2",
@@ -648,95 +672,298 @@ pub(super) mod tests {
                 ws(" "),
                 dynamic_token(TokenKind::Number, "2"),
             ],
-            vec![],
+            Vec::new(),
+        );
+
+        check_ep(
+            Entrypoint::Cells,
+            "1 2>",
+            vec![
+                dynamic_token(TokenKind::Number, "1"),
+                ws(" "),
+                dynamic_token(TokenKind::Number, "2"),
+                node(NodeKind::ParseError, vec![static_token(TokenKind::RAngle)]),
+            ],
+            vec![ParseError {
+                message: Cow::Borrowed("Expected cell or end-of-file, but found ‘>’"),
+                primary_span: (3..4).into(),
+                span_labels: Vec::new(),
+            }],
+        );
+    }
+
+    #[test]
+    fn references() {
+        // According to the DT spec v0.4, labels can only match [0-9a-zA-Z_]
+        // Note how commas are ignored:
+        check_ep(
+            Entrypoint::PropValues,
+            "&foo, &123_foo",
+            vec![
+                node(
+                    NodeKind::DtPhandle,
+                    vec![
+                        static_token(TokenKind::Ampersand),
+                        dynamic_token(TokenKind::Name, "foo"),
+                    ],
+                ),
+                static_token(TokenKind::Comma),
+                ws(" "),
+                node(
+                    NodeKind::DtPhandle,
+                    vec![
+                        static_token(TokenKind::Ampersand),
+                        dynamic_token(TokenKind::Name, "123_foo"),
+                    ],
+                ),
+            ],
+            Vec::new(),
+        );
+    }
+
+    #[test]
+    fn macro_positions() {
+        let macro_invoc_bar = node(
+            NodeKind::MacroInvocation,
+            vec![
+                dynamic_token(TokenKind::Ident, "FOO"),
+                static_token(TokenKind::LParen),
+                node(
+                    NodeKind::MacroArgument,
+                    vec![dynamic_token(TokenKind::Ident, "bar")],
+                ),
+                static_token(TokenKind::RParen),
+            ],
+        );
+        let macro_invoc = node(
+            NodeKind::MacroInvocation,
+            vec![dynamic_token(TokenKind::Ident, "FOO")],
+        );
+
+        // Item name, extension
+        check(
+            "FOO {}; FOO(bar) {}; &FOO {}; &FOO(bar) {};",
+            vec![
+                node(
+                    NodeKind::DtNode,
+                    vec![
+                        dynamic_token(TokenKind::Name, "FOO"),
+                        ws(" "),
+                        static_token(TokenKind::LCurly),
+                        static_token(TokenKind::RCurly),
+                        static_token(TokenKind::Semicolon),
+                    ],
+                ),
+                ws(" "),
+                node(
+                    NodeKind::DtNode,
+                    vec![
+                        macro_invoc_bar.clone(),
+                        ws(" "),
+                        static_token(TokenKind::LCurly),
+                        static_token(TokenKind::RCurly),
+                        static_token(TokenKind::Semicolon),
+                    ],
+                ),
+                ws(" "),
+                node(
+                    NodeKind::DtNode,
+                    vec![
+                        node(
+                            NodeKind::DtPhandle,
+                            vec![
+                                static_token(TokenKind::Ampersand),
+                                dynamic_token(TokenKind::Name, "FOO"),
+                            ],
+                        ),
+                        ws(" "),
+                        static_token(TokenKind::LCurly),
+                        static_token(TokenKind::RCurly),
+                        static_token(TokenKind::Semicolon),
+                    ],
+                ),
+                ws(" "),
+                node(
+                    NodeKind::DtNode,
+                    vec![
+                        node(
+                            NodeKind::DtPhandle,
+                            vec![static_token(TokenKind::Ampersand), macro_invoc_bar.clone()],
+                        ),
+                        ws(" "),
+                        static_token(TokenKind::LCurly),
+                        static_token(TokenKind::RCurly),
+                        static_token(TokenKind::Semicolon),
+                    ],
+                ),
+            ],
+            Vec::new(),
+        );
+
+        // Label definition
+        check(
+            "FOO: bar {}; FOO(bar): bar {};",
+            vec![
+                node(
+                    NodeKind::DtNode,
+                    vec![
+                        node(
+                            NodeKind::DtLabel,
+                            vec![
+                                dynamic_token(TokenKind::Name, "FOO"),
+                                static_token(TokenKind::Colon),
+                            ],
+                        ),
+                        ws(" "),
+                        dynamic_token(TokenKind::Name, "bar"),
+                        ws(" "),
+                        static_token(TokenKind::LCurly),
+                        static_token(TokenKind::RCurly),
+                        static_token(TokenKind::Semicolon),
+                    ],
+                ),
+                ws(" "),
+                node(
+                    NodeKind::DtNode,
+                    vec![
+                        node(
+                            NodeKind::DtLabel,
+                            vec![macro_invoc_bar.clone(), static_token(TokenKind::Colon)],
+                        ),
+                        ws(" "),
+                        dynamic_token(TokenKind::Name, "bar"),
+                        ws(" "),
+                        static_token(TokenKind::LCurly),
+                        static_token(TokenKind::RCurly),
+                        static_token(TokenKind::Semicolon),
+                    ],
+                ),
+            ],
+            Vec::new(),
+        );
+
+        // As value/cell
+        check_ep(
+            Entrypoint::PropValues,
+            "<FOO FOO(bar)>, FOO, FOO(bar)",
+            vec![
+                node(
+                    NodeKind::DtCellList,
+                    vec![
+                        static_token(TokenKind::LAngle),
+                        macro_invoc.clone(),
+                        ws(" "),
+                        macro_invoc_bar.clone(),
+                        static_token(TokenKind::RAngle),
+                    ],
+                ),
+                static_token(TokenKind::Comma),
+                ws(" "),
+                macro_invoc.clone(),
+                static_token(TokenKind::Comma),
+                ws(" "),
+                macro_invoc_bar.clone(),
+            ],
+            Vec::new(),
+        );
+
+        // As reference
+        check_ep(
+            Entrypoint::PropValues,
+            "<&FOO &FOO(bar)>, &FOO, &FOO(bar)",
+            vec![
+                node(
+                    NodeKind::DtCellList,
+                    vec![
+                        static_token(TokenKind::LAngle),
+                        node(
+                            NodeKind::DtPhandle,
+                            vec![
+                                static_token(TokenKind::Ampersand),
+                                dynamic_token(TokenKind::Name, "FOO"),
+                            ],
+                        ),
+                        ws(" "),
+                        node(
+                            NodeKind::DtPhandle,
+                            vec![static_token(TokenKind::Ampersand), macro_invoc_bar.clone()],
+                        ),
+                        static_token(TokenKind::RAngle),
+                    ],
+                ),
+                static_token(TokenKind::Comma),
+                ws(" "),
+                node(
+                    NodeKind::DtPhandle,
+                    vec![
+                        static_token(TokenKind::Ampersand),
+                        dynamic_token(TokenKind::Name, "FOO"),
+                    ],
+                ),
+                static_token(TokenKind::Comma),
+                ws(" "),
+                node(
+                    NodeKind::DtPhandle,
+                    vec![static_token(TokenKind::Ampersand), macro_invoc_bar.clone()],
+                ),
+            ],
+            Vec::new(),
         );
     }
 
     #[test]
     fn parse_directive() {
-        check(
-            "/dts-v1/;",
-            vec![node(
-                NodeKind::Directive,
-                vec![
-                    static_token(TokenKind::V1Directive),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            Vec::new(),
-        );
-
-        check(
-            "/plugin/;",
-            vec![node(
-                NodeKind::Directive,
-                vec![
-                    static_token(TokenKind::PluginDirective),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            Vec::new(),
-        );
-
-        check(
-            "/delete-node/ node-name;",
-            vec![node(
-                NodeKind::Directive,
-                vec![
-                    static_token(TokenKind::DeleteNodeDirective),
-                    ws(" "),
-                    node(
-                        NodeKind::DirectiveArguments,
-                        vec![dynamic_token(TokenKind::Name, "node-name")],
-                    ),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            Vec::new(),
-        );
-
-        check(
-            "/delete-node/ &label;",
-            vec![node(
-                NodeKind::Directive,
-                vec![
-                    static_token(TokenKind::DeleteNodeDirective),
-                    ws(" "),
-                    node(
-                        NodeKind::DirectiveArguments,
-                        vec![node(
-                            NodeKind::DtPhandle,
-                            vec![
-                                static_token(TokenKind::Ampersand),
-                                dynamic_token(TokenKind::Name, "label"),
-                            ],
-                        )],
-                    ),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            Vec::new(),
-        );
-
-        check(
-            "/memreserve/ 0x10000000 0x4000;",
-            vec![node(
-                NodeKind::Directive,
-                vec![
-                    static_token(TokenKind::MemreserveDirective),
-                    ws(" "),
-                    node(
-                        NodeKind::DirectiveArguments,
+        #[track_caller]
+        fn check_directive(input: &str, kind: TokenKind, args: Option<Vec<GreenItem>>) {
+            check(
+                input,
+                vec![node(
+                    NodeKind::Directive,
+                    if let Some(args) = args {
                         vec![
-                            dynamic_token(TokenKind::Number, "0x10000000"),
+                            static_token(kind),
                             ws(" "),
-                            dynamic_token(TokenKind::Number, "0x4000"),
-                        ],
-                    ),
-                    static_token(TokenKind::Semicolon),
+                            node(NodeKind::DirectiveArguments, args),
+                            static_token(TokenKind::Semicolon),
+                        ]
+                    } else {
+                        vec![static_token(kind), static_token(TokenKind::Semicolon)]
+                    },
+                )],
+                Vec::new(),
+            )
+        }
+
+        check_directive("/dts-v1/;", TokenKind::V1Directive, None);
+
+        check_directive("/plugin/;", TokenKind::PluginDirective, None);
+
+        check_directive(
+            "/delete-node/ node-name;",
+            TokenKind::DeleteNodeDirective,
+            Some(vec![dynamic_token(TokenKind::Name, "node-name")]),
+        );
+
+        check_directive(
+            "/delete-node/ &label;",
+            TokenKind::DeleteNodeDirective,
+            Some(vec![node(
+                NodeKind::DtPhandle,
+                vec![
+                    static_token(TokenKind::Ampersand),
+                    dynamic_token(TokenKind::Name, "label"),
                 ],
-            )],
-            Vec::new(),
+            )]),
+        );
+
+        check_directive(
+            "/memreserve/ 0x10000000 0x4000;",
+            TokenKind::MemreserveDirective,
+            Some(vec![
+                dynamic_token(TokenKind::Number, "0x10000000"),
+                ws(" "),
+                dynamic_token(TokenKind::Number, "0x4000"),
+            ]),
         );
     }
 

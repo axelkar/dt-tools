@@ -37,7 +37,7 @@ impl MacroContext {
 enum MacroTokenKind {
     Word(String),
     Parameter(usize),
-    StringLiteral(String),
+    Symbol(String),
     ConcatOperator,
     StringifyOperator,
 }
@@ -285,11 +285,11 @@ impl MacroDefinition {
                             break;
                         }
                     }
-                    let text_range = p.text_range();
 
+                    let text_range = p.text_range();
                     let tok = std::mem::take(&mut p.current_token);
                     p.push_tok(MacroToken {
-                        kind: MacroTokenKind::StringLiteral(tok),
+                        kind: MacroTokenKind::Symbol(tok),
                         text_range,
                     })?;
                 }
@@ -347,28 +347,54 @@ impl MacroDefinition {
                     p.complete_token()?;
                 }
                 // Special characters, break the word
-                '<' => {
+                '<' | '>' | '&' | '|' => {
+                    // These change meaning when two are pasted together
                     p.complete_token()?;
-                    p.bump(ch);
-                    if p.peek() == Some(&'<') {
+                    if p.peek() == Some(&ch) {
                         p.next();
-                        p.bump(ch);
-                    }
-                    p.complete_token()?;
-                }
-                '>' => {
-                    p.complete_token()?;
-                    p.bump(ch);
-                    if p.peek() == Some(&'>') {
+                        p.push_tok(MacroToken {
+                            text_range: TextRange {
+                                start: p.offset - 2,
+                                end: p.offset,
+                            },
+                            kind: MacroTokenKind::Word({
+                                let mut s = String::with_capacity(2);
+                                s.push(ch);
+                                s.push(ch);
+                                s
+                            }),
+                        })?;
                         p.next();
-                        p.bump(ch);
+                    } else {
+                        p.push_tok(MacroToken {
+                            text_range: TextRange {
+                                start: p.offset - 1,
+                                end: p.offset,
+                            },
+                            kind: MacroTokenKind::Word(ch.to_string()),
+                        })?;
                     }
-                    p.complete_token()?;
                 }
-                '(' | ')' | '{' | '}' | ';' | '+' | '-' | '*' | '/' | '~' | '?' | ':' => {
+                '(' | ')' | '{' | '}' | ';' | '+' | '*' | '/' | '~' | '?' | ':' => {
                     p.complete_token()?;
-                    p.bump(ch);
+                    p.push_tok(MacroToken {
+                        text_range: TextRange {
+                            start: p.offset - 1,
+                            end: p.offset,
+                        },
+                        kind: MacroTokenKind::Symbol(ch.to_string()),
+                    })?;
+                }
+                '-' => {
+                    // Can't be pasted next to words
                     p.complete_token()?;
+                    p.push_tok(MacroToken {
+                        text_range: TextRange {
+                            start: p.offset - 1,
+                            end: p.offset,
+                        },
+                        kind: MacroTokenKind::Word(ch.to_string()),
+                    })?;
                 }
                 _ => {
                     p.bump(ch);
@@ -405,51 +431,55 @@ impl MacroDefinition {
             params,
         })
     }
-    fn substitute(&self, arguments: &[String]) -> Result<String, (&'static str, TextRange)> {
+    fn substitute(&self, arguments: &[String]) -> String {
         let mut s = String::new();
         let mut iter = self.body_tokens.iter().peekable();
+        let mut push_ws = false;
         while let Some(token) = iter.next() {
             match &token.kind {
                 MacroTokenKind::Word(text) => {
-                    s.push(' ');
+                    if push_ws {
+                        s.push(' ');
+                    }
                     s.push_str(text);
                 }
                 MacroTokenKind::Parameter(idx) => {
                     let text = &arguments[*idx];
-                    s.push(' ');
-                    s.push_str(text);
-                }
-                MacroTokenKind::StringLiteral(text) => {
-                    s.push_str(text);
-                }
-                MacroTokenKind::ConcatOperator => {
-                    // TODO: If first token, error
-                    match iter.next() {
-                        Some(MacroToken {
-                            kind: MacroTokenKind::Word(text),
-                            ..
-                        }) => {
-                            s.push_str(text);
-                        }
-                        Some(MacroToken {
-                            kind: MacroTokenKind::Parameter(idx),
-                            ..
-                        }) => {
-                            let text = &arguments[*idx];
-                            s.push_str(text);
-                        }
-                        Some(MacroToken {
-                            kind:
-                                MacroTokenKind::StringLiteral(_)
-                                | MacroTokenKind::ConcatOperator
-                                | MacroTokenKind::StringifyOperator,
-                            ..
-                        })
-                        | None => {
-                            unreachable!()
-                        }
+                    if push_ws {
+                        s.push(' ');
                     }
+                    s.push_str(text);
                 }
+                MacroTokenKind::Symbol(text) => {
+                    s.push_str(text);
+                    push_ws = false;
+                    continue;
+                }
+                MacroTokenKind::ConcatOperator => match iter.next() {
+                    Some(MacroToken {
+                        kind: MacroTokenKind::Word(text),
+                        ..
+                    }) => {
+                        s.push_str(text);
+                    }
+                    Some(MacroToken {
+                        kind: MacroTokenKind::Parameter(idx),
+                        ..
+                    }) => {
+                        let text = &arguments[*idx];
+                        s.push_str(text);
+                    }
+                    Some(MacroToken {
+                        kind:
+                            MacroTokenKind::Symbol(_)
+                            | MacroTokenKind::ConcatOperator
+                            | MacroTokenKind::StringifyOperator,
+                        ..
+                    })
+                    | None => {
+                        unreachable!()
+                    }
+                },
                 MacroTokenKind::StringifyOperator => match iter.next() {
                     Some(MacroToken {
                         kind: MacroTokenKind::Word(text),
@@ -466,7 +496,7 @@ impl MacroDefinition {
                     }
                     Some(MacroToken {
                         kind:
-                            MacroTokenKind::StringLiteral(_)
+                            MacroTokenKind::Symbol(_)
                             | MacroTokenKind::ConcatOperator
                             | MacroTokenKind::StringifyOperator,
                         ..
@@ -476,8 +506,9 @@ impl MacroDefinition {
                     }
                 },
             }
+            push_ws = true;
         }
-        Ok(s)
+        s
     }
 }
 
@@ -489,18 +520,25 @@ impl MacroDefinition {
 //
 // https://gcc.gnu.org/onlinedocs/gcc-3.4.3/cpp/Argument-Prescan.html
 
-pub(crate) fn macro_invoc(ast: ast::MacroInvocation) -> String {
-    let id = &ast.green_ident().expect("grammar promise").text;
-    let arguments = ast
-        .arguments()
-        .map(|arg| {
-            arg.green
-                .child_tokens()
-                .map(|tok| tok.text.as_str())
-                .collect()
-        })
-        .collect::<Vec<String>>();
-    format!("foo {id}{:?}", arguments)
+pub(crate) fn evaluate_macro(
+    ast: Option<&ast::MacroInvocation>,
+    def: &MacroDefinition,
+) -> Result<String, String> {
+    let arguments = ast.map(|ast| {
+        ast.arguments()
+            .map(|arg| {
+                arg.green
+                    .child_tokens()
+                    .map(|tok| tok.text.as_str())
+                    .collect()
+            })
+            .collect::<Vec<String>>()
+    });
+    if def.params.len() != arguments.as_ref().map_or(0, |args| args.len()) {
+        return Err("ERROR: invalid argument length".to_owned());
+    }
+    let out = def.substitute(arguments.as_ref().map_or(&[], |args| args));
+    Ok(out)
 }
 
 /// Stringifies `input` like Clang.
@@ -594,17 +632,17 @@ mod tests {
         let def = MacroDefinition::parse("#define CONCAT(a, b) a ## b").unwrap();
         assert_eq!(
             def.substitute(&["foo".to_owned(), "bar".to_owned()]),
-            Ok(" foobar".to_owned())
+            "foobar".to_owned()
         );
 
         let def = MacroDefinition::parse("#define STRINGIFY(a) #a").unwrap();
         assert_eq!(
             def.substitute(&["1 + 2".to_owned()]),
-            Ok("\"1 + 2\"".to_owned())
+            "\"1 + 2\"".to_owned()
         );
 
         let def = MacroDefinition::parse(r#"#define FOO "bar" <123>"#).unwrap();
-        assert_eq!(def.substitute(&[]), Ok("\"bar\" < 123 >".to_owned()));
+        assert_eq!(def.substitute(&[]), "\"bar\"< 123 >".to_owned());
 
         let def = MacroDefinition::parse(
             "#define MATRIX_KEY(row, col, code) \
@@ -614,8 +652,16 @@ mod tests {
 
         assert_eq!(
             def.substitute(&["0x00".to_owned(), "0x02".to_owned(), "KEY_BACK".to_owned()]),
-            Ok(" ( ( ( ( 0x00 ) & 0xFF ) << 24 ) | ( ( ( 0x02 ) & 0xFF ) << 16 ) | ( ( KEY_BACK ) & 0xFFFF ) )".to_owned())
+            "((((0x00)& 0xFF)<< 24)|(((0x02)& 0xFF)<< 16)|((KEY_BACK)& 0xFFFF))".to_owned()
         );
+    }
+
+    #[test]
+    fn substitute_double_symbols() {
+        let def = MacroDefinition::parse("#define FOO < < > > & & | |").unwrap();
+        assert_eq!(def.substitute(&[]), "< < > > & & | |".to_owned());
+        let def = MacroDefinition::parse("#define FOO << >> && ||").unwrap();
+        assert_eq!(def.substitute(&[]), "<< >> && ||".to_owned());
     }
 
     #[test]
@@ -647,7 +693,7 @@ mod tests {
                 params: Vec::new(),
                 body_tokens: vec![
                     mt(MacroTokenKind::Word("1".to_owned()), 12..13),
-                    mt(MacroTokenKind::Word("+".to_owned()), 14..15),
+                    mt(MacroTokenKind::Symbol("+".to_owned()), 14..15),
                     mt(MacroTokenKind::Word("2".to_owned()), 16..17),
                 ],
                 dont_prescan_indices: Vec::new()
@@ -743,7 +789,7 @@ mod tests {
                 name: "FOO".to_owned(),
                 params: Vec::new(),
                 body_tokens: vec![
-                    mt(MacroTokenKind::StringLiteral("\"bar\"".to_owned()), 12..17),
+                    mt(MacroTokenKind::Symbol("\"bar\"".to_owned()), 12..17),
                     mt(MacroTokenKind::Word("<".to_owned()), 18..19),
                     mt(MacroTokenKind::Word("123".to_owned()), 19..22),
                     mt(MacroTokenKind::Word(">".to_owned()), 22..23),

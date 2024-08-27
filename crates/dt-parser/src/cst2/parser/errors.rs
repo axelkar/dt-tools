@@ -11,6 +11,8 @@ pub enum Expected {
     PreprocessorDirective,
     Value,
     Cell,
+    LabelName,
+    Eof,
 }
 impl core::fmt::Display for Expected {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -19,6 +21,8 @@ impl core::fmt::Display for Expected {
             Expected::PreprocessorDirective => f.write_str("preprocessor directive"),
             Expected::Value => f.write_str("value"),
             Expected::Cell => f.write_str("cell"),
+            Expected::LabelName => f.write_str("label name"),
+            Expected::Eof => f.write_str("end-of-file"),
         }
     }
 }

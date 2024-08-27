@@ -32,6 +32,7 @@ const NAME_SET: [TokenKind; 4] = [
     TokenKind::Comma,
     TokenKind::Minus,
 ];
+const LABEL_NAME_SET: [TokenKind; 2] = [TokenKind::Ident, TokenKind::Number];
 
 const PREPROCESSOR_DIRECTIVE_SET: [TokenKind; 9] = [
     TokenKind::UndefDirective,
@@ -62,10 +63,12 @@ pub struct Parse<'input> {
     pub errors: Vec<ParseError>,
 }
 impl Parse<'_> {
+    /// # Panics
+    ///
+    /// This function panics when you haven't parsed using [`Entrypoint::SourceFile`].
     pub fn source_file(&self) -> ast::SourceFile {
         use ast::AstNode as _;
-        ast::SourceFile::cast(super::RedNode::new(Arc::new(self.green_node.clone())))
-            .expect("parser should only output SourceFile")
+        ast::SourceFile::cast(super::RedNode::new(Arc::new(self.green_node.clone()))).unwrap()
     }
 }
 
@@ -77,7 +80,9 @@ pub enum Entrypoint {
     /// Parses into a [`NodeKind::EntryName`]
     // TODO: labels + name?
     Name,
-    /// Parses into a [`NodeKind::EntryReferenceNoamp`]
+    /// Parses into a [`NodeKind::DtPhandle`]
+    ///
+    /// Please note that `DtPhandle`s returned don't have ampersands.
     ReferenceNoamp,
     /// Parses into a [`NodeKind::EntryPropValues`] with [`ast::PropValue`]s
     PropValues,
@@ -120,10 +125,14 @@ impl Entrypoint {
             }
             Self::ReferenceNoamp => {
                 grammar::reference_noamp(p);
-                NodeKind::EntryReferenceNoamp
+                NodeKind::DtPhandle
             }
             Self::PropValues => {
                 grammar::propvalues(p, &[]).ok();
+                if !p.at_end() {
+                    p.add_expected(Expected::Eof);
+                    p.error2();
+                }
                 NodeKind::EntryPropValues
             }
             Self::Cells => {
@@ -343,10 +352,10 @@ impl<'t, 'input> Parser<'t, 'input> {
         span_labels: Vec<dt_diagnostic::SpanLabel>,
     ) {
         let primary_span = if self.at_end() {
-            let pos = self.source.last_token_range().unwrap().start;
-            crate::TextRange {
+            let pos = self.source.last_token_range().map_or(0, |tr| tr.start);
+            TextRange {
                 start: pos,
-                end: pos,
+                end: pos + 1,
             }
         } else if let [Expected::Kind(TokenKind::RCurly)] = self.expected.as_slice() {
             let offset = self
@@ -395,6 +404,16 @@ impl<'t, 'input> Parser<'t, 'input> {
         }
     }
 
+    /// Returns true if at a label name token.
+    pub fn at_label_name(&mut self) -> bool {
+        if self.silent_at_set(&LABEL_NAME_SET) {
+            true
+        } else {
+            self.expected.push(Expected::LabelName);
+            false
+        }
+    }
+
     /// Returns true if at a name token.
     pub fn at_name(&mut self) -> bool {
         if self.silent_at_set(&NAME_SET) {
@@ -422,10 +441,20 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Bumps name tokens into [`TokenKind::Name`].
     pub fn bump_name(&mut self) {
-        #[cfg(feature = "grammar-tracing")]
-        tracing::info!("bump_name");
+        self.bump_name_generic(&NAME_SET)
+    }
 
-        assert!(self.silent_at_set(&NAME_SET));
+    /// Bumps label name tokens into [`TokenKind::Name`].
+    pub fn bump_label_name(&mut self) {
+        self.bump_name_generic(&LABEL_NAME_SET)
+    }
+
+    #[inline]
+    fn bump_name_generic(&mut self, set: &[TokenKind]) {
+        #[cfg(feature = "grammar-tracing")]
+        tracing::info!("bump_name_generic");
+
+        assert!(self.silent_at_set(set));
 
         // Make sure no trivia tokens get into the combined token
         self.source.skip_trivia();
@@ -434,10 +463,7 @@ impl<'t, 'input> Parser<'t, 'input> {
         let mut n_raw_tokens = 0;
         let mut text = String::new();
 
-        while self
-            .peek_immediate()
-            .map_or(false, |k| NAME_SET.contains(&k))
-        {
+        while self.peek_immediate().map_or(false, |k| set.contains(&k)) {
             let token = self.source.next_token().expect("Tried to bump at EOF");
             n_raw_tokens += 1;
             text.push_str(token.text);

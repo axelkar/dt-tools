@@ -12,7 +12,6 @@ pub enum NodeKind {
     // Entrypoints
     SourceFile,
     EntryName,
-    EntryReferenceNoamp,
     EntryPropValues,
     EntryCells,
 

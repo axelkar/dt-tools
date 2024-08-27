@@ -7,7 +7,6 @@ impl dt_diagnostic::DiagnosticCollector for PanickingDiagnosticCollector {
     }
 }
 
-#[track_caller]
 fn dts_to_json(filename: &str) -> serde_json::Value {
     let diag = &PanickingDiagnosticCollector;
 
@@ -28,8 +27,7 @@ fn dts_to_json(filename: &str) -> serde_json::Value {
         panic!("Nonzero number of includes: {:#?}", includes);
     }
 
-    let stage2 =
-        crate::new::stage2::compute(analyzed.iter().filter_map(|a| a.as_node()), &[], diag);
+    let stage2 = crate::new::stage2::compute(&analyzed, &[], diag);
 
     stage2.root_node.into_json()
 }
@@ -52,4 +50,6 @@ macro_rules! define_tests {
 
 define_tests! {
     test_1_basic, "1";
+    test_2_include, "2";
+    test_3_macros, "3";
 }

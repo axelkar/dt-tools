@@ -1,6 +1,13 @@
-use dt_parser::ast::{self, AstToken, HasName};
+use std::sync::Arc;
 
-use crate::macros::macro_invoc;
+use dt_parser::{
+    ast::{self, AstNode, AstNodeOrToken, AstToken, DtPhandle, HasMacroInvocation, HasName},
+    cst2::parser::Entrypoint,
+    TextRange,
+};
+use rustc_hash::FxHashMap;
+
+use crate::macros::{evaluate_macro, MacroDefinition};
 
 #[derive(thiserror::Error, Debug)]
 pub enum ValueFromAstError {
@@ -14,6 +21,8 @@ pub enum ValueFromAstError {
     MissingAst,
     #[error("bytestring is missing a hex digit")]
     IncompleteBytestring,
+    #[error("Unrecognized macro name {0}")]
+    UnrecognizedMacro(String),
 }
 
 pub(crate) fn parse_u32(src: &str) -> Result<u32, ValueFromAstError> {
@@ -55,12 +64,13 @@ impl Value {
             Self::Phandle(_phandle_target) => JValue::String("".to_owned()), // TODO
         }
     }
+    // TODO: resolve_macro should depend on text range
     // TODO: resolve_label
     // TODO: arithmetics + macros (evaluation)
     pub(crate) fn from_ast(
         ast: &ast::PropValue,
-        _resolve_label: impl FnMut(&str) -> Option<ast::DtLabel>,
-        _resolve_macro: impl FnMut(&str) -> Option<ast::PreprocessorDirective>,
+        resolve_label: &mut impl FnMut(&str) -> Option<ast::DtLabel>,
+        macro_resolver: &impl MacroResolver,
     ) -> Result<Self, ValueFromAstError> {
         Ok(match ast {
             ast::PropValue::String(tok) => {
@@ -69,48 +79,12 @@ impl Value {
             ast::PropValue::CellList(cell_list) => Value::CellList(
                 cell_list
                     .cells()
-                    .map(|cell| {
-                        Ok(Some(match cell {
-                            ast::Cell::Phandle(phandle) => Cell::Phandle({
-                                let ident = phandle
-                                    .name()
-                                    .ok_or(ValueFromAstError::MissingAst)?
-                                    .syntax()
-                                    .text()
-                                    .to_owned();
-                                if phandle.is_path() {
-                                    PhandleTarget::Path(ident)
-                                } else {
-                                    PhandleTarget::Label(ident)
-                                }
-                            }),
-                            ast::Cell::Number(token) => Cell::U32(parse_u32(token.text())?),
-                            ast::Cell::Macro(ast) => {
-                                let s = macro_invoc(ast);
-                                Cell::Phandle(PhandleTarget::Label(s))
-                            } // FIXME!!
-                        }))
-                    })
-                    .filter_map(|v| match v {
-                        Ok(None) => None,
-                        Ok(Some(v)) => Some(Ok(v)),
-                        Err(e) => Some(Err(e)),
-                    })
+                    .map(|cell| Cell::from_ast(&cell, resolve_label, macro_resolver))
                     .collect::<Result<_, ValueFromAstError>>()?,
             ),
-            ast::PropValue::Phandle(phandle) => Value::Phandle({
-                let ident = phandle
-                    .name()
-                    .ok_or(ValueFromAstError::MissingAst)?
-                    .syntax()
-                    .text()
-                    .to_owned();
-                if phandle.is_path() {
-                    PhandleTarget::Path(ident)
-                } else {
-                    PhandleTarget::Label(ident)
-                }
-            }),
+            ast::PropValue::Phandle(phandle) => {
+                Value::Phandle(reference_eval(phandle, macro_resolver)?)
+            }
             ast::PropValue::Bytestring(tok) => {
                 let mut bytes = Vec::new();
                 let mut first_nibble = None;
@@ -164,6 +138,97 @@ impl Cell {
             Self::Phandle(_phandle_target) => serde_json::Value::Number((-1).into()),
         }
     }
+    fn from_ast(
+        ast: &ast::Cell,
+        _resolve_label: &mut impl FnMut(&str) -> Option<ast::DtLabel>,
+        macro_resolver: &impl MacroResolver,
+    ) -> Result<Self, ValueFromAstError> {
+        Ok(match ast {
+            ast::Cell::Phandle(phandle) => Cell::Phandle(reference_eval(phandle, macro_resolver)?),
+            ast::Cell::Number(token) => Cell::U32(parse_u32(token.text())?),
+            ast::Cell::Macro(macro_ast) => {
+                let macro_name = &macro_ast
+                    .green_ident()
+                    .expect("No macro invocation without a name")
+                    .text;
+
+                let Some(macro_def) = macro_resolver.resolve(macro_name) else {
+                    return Err(ValueFromAstError::UnrecognizedMacro(macro_name.to_owned()));
+                };
+
+                let s = evaluate_macro(Some(macro_ast), macro_def).expect("FIXME: no error");
+
+                let parse = Entrypoint::Cells.parse(&s);
+
+                let cells = dt_parser::cst2::RedNode::new(Arc::new(parse.green_node.clone()));
+
+                let cell = ast::Cell::cast(cells.children().next().unwrap()).unwrap();
+                // TODO: handle errors & map textranges somehow?!
+                // TODO: this can return multiple cells
+
+                Cell::from_ast(&cell, _resolve_label, macro_resolver)?
+            }
+        })
+    }
+}
+
+// Required to decouple &str's lifetime from &MacroDefinition
+pub trait MacroResolver {
+    fn resolve<'r>(&'r self, s: &str) -> Option<&'r MacroDefinition>;
+}
+impl<K: Eq + std::hash::Hash + std::borrow::Borrow<str>> MacroResolver
+    for FxHashMap<K, (TextRange, &MacroDefinition)>
+{
+    fn resolve<'r>(&'r self, s: &str) -> Option<&'r MacroDefinition> {
+        self.get(s).map(|a| a.1)
+    }
+}
+
+fn reference_eval(
+    phandle: &DtPhandle,
+    macro_resolver: &impl MacroResolver,
+) -> Result<PhandleTarget, ValueFromAstError> {
+    let (macro_ast, macro_def) = if let Some(macro_ast) = phandle.macro_invocation() {
+        let macro_name = &macro_ast
+            .green_ident()
+            .expect("No macro invocation without a name")
+            .text;
+
+        let Some(macro_def) = macro_resolver.resolve(macro_name) else {
+            return Err(ValueFromAstError::UnrecognizedMacro(macro_name.to_owned()));
+        };
+        (Some(macro_ast), macro_def)
+    } else {
+        let ident = phandle.name().ok_or(ValueFromAstError::MissingAst)?;
+        let ident = ident.syntax().text();
+
+        match macro_resolver.resolve(ident) {
+            Some(macro_def) => (None, macro_def),
+            None => {
+                return if phandle.is_path() {
+                    Ok(PhandleTarget::Path(ident.to_owned()))
+                } else {
+                    Ok(PhandleTarget::Label(ident.to_owned()))
+                }
+            }
+        }
+    };
+
+    if phandle.is_path() {
+        // TODO: implement path-based references
+        todo!()
+    }
+
+    let s = evaluate_macro(macro_ast.as_ref(), macro_def).expect("FIXME: no error");
+
+    let parse = Entrypoint::ReferenceNoamp.parse(&s);
+    let phandle = ast::DtPhandle::cast(dt_parser::cst2::RedNode::new(Arc::new(
+        parse.green_node.clone(),
+    )))
+    .unwrap();
+    // TODO: handle errors & map textranges somehow?!
+
+    reference_eval(&phandle, macro_resolver)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
