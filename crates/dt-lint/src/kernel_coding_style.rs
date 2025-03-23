@@ -16,9 +16,10 @@ fn valid_node_unit_name(s: &str) -> bool {
     (s.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')) && !s.starts_with('0')) || s == "0"
 }
 fn valid_prop_name(s: &str) -> bool {
-    s.chars().enumerate().all(|(i, c)| {
-        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || (i == 0 && c == '#')
-    })
+    s.chars().filter(|c| c == &',').count() == 1
+        || s.chars().enumerate().all(|(i, c)| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || (i == 0 && c == '#')
+        })
 }
 fn valid_label_name(s: &str) -> bool {
     s.chars()
@@ -79,7 +80,7 @@ impl EarlyLintPass for KernelCodingStyle {
             if text != "device_type" && text != "ddr_device_type" && !valid_prop_name(text) {
                 cx.add_lint_from_cst(
                     LintId::KernelCodingStyle,
-                    format!("Property name `{text}` should match `#?[a-z0-9-]+`"),
+                    format!("Property name `{text}` should match `#?[a-z0-9-,]+`"),
                     LintSeverity::Warn,
                     name.syntax().text_range(),
                 );
