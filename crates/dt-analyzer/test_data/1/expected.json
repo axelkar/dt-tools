@@ -1,4 +1,5 @@
 {
   "foo": ["Hello, world!", [18, 52, 86]],
-  "bar": [[1]]
+  "bar": [[1]],
+  "vendor,baz": true
 }

@@ -6,4 +6,5 @@
 
 / {
   bar = <1>;
+  vendor,baz;
 };
