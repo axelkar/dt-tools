@@ -16,10 +16,19 @@ fn valid_node_unit_name(s: &str) -> bool {
     (s.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')) && !s.starts_with('0')) || s == "0"
 }
 fn valid_prop_name(s: &str) -> bool {
-    s.chars().filter(|c| c == &',').count() == 1
-        || s.chars().enumerate().all(|(i, c)| {
-            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || (i == 0 && c == '#')
-        })
+    let mut count = 0;
+    s.chars().enumerate().all(|(i, c)| {
+        let is_vendor_property = i != 0 && c == ',';
+        if is_vendor_property {
+            count += 1;
+        }
+
+        c.is_ascii_lowercase()
+            || c.is_ascii_digit()
+            || c == '-'
+            || (i == 0 && c == '#')
+            || (is_vendor_property && count == 1)
+    })
 }
 fn valid_label_name(s: &str) -> bool {
     s.chars()
