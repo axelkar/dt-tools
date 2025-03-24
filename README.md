@@ -98,7 +98,7 @@
 1. Install [Rust](https://www.rust-lang.org/learn/get-started)
 2. Clone this repo:
    ```sh
-   git clone --recurse-submodules https://git.axka.fi/dt-tools.git dt-tools
+   git clone --recurse-submodules https://github.com/axelkar/dt-tools.git dt-tools
    cd dt-tools
    ```
 3. Run some commands:
