@@ -8,7 +8,6 @@ categories = ["development-tools"]
 version.workspace = true
 authors.workspace = true
 readme.workspace = true
-homepage.workspace = true
 repository.workspace = true
 license.workspace = true
 
