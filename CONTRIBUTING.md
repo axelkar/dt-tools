@@ -33,7 +33,7 @@ If you have any questions or feedback, open a [GitHub discussion](https://github
    # Showcase analyzer output
    cargo run --example test_analyzer ./syntax_error_showcase.dts
    ```
-4. View the high-level structure of dt-tools in [ARCHITECTURE.md](ARCHITECTURE.md)
+4. Explore the high-level structure of dt-tools in [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Testing
 
