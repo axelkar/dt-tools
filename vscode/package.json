@@ -1,0 +1,102 @@
+{
+  "name": "dt-tools-lsp-vscode",
+  "version": "0.0.1",
+  "displayName": "dt-tools LSP",
+  "description": "A VSCode language server client for dt-tools's language server",
+  "categories": ["Programming Languages"],
+  "keywords": ["dts", "devicetree", "language-server"],
+  "license": "(MIT OR Apache-2.0)",
+  "publisher": "axelkar",
+  "author": {
+    "email": "axel@axka.fi",
+    "name": "Axel Karjalainen",
+    "url": "https://axka.fi"
+  },
+  "homepage": "https://github.com/axelkar/dt-tools/tree/master/vscode",
+  "repository": "https://github.com/axelkar/dt-tools",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "dts",
+        "aliases": ["DeviceTree", "dts"],
+        "extensions": [".dts",".dtsi", ".dtso"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dts",
+        "scopeName": "source.dts",
+        "path": "./syntaxes/dts.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "dt-tools-lsp.restart",
+        "title": "dt-tools LSP: Restart dt-tools LSP server"
+      }
+    ],
+    "configuration": {
+      "title": "dt-tools LSP",
+      "properties": {
+        "dt-tools-lsp.server.path": {
+          "type": "string",
+          "scope": "machine-overridable",
+          "default": "dt-lsp",
+          "description": "Path to dt-lsp executable."
+        },
+        "dt-tools-lsp.server.extraEnv": {
+          "type": [
+            "null",
+            "object"
+          ],
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "default": null,
+          "markdownDescription": "Extra environment variables that will be passed to the dt-lsp executable. Useful for passing e.g. `RUST_BACKTRACE=1` for debugging."
+        },
+        "dt-tools-lsp.trace.server": {
+          "scope": "window",
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "18.x",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^7.4.0",
+    "@typescript-eslint/parser": "^7.4.0",
+    "@vscode/test-cli": "^0.0.8",
+    "@vscode/test-electron": "^2.3.9",
+    "eslint": "^8.57.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

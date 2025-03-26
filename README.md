@@ -52,10 +52,11 @@ If you can, take care of code containing `TODO`, `FIXME`, `todo!(`, `unimplement
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md).
 
-
 ## LSP
 
-The language server is currently only packaged for Neovim with the `./crates/dt-lsp/lsp.lua` script.
+The VSCode extension's documentation can be found [here](vscode/README.md).
+
+The language server is also packaged for Neovim with the `./crates/dt-lsp/lsp.lua` script.
 
 ```sh
 cd ./crates/dt-lsp

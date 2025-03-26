@@ -10,9 +10,21 @@
       in
       {
         devShells.default = pkgs.mkShellNoCC {
+          strictDeps = true;
           # FIXME: rustc+cargo+r-a is not in the dev shell
           env.RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
-          nativeBuildInputs = [ pkgs.llvmPackages.bintools ];
+          nativeBuildInputs = [
+            pkgs.llvmPackages.bintools
+            pkgs.cargo-release
+          ];
+        };
+        devShells.vscode = pkgs.mkShellNoCC {
+          strictDeps = true;
+          nativeBuildInputs = [
+            pkgs.nodejs_23
+            pkgs.vscodium
+            pkgs.vsce
+          ];
         };
       });
 }

@@ -16,6 +16,12 @@ yet or fixed on the master branch.
 
 ## Getting started
 
+> [!TIP]
+> Using [Nix](https://nixos.org/),
+> [nix-direnv](https://github.com/nix-community/nix-direnv) and
+> [direnv](https://direnv.net/) you can automatically get the
+> required dependencies.
+
 1. Install [Rust](https://www.rust-lang.org/learn/get-started)
 2. Clone this repo:
    ```sh
