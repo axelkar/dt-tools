@@ -10,6 +10,7 @@
       in
       {
         devShells.default = pkgs.mkShellNoCC {
+          # FIXME: rustc+cargo+r-a is not in the dev shell
           env.RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
           nativeBuildInputs = [ pkgs.llvmPackages.bintools ];
         };
