@@ -51,7 +51,10 @@ make sure regressions don't come back.
 
 ## Commit messages
 
-It's recommended to adhere to the [conventional commit specification](https://www.conventionalcommits.org/en/v1.0.0/).
+When referencing GitHub issues or pull requests in commits, please use the URLs
+instead of just a hashtag and a number.
+
+Commit messages should be written according to the [conventional commit specification](https://www.conventionalcommits.org/en/v1.0.0/).
 
 The following commit types are supported:
 
@@ -64,22 +67,22 @@ The following commit types are supported:
   tests in the same commits as the changes they're testing) 
 - `chore:`, Other changes that don't modify source code or documentation (e.g. Modifying Cargo.toml)
 
-Please write your commit messages with regard to the [API versioning](https://doc.rust-lang.org/cargo/reference/semver.html):
-
-- `feat:` to trigger a minor version bump at the next release
-- `fix:`, `test:`, `refactor:` or `perf:` to trigger a patch version bump at the next release
-- `!` before the colon in the title and `BREAKING CHANGE:` in the footer  to
-  trigger a major version bump at the next release
-
 Below are examples of well-formatted commit titles:
 
-```txt
-feat!(lint): rework linting API
+```
+feat(lint)!: rework linting API
 feat(parser): implement parsing for new type of files
 fix: fix nasty unhandled error
 docs: fix link to website page
 test(parser): add more cases to handle invalid files
 ```
+
+Please write your commit messages with regard to the [API versioning](https://doc.rust-lang.org/cargo/reference/semver.html):
+
+- `feat:` to trigger a minor version bump at the next release
+- `fix:`, `test:`, `refactor:` or `perf:` to trigger a patch version bump at the next release
+- `!` before the colon in the title and `BREAKING CHANGE:` in the footer to
+  trigger a major version bump at the next release
 
 ## Changelog
 
