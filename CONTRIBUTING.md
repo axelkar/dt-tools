@@ -10,11 +10,9 @@ If you have any questions or feedback, open a [GitHub discussion](https://github
 
 ## Reporting bugs
 
-[GitHub issues](https://github.com/axelkar/dt-tools/issues) serves as a place
-for submitting bugs. Make sure that the bug you are reporting has not been
-reported yet or fixed on the master branch.
-
-If you have any questions or feedback, open a [GitHub discussion](https://github.com/axelkar/dt-tools/discussions).
+[GitHub issues](https://github.com/axelkar/dt-tools/issues) are used for
+submitting bugs. Make sure that the bug you are reporting has not been reported
+yet or fixed on the master branch.
 
 ## Getting started
 
@@ -42,23 +40,25 @@ You can run all unit and integration tests by running the follwoing command:
 cargo test
 ```
 
-It's recommended to add tests for all new functionality, and to fixes to make sure regressions don't come back.
+It's recommended to add tests for all new functionality, and to bug fixes to
+make sure regressions don't come back.
 
 ## Commit messages
 
 It's recommended to adhere to the [conventional commit specification](https://www.conventionalcommits.org/en/v1.0.0/).
 
-The following commit prefixes are supported:
+The following commit types are supported:
 
 - `feat:`, New features
 - `fix:`, Bug fixes
 - `docs:`, Documentation-only changes
 - `refactor:`, A code change that neither fixes a bug nor adds a feature
 - `perf:`, Performance improvements
-- `test:`, Adding missing tests or correcting existing tests (If possible, add tests in the same commits as the changes they're testing) 
+- `test:`, Adding missing tests or correcting existing tests (If possible, add
+  tests in the same commits as the changes they're testing) 
 - `chore:`, Other changes that don't modify source code or documentation (e.g. Modifying Cargo.toml)
 
-Please write your commit names with regard to the [API versioning](https://doc.rust-lang.org/cargo/reference/semver.html):
+Please write your commit messages with regard to the [API versioning](https://doc.rust-lang.org/cargo/reference/semver.html):
 
 - `feat:` to trigger a minor version bump at the next release
 - `fix:`, `test:`, `refactor:` or `perf:` to trigger a patch version bump at the next release
@@ -81,10 +81,11 @@ All notable changes to the project should be documented in [CHANGELOG.md](CHANGE
 
 ## Submitting changes
 
-1. Please first make sure that you have not introduced any regressions and format the code by running the following commands at the repository root.
+1. Please first make sure that you have not introduced any regressions and
+   format the code by running the following commands at the repository root.
    ```sh
    cargo fmt
    cargo clippy
    cargo test
    ```
-2. Please make a GitHub [pull request](https://github.com/axelkar/dt-tools/pulls).
+2. Make a GitHub [pull request](https://github.com/axelkar/dt-tools/pulls).
