@@ -17,8 +17,14 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load() -> Result<Self, Error> {
-        let builder = config::Config::builder().add_source(File::with_name(CONFIG_FILENAME));
+    pub fn load(from: Option<&Path>) -> Result<Self, Error> {
+        let builder = config::Config::builder().add_source(File::with_name(
+            from.unwrap_or(current_dir().map_err(|_| Error::BadCwd)?.as_path())
+                .join(CONFIG_FILENAME)
+                .as_os_str()
+                .to_str()
+                .ok_or(Error::BadOsStr)?,
+        ));
 
         Ok(builder
             .build()
@@ -26,6 +32,11 @@ impl Config {
             .try_deserialize::<Self>()
             .map_err(|e| Error::BadConfig(e))
             .unwrap_or(Config::default()))
+    }
+
+    pub fn include_root(&mut self, at: Option<&Path>) -> &Option<PathBuf> {
+        self.include_root = PathBuf::find(INCLUDE_MARKER, at);
+        &self.include_root
     }
 }
 
@@ -35,16 +46,19 @@ pub(crate) trait Backtrack: Sized {
 
 impl Backtrack for PathBuf {
     fn find(marker: &str, at: Option<&Path>) -> Option<Self> {
-        let mut path = at.map_or(current_dir().ok()?, |p| p.to_path_buf());
-        loop {
+        for path in at
+            .unwrap_or(current_dir().ok()?.as_path())
+            .ancestors()
+            .into_iter()
+        {
             let marker_path = path.join(marker);
 
             if marker_path.exists() && marker_path.is_file() {
-                break Some(path);
+                return Some(path.to_path_buf());
             }
-
-            path = path.parent()?.to_path_buf();
         }
+
+        None
     }
 }
 
@@ -54,8 +68,25 @@ mod tests {
 
     #[test]
     fn load() {
-        let config = Config::load().unwrap();
-        assert_ne!(None, config.include_root);
+        let config = Config::load(Some(Path::new("tests"))).unwrap();
+        assert_eq!(Some(PathBuf::from("somewhere")), config.include_root);
+    }
+
+    #[test]
+    #[should_panic]
+    fn load_panic() {
+        Config::load(None).unwrap();
+    }
+
+    #[test]
+    fn lazy_include() {
+        let path = Some(Path::new("tests"));
+
+        let mut config = Config::load(path).unwrap();
+        let lazy = config.include_root(path).clone().unwrap();
+
+        assert!(lazy.exists());
+        assert_eq!(config.include_root, Some(lazy)); // check is value updated in internal field
     }
 }
 
@@ -63,6 +94,12 @@ mod tests {
 pub enum Error {
     #[error("Failed to determine home")]
     BadHome,
+
+    #[error("Failed to determine current working directory")]
+    BadCwd,
+
+    #[error("Failed to convert OsStr to &str because it contains invalid UTF-8")]
+    BadOsStr,
 
     #[error("Failed to create builder: {0}")]
     BadBuilder(ConfigError),
