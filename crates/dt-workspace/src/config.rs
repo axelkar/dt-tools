@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use config::{ConfigError, File};
+use config::{ConfigError as CfgError, File};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -17,20 +17,20 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load(from: Option<&Path>) -> Result<Self, Error> {
+    pub fn load(from: Option<&Path>) -> Result<Self, ConfigError> {
         let builder = config::Config::builder().add_source(File::with_name(
-            from.unwrap_or(current_dir().map_err(|_| Error::BadCwd)?.as_path())
+            from.unwrap_or(current_dir().map_err(|_| ConfigError::Cwd)?.as_path())
                 .join(CONFIG_FILENAME)
                 .as_os_str()
                 .to_str()
-                .ok_or(Error::BadOsStr)?,
+                .ok_or(ConfigError::OsStr)?,
         ));
 
         Ok(builder
             .build()
-            .map_err(|e| Error::BadBuilder(e))?
+            .map_err(|e| ConfigError::Builder(e))?
             .try_deserialize::<Self>()
-            .map_err(|e| Error::BadConfig(e))
+            .map_err(|e| ConfigError::Config(e))
             .unwrap_or(Config::default()))
     }
 
@@ -91,22 +91,22 @@ mod tests {
 }
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum ConfigError {
     #[error("Failed to determine home")]
-    BadHome,
+    Home,
 
     #[error("Failed to determine current working directory")]
-    BadCwd,
+    Cwd,
 
     #[error("Failed to convert OsStr to &str because it contains invalid UTF-8")]
-    BadOsStr,
+    OsStr,
 
     #[error("Failed to create builder: {0}")]
-    BadBuilder(ConfigError),
+    Builder(CfgError),
 
     #[error("Failed to deserialize config: {0}")]
-    BadConfig(ConfigError),
+    Config(CfgError),
 
     #[error("Failed to determine root include path")]
-    BadIncludePath,
+    IncludePath,
 }
