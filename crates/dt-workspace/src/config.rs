@@ -26,7 +26,7 @@ impl Config {
 
     pub fn load(at: &Path) -> Result<Self, ConfigError> {
         // can fail if we falled back to cwd or config doesn't exist here
-        let mut this = if at.exists() {
+        let mut this = if at.join(CONFIG_FILENAME).exists() {
             toml::from_str(
                 &fs::read_to_string(at.join(CONFIG_FILENAME)).map_err(|_| ConfigError::Utf8)?,
             )
@@ -77,6 +77,15 @@ mod tests {
         let config = Config::load(&current_dir().unwrap()).unwrap();
         // include root is valid because we have another config in `dt-workspace`
         // with `include-root = "tests"`
+        assert_eq!(
+            IncludeRoot(Some(PathBuf::from("tests"))),
+            config.include_root
+        );
+    }
+
+    #[test]
+    fn load_not_exists() {
+        let config = Config::load(&Path::new("tests").join("empty")).unwrap();
         assert_eq!(
             IncludeRoot(Some(PathBuf::from("tests"))),
             config.include_root
