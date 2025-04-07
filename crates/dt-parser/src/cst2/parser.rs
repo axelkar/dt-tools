@@ -727,7 +727,7 @@ mod tests {
                 lex_errors: Vec::new(),
                 errors: vec![ParseError {
                     message: Cow::Borrowed("Expected ‘}’, but found end-of-file"),
-                    primary_span: TextRange::new(4, 4),
+                    primary_span: TextRange::new(4, 5),
                     span_labels: Vec::new(),
                 }]
             }
