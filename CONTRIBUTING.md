@@ -98,3 +98,7 @@ All notable changes to the project should be documented in [CHANGELOG.md](CHANGE
    cargo test
    ```
 2. Make a GitHub [pull request](https://github.com/axelkar/dt-tools/pulls).
+
+## Releases
+
+When making a release use `cargo-release`
