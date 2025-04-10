@@ -16,7 +16,14 @@ use std::{
     path::PathBuf,
 };
 use tokio::{net::TcpListener, sync::Mutex};
-use tower_lsp::lsp_types::*;
+use tower_lsp::lsp_types::{
+    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams, Hover,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    MessageType, OneOf, Position, Range, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceFolder,
+    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
+};
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
@@ -314,9 +321,9 @@ impl Backend {
         if false {
             use std::io::Write;
             let mut f = std::fs::File::create("analyzed2.dbg").unwrap();
-            write!(f, "analyzed2={:#?}", analyzed2).unwrap();
+            write!(f, "analyzed2={analyzed2:#?}").unwrap();
             let mut f = std::fs::File::create("analyzed1.dbg").unwrap();
-            write!(f, "analyzed1={:#?}", analyzed).unwrap();
+            write!(f, "analyzed1={analyzed:#?}").unwrap();
         }
 
         let parent_path = uri
@@ -446,7 +453,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             TcpListener::bind(SocketAddr::new(Ipv4Addr::new(127, 0, 0, 1).into(), 9257)).await?;
         let (stream, _) = listener.accept().await.unwrap();
         let (read, write) = tokio::io::split(stream);
-        Server::new(read, write, socket).serve(service).await
+        Server::new(read, write, socket).serve(service).await;
     } else {
         tracing_subscriber::fmt()
             .with_env_filter(tracing_env_filter)
@@ -457,7 +464,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Using stdio");
         let read = tokio::io::stdin();
         let write = tokio::io::stdout();
-        Server::new(read, write, socket).serve(service).await
+        Server::new(read, write, socket).serve(service).await;
     }
     Ok(())
 }
@@ -470,7 +477,10 @@ fn offset_to_position(offset: usize, rope: &Rope) -> Option<Position> {
     let line = rope.try_byte_to_line(offset).ok()?;
     let first_char_of_line = rope.try_line_to_byte(line).ok()?;
     let column = offset - first_char_of_line;
-    Some(Position::new(line as u32, column as u32))
+    Some(Position::new(
+        u32::try_from(line).ok()?,
+        u32::try_from(column).ok()?,
+    ))
 }
 
 fn range_to_lsp(text_range: TextRange, rope: &Rope) -> Option<Range> {

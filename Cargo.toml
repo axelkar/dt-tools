@@ -24,3 +24,15 @@ owo-colors = "4.0.0"
 parking_lot = "0.12.3"
 rayon = "1.10.0"
 logos = "0.14.1"
+
+[workspace.lints.rust]
+# https://github.com/rust-lang/rust/issues/95513
+#unused_crate_dependencies = "warn"
+unsafe_code = "deny" # Not in this project's scope currently
+
+[workspace.lints.clippy]
+pedantic = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+should_panic_without_expect = "warn"
+match_wildcard_for_single_variants = { level = "allow", priority = 1 }

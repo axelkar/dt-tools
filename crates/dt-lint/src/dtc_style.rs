@@ -22,7 +22,7 @@ impl EarlyLintPass for DtcStyle {
     fn check_document(&mut self, cx: &mut crate::EarlyContext<'_>, file: &ast::SourceFile) {
         if cx.is_main_file {
             if let Some(first) = file.items().next() {
-                let is_v1_directive = first.clone().into_directive().ok().map_or(false, |dir| {
+                let is_v1_directive = first.clone().into_directive().ok().is_some_and(|dir| {
                     dir.syntax()
                         .child_tokens()
                         .any(|tok| tok.green.kind == TokenKind::V1Directive)
@@ -57,7 +57,7 @@ impl EarlyLintPass for DtcStyle {
                     node.syntax().text_range(),
                 );
             }
-            self.check_node(cx, &node)
+            self.check_node(cx, &node);
         }
     }
     fn check_node(&mut self, cx: &mut crate::EarlyContext<'_>, node: &ast::DtNode) {
@@ -72,7 +72,7 @@ impl EarlyLintPass for DtcStyle {
         }
 
         for node in node.subnodes() {
-            self.check_node(cx, &node)
+            self.check_node(cx, &node);
         }
 
         if let Some(last_prop) = last_prop {

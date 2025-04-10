@@ -6,6 +6,7 @@ use logos::Logos;
 
 use crate::TextRange;
 
+#[must_use]
 pub fn lex(input: &str) -> Vec<Token> {
     Lexer::new(input).collect()
 }
@@ -220,6 +221,7 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    #[must_use]
     pub fn static_text(self) -> Option<&'static str> {
         Some(match self {
             TokenKind::Comma => ",",
@@ -252,7 +254,8 @@ impl TokenKind {
     }
 
     /// Returns true for comment and whitespace token kinds.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn is_trivia(self) -> bool {
         matches!(
             self,
@@ -261,7 +264,8 @@ impl TokenKind {
     }
 
     /// Returns true for preprocessor directive token kinds.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn is_preprocessor_directive(self) -> bool {
         matches!(
             self,
@@ -295,7 +299,7 @@ impl core::fmt::Display for TokenKind {
             TokenKind::DefineDirective => "‘#define‘ preprocessor directive",
             TokenKind::IncludeDirective => "‘#include‘ preprocessor directive",
             TokenKind::BitsDirective => "‘/bits/‘",
-            TokenKind::DtIncludeDirective => "‘/memreserve/‘",
+            TokenKind::DtIncludeDirective => "‘/include/‘",
             TokenKind::MemreserveDirective => "‘/memreserve/‘",
             TokenKind::DeleteNodeDirective => "‘/delete-node/‘",
             TokenKind::DeletePropertyDirective => "‘/delete-property/‘",
@@ -354,6 +358,35 @@ fn lex_block_comment(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> 
 }
 
 fn lex_preprocessor_directive(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
+    /// take [^\n\\"'/]*
+    fn take(lex: &mut logos::Lexer<TokenKind>) {
+        let remainder: &str = lex.remainder();
+        let mut total_len = 0;
+
+        for c in remainder.chars() {
+            if let '\n' | '\\' | '"' | '\'' | '/' = c {
+                lex.bump(total_len);
+                break;
+            }
+
+            total_len += c.len_utf8();
+        }
+    }
+    /// take [^\n\r]+
+    fn take_line_comment(lex: &mut logos::Lexer<TokenKind>) {
+        let remainder: &str = lex.remainder();
+        let mut total_len = 0;
+
+        for c in remainder.chars() {
+            if let '\n' | '\r' = c {
+                lex.bump(total_len);
+                break;
+            }
+
+            total_len += c.len_utf8();
+        }
+    }
+
     let remainder: &str = lex.remainder();
 
     match remainder.as_bytes().first() {
@@ -416,36 +449,7 @@ fn lex_preprocessor_directive(lex: &mut logos::Lexer<TokenKind>) -> Result<(), L
         _ => {}
     }
 
-    return Ok(());
-
-    /// take [^\n\\"'/]*
-    fn take(lex: &mut logos::Lexer<TokenKind>) {
-        let remainder: &str = lex.remainder();
-        let mut total_len = 0;
-
-        for c in remainder.chars() {
-            if let '\n' | '\\' | '"' | '\'' | '/' = c {
-                lex.bump(total_len);
-                break;
-            }
-
-            total_len += c.len_utf8();
-        }
-    }
-    /// take [^\n\r]+
-    fn take_line_comment(lex: &mut logos::Lexer<TokenKind>) {
-        let remainder: &str = lex.remainder();
-        let mut total_len = 0;
-
-        for c in remainder.chars() {
-            if let '\n' | '\r' = c {
-                lex.bump(total_len);
-                break;
-            }
-
-            total_len += c.len_utf8();
-        }
-    }
+    Ok(())
 }
 
 // preprocessor to dtc:

@@ -89,6 +89,7 @@ pub trait AstNodeOrToken: Sized {
     /// Try to cast a [`RedToken`] or a [`RedNode`]s to an AST node or token.
     // TODO: return RedItem back if it doesn't succeed, so reditem doesn't have to be cloned in
     // match_ast!
+    #[must_use]
     fn cast(syntax: RedItem) -> Option<Self> {
         match syntax {
             RedItem::Node(syntax) => Self::cast_node(syntax),
@@ -222,12 +223,13 @@ impl SourceFile {
 
     // TODO: don't make parser public
     // TODO: return a RedNode or SourceFile
+    #[must_use]
     pub fn parse(text: &str) -> Parse {
         let parse = crate::cst2::parser::parse(text);
         // TODO:
         //errors.extend(validation::validate(&root));
 
-        assert_eq!(parse.green_node.kind, NodeKind::SourceFile);
+        debug_assert_eq!(parse.green_node.kind, NodeKind::SourceFile);
         parse
     }
 }
@@ -365,8 +367,7 @@ impl AstNodeOrToken for PropValue {
     fn syntax(&self) -> RedItemRef {
         match self {
             Self::CellList(it) => TreeItem::Node(&it.syntax),
-            Self::String(it) => TreeItem::Token(it),
-            Self::Bytestring(it) => TreeItem::Token(it),
+            Self::String(it) | Self::Bytestring(it) => TreeItem::Token(it),
             Self::Phandle(it) => TreeItem::Node(&it.syntax),
             Self::Macro(it) => TreeItem::Node(&it.syntax),
         }
@@ -425,6 +426,7 @@ impl AstNode for DtPhandle {
 }
 impl DtPhandle {
     /// Returns true if this is a path phandle and not a label phandle.
+    #[must_use]
     pub fn is_path(&self) -> bool {
         self.syntax
             .child_tokens()
@@ -434,7 +436,8 @@ impl DtPhandle {
     ///
     /// # Example
     ///
-    /// TODO: Example for is_label
+    /// TODO: Example for `is_label`
+    #[must_use]
     pub fn is_label(&self) -> bool {
         !self.is_path()
     }
@@ -462,12 +465,14 @@ impl AstNode for MacroInvocation {
 }
 impl MacroInvocation {
     /// Returns the macro's identifier
+    #[must_use]
     pub fn ident(&self) -> Option<Arc<RedToken>> {
         self.syntax
             .child_tokens()
             .find(|tok| tok.green.kind == TokenKind::Ident)
     }
     /// Returns the macro's identifier
+    #[must_use]
     pub fn green_ident(&self) -> Option<&Arc<GreenToken>> {
         self.syntax
             .green
@@ -621,6 +626,7 @@ impl DtNode {
     ///
     /// ```
     // TODO: Cow -> String, remove src
+    #[must_use]
     pub fn text_name(&self, _src: &str) -> Option<Cow<'static, str>> {
         Some(match self.unit_address() {
             None => Cow::Owned(self.name()?.syntax.text().clone().to_owned()),
@@ -660,6 +666,7 @@ impl DtNode {
     /// assert!(!node_b.is_extension());
     ///
     /// ```
+    #[must_use]
     pub fn is_extension(&self) -> bool {
         self.syntax
             .child_nodes()
@@ -693,6 +700,7 @@ impl DtNode {
     ///
     /// assert!(node.parent_nodes().any(|node| node.is_extension()));
     /// ```
+    #[must_use]
     pub fn is_concrete(&self) -> bool {
         !self.is_extension()
     }
@@ -722,6 +730,7 @@ impl DtNode {
     }
 
     /// Returns true if this is a concrete node with the name "/".
+    #[must_use]
     pub fn is_root(&self) -> bool {
         self.syntax
             .child_tokens()
@@ -765,8 +774,9 @@ impl AstToken for Name {
 }
 impl Name {
     // TODO: make callers use syntax.text directly
-    #[inline(always)]
+    #[inline]
     #[deprecated = "use syntax.text() directly"]
+    #[must_use]
     pub fn text(&self, _src: &str) -> Option<&str> {
         Some(self.syntax.text())
     }
@@ -787,6 +797,10 @@ impl AstNode for NameRef {
 }
 impl NameRef {
     /// Returns the [`Name`].
+    ///
+    /// # Panics
+    ///
+    /// This may panic if the CST was not parsed as expected. [`Name`] expected to be a direct child.
     pub fn name(&self) -> Name {
         self.syntax()
             .child_tokens()

@@ -75,7 +75,7 @@ pub struct Label {
 ///
 /// See [crate root](crate).
 pub fn analyze_cst(file: &ast::SourceFile, src: &str) -> Option<FileDefinition> {
-    let root_node = file.nodes().find(|node| node.is_root())?;
+    let root_node = file.nodes().find(dt_parser::ast::DtNode::is_root)?;
     let extensions = file.nodes().filter(ast::DtNode::is_extension);
     // TODO: check includes for extension labels?
     let labels = {
@@ -94,25 +94,24 @@ pub fn analyze_cst(file: &ast::SourceFile, src: &str) -> Option<FileDefinition> 
     // duplicate labels aren't allowed
     // labels can be used before and after their definition, without scope
 
-    let mut tree = analyze_node(root_node, src)?;
+    let mut tree = analyze_node(&root_node, src)?;
     for extension in extensions {
         // TODO: path-based phandles
         let label = extension.extension_name()?.name()?;
         let label = label.syntax().text().as_str();
 
-        let label = match labels.get(label) {
-            Some(labels) => labels,
-            None => {
-                tracing::warn!(
-                    "Couldn't find label {label} for extension at {:?}!",
-                    extension.syntax().text_range()
-                );
-                continue;
-            }
+        let label = if let Some(labels) = labels.get(label) {
+            labels
+        } else {
+            tracing::warn!(
+                "Couldn't find label {label} for extension at {:?}!",
+                extension.syntax().text_range()
+            );
+            continue;
         }
         .last()?;
 
-        let Some(ex_tree) = analyze_node(extension, src) else {
+        let Some(ex_tree) = analyze_node(&extension, src) else {
             continue;
         };
         let ex_tree = ex_tree.prefix(label.node_ast.path(src).map(Cow::into_owned));
@@ -125,6 +124,7 @@ pub fn analyze_cst(file: &ast::SourceFile, src: &str) -> Option<FileDefinition> 
     })
 }
 
+#[must_use]
 pub fn find_labels<'i>(node: &ast::DtNode, src: &'i str) -> Vec<(&'i str, Label)> {
     node.label()
         .and_then(|label| {

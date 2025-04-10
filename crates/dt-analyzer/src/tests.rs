@@ -3,7 +3,7 @@ use dt_parser::ast::SourceFile;
 struct PanickingDiagnosticCollector;
 impl dt_diagnostic::DiagnosticCollector for PanickingDiagnosticCollector {
     fn emit(&self, diag: dt_diagnostic::Diagnostic) {
-        panic!("Diagnostic emitted: {:#?}", diag);
+        panic!("Diagnostic emitted: {diag:#?}");
     }
 }
 
@@ -23,9 +23,10 @@ fn dts_to_json(filename: &str) -> serde_json::Value {
         .iter()
         .filter_map(|a| a.as_include())
         .collect::<Vec<_>>();
-    if !includes.is_empty() {
-        panic!("Nonzero number of includes: {:#?}", includes);
-    }
+    assert!(
+        includes.is_empty(),
+        "Nonzero number of includes: {includes:#?}"
+    );
 
     let stage2 = crate::new::stage2::compute(&analyzed, &[], diag);
 

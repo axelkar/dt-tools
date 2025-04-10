@@ -96,7 +96,7 @@ impl<'t, 'input> Sink<'t, 'input> {
                 }
                 Event::AddToken => {
                     self.eat_trivia();
-                    self.token()
+                    self.token();
                 }
                 Event::AddCombinedToken {
                     kind,

@@ -1,11 +1,10 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use dt_parser::{
     ast::{self, AstNode, AstNodeOrToken, AstToken, DtPhandle, HasMacroInvocation, HasName},
     cst2::parser::Entrypoint,
     TextRange,
 };
-use rustc_hash::FxHashMap;
 
 use crate::macros::{evaluate_macro, MacroDefinition};
 
@@ -45,12 +44,13 @@ pub enum Value {
     Phandle(PhandleTarget),
 }
 impl Value {
+    #[must_use]
     pub fn into_json(self) -> serde_json::Value {
         use serde_json::Value as JValue;
         match self {
             Self::String(s) => JValue::String(s),
             Self::CellList(cell_items) => {
-                JValue::Array(cell_items.into_iter().map(|ci| ci.into_json()).collect())
+                JValue::Array(cell_items.into_iter().map(Cell::into_json).collect())
             }
             // TODO: DTC outputs `!u8 [0x12, 0x34, 0x56]` for `[123456]`
             // This is very easily confused with a cell like
@@ -61,7 +61,7 @@ impl Value {
                     .map(|byte| JValue::Number(byte.into()))
                     .collect(),
             ), // TODO
-            Self::Phandle(_phandle_target) => JValue::String("".to_owned()), // TODO
+            Self::Phandle(_phandle_target) => JValue::String(String::new()), // TODO
         }
     }
     // TODO: resolve_macro should depend on text range
@@ -92,6 +92,10 @@ impl Value {
                     if ch == ']' {
                         break;
                     }
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "to_digit returns values 0-15"
+                    )]
                     if let Some(nibble) = ch.to_digit(16) {
                         let nibble = nibble as u8;
                         if let Some(first_nibble) = first_nibble.take() {
@@ -104,9 +108,8 @@ impl Value {
 
                 if first_nibble.is_some() {
                     return Err(ValueFromAstError::IncompleteBytestring);
-                } else {
-                    Value::Bytestring(bytes)
                 }
+                Value::Bytestring(bytes)
             }
             ast::PropValue::Macro(_tok) => {
                 // TODO: find macro and reparse as value
@@ -132,12 +135,15 @@ pub enum Cell {
     Phandle(PhandleTarget),
 }
 impl Cell {
+    #[must_use]
     pub fn into_json(self) -> serde_json::Value {
         match self {
             Self::U32(n) => serde_json::Value::Number(n.into()),
             Self::Phandle(_phandle_target) => serde_json::Value::Number((-1).into()),
         }
     }
+    // TODO: use _resolve_label
+    #[expect(clippy::used_underscore_binding, reason = "not yet implemented")]
     fn from_ast(
         ast: &ast::Cell,
         _resolve_label: &mut impl FnMut(&str) -> Option<ast::DtLabel>,
@@ -176,8 +182,8 @@ impl Cell {
 pub trait MacroResolver {
     fn resolve<'r>(&'r self, s: &str) -> Option<&'r MacroDefinition>;
 }
-impl<K: Eq + std::hash::Hash + std::borrow::Borrow<str>> MacroResolver
-    for FxHashMap<K, (TextRange, &MacroDefinition)>
+impl<K: Eq + std::hash::Hash + std::borrow::Borrow<str>, S: std::hash::BuildHasher> MacroResolver
+    for HashMap<K, (TextRange, &MacroDefinition), S>
 {
     fn resolve<'r>(&'r self, s: &str) -> Option<&'r MacroDefinition> {
         self.get(s).map(|a| a.1)

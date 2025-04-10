@@ -11,8 +11,6 @@ readme.workspace = true
 repository.workspace = true
 license.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 clap = { version = "4.5.4", features = ["derive", "cargo"] }
 codespan-reporting = "0.11.1"
@@ -21,3 +19,5 @@ dt-parser.workspace = true
 dt-lint.workspace = true
 dt-analyzer.workspace = true
 
+[lints]
+workspace = true

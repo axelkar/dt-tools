@@ -24,6 +24,7 @@ pub enum DefinitionTree {
 }
 impl DefinitionTree {
     /// Wraps self in a [`DefinitionTree::Node`] until `prefix` returns none
+    #[must_use]
     pub fn prefix(self, mut prefix: impl Iterator<Item = String>) -> Self {
         if let Some(name) = prefix.next() {
             Self::Node(DefinitionTreeNode {
@@ -72,6 +73,7 @@ pub struct DefinitionTreeNode {
 }
 impl DefinitionTreeNode {
     /// Wraps self in another node until `prefix` returns none
+    #[must_use]
     pub fn prefix(self, mut prefix: impl Iterator<Item = String>) -> Self {
         if let Some(name) = prefix.next() {
             Self {
@@ -85,12 +87,14 @@ impl DefinitionTreeNode {
             self
         }
     }
+    #[must_use]
     pub fn into_json(self) -> serde_json::Value {
         DefinitionTree::Node(self).into_json()
     }
 
     // TODO: return Vec<Value> instead of Value
     // TODO: create "linked list" type with Arc<str> and efficient pushing to left
+    #[must_use]
     pub fn dfs_iter(self) -> Box<dyn Iterator<Item = (Vec<String>, Value)>> {
         Box::new(self.children.into_iter().flat_map(|(parent_n, v)| {
             v.into_iter().flat_map(move |tree| {
@@ -115,6 +119,7 @@ impl DefinitionTreeNode {
             })
         }))
     }
+    #[must_use]
     pub fn dfs_iter_nodes(self) -> Box<dyn Iterator<Item = (Vec<String>, DefinitionTreeNode)>> {
         Box::new(self.children.into_iter().flat_map(|(parent_n, v)| {
             v.into_iter()
@@ -161,10 +166,10 @@ impl DefinitionTreeNode {
 /// Analyze and AST node and its subnodes for properties, skipping over errors
 ///
 /// Returns [None] when the node's name cannot be found
-pub fn analyze_node(node: ast::DtNode, src: &str) -> Option<DefinitionTreeNode> {
+pub fn analyze_node(node: &ast::DtNode, src: &str) -> Option<DefinitionTreeNode> {
     let children = node
         .properties()
-        .flat_map(|prop| {
+        .filter_map(|prop| {
             Some((
                 prop.name()?.syntax().text().to_owned(),
                 DefinitionTree::Prop {
@@ -185,7 +190,7 @@ pub fn analyze_node(node: ast::DtNode, src: &str) -> Option<DefinitionTreeNode> 
                         // Documentation/devicetree/bindings/i2c/i2c-virtio.yaml#L20
                         // Documentation/devicetree/bindings/serial/serial.yaml#L23
                         node.text_name(src)?.into_owned(),
-                        DefinitionTree::Node(analyze_node(node, src)?),
+                        DefinitionTree::Node(analyze_node(&node, src)?),
                     ))
                 }),
         )
@@ -193,7 +198,7 @@ pub fn analyze_node(node: ast::DtNode, src: &str) -> Option<DefinitionTreeNode> 
     let children = {
         let mut hm: FxHashMap<String, Vec1<DefinitionTree>> = FxHashMap::default();
         for (name, child) in children {
-            let name = name.to_owned();
+            let name = name.clone();
             if let Some(vec) = hm.get_mut(&name) {
                 vec.push(child);
             } else {
@@ -256,6 +261,10 @@ impl Value {
         vec![match self {
             Self::Empty => return Vec::new(),
             Self::U32(value) => CustomValue::Cell(vec![CustomValueCellItem::U32(value)]),
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "splitting u64 into two u32s"
+            )]
             Self::U64(value) => CustomValue::Cell(vec![
                 CustomValueCellItem::U32((value >> 32) as u32),
                 CustomValueCellItem::U32(value as u32),
@@ -283,7 +292,8 @@ impl Value {
                     }),
                     [ast::Cell::Number(number)] => Value::U32(parse_u32(number.text())?),
                     [ast::Cell::Number(low), ast::Cell::Number(high)] => Value::U64(
-                        ((parse_u32(low.text())? as u64) << 32) + parse_u32(high.text())? as u64,
+                        (u64::from(parse_u32(low.text())?) << 32)
+                            + u64::from(parse_u32(high.text())?),
                     ),
                     [..] => Value::PropEncodedArray(
                         ast.iter()
@@ -346,12 +356,16 @@ pub enum CustomValue {
                          // TODO: more?
 }
 impl CustomValue {
+    #[must_use]
     pub fn into_json(self) -> serde_json::Value {
         match self {
             Self::String(s) => serde_json::Value::String(s),
-            Self::Cell(cell_items) => {
-                serde_json::Value::Array(cell_items.into_iter().map(|ci| ci.into_json()).collect())
-            }
+            Self::Cell(cell_items) => serde_json::Value::Array(
+                cell_items
+                    .into_iter()
+                    .map(CustomValueCellItem::into_json)
+                    .collect(),
+            ),
             Self::Bytestring(_bytes) => todo!(),
         }
     }
@@ -393,7 +407,7 @@ impl CustomValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// See [CustomValue] and [`Value`] documentation
+/// See [`CustomValue`] and [`Value`] documentation
 pub enum CustomValueCellItem {
     /// e.g. `0x11223344`
     U32(u32),
@@ -408,6 +422,7 @@ pub enum CustomValueCellItem {
     Phandle(PhandleTarget),
 }
 impl CustomValueCellItem {
+    #[must_use]
     pub fn into_json(self) -> serde_json::Value {
         match self {
             Self::U32(n) => serde_json::Value::Number(n.into()),

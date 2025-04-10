@@ -66,6 +66,7 @@ impl Parse<'_> {
     /// # Panics
     ///
     /// This function panics when you haven't parsed using [`Entrypoint::SourceFile`].
+    #[must_use]
     pub fn source_file(&self) -> ast::SourceFile {
         use ast::AstNode as _;
         ast::SourceFile::cast(super::RedNode::new(Arc::new(self.green_node.clone()))).unwrap()
@@ -91,6 +92,7 @@ pub enum Entrypoint {
 }
 impl Entrypoint {
     /// Parses the input according to the entrypoint.
+    #[must_use]
     pub fn parse(self, input: &str) -> Parse {
         // TODO: make NodeKind::Root
         // TODO: typesafe Entrypoint -> correct AST struct
@@ -147,6 +149,7 @@ impl Entrypoint {
     }
 }
 
+#[must_use]
 pub fn parse(input: &str) -> Parse {
     Entrypoint::SourceFile.parse(input)
 }
@@ -187,7 +190,7 @@ impl<'t, 'input> Parser<'t, 'input> {
     /// Peeks ahead at the current token's kind.
     ///
     /// Returns None on EOF
-    #[inline(always)]
+    #[inline]
     fn peek_immediate(&mut self) -> Option<TokenKind> {
         self.source.peek_kind_immediate()
     }
@@ -195,7 +198,7 @@ impl<'t, 'input> Parser<'t, 'input> {
     /// Peeks ahead at the current token's kind.
     ///
     /// Returns None on EOF
-    #[inline(always)]
+    #[inline]
     pub fn peek(&mut self) -> Option<TokenKind> {
         self.source.peek_kind()
     }
@@ -245,14 +248,14 @@ impl<'t, 'input> Parser<'t, 'input> {
         for kind in set {
             self.expected.push(Expected::Kind(*kind));
         }
-        self.peek().map_or(false, |k| set.contains(&k))
+        self.peek().is_some_and(|k| set.contains(&k))
     }
 
     /// Returns true if the current token's kind is in `set`.
     ///
     /// - This doesn't add `set` to `expected_kinds`.
     pub fn silent_at_set(&mut self, set: &[TokenKind]) -> bool {
-        self.peek().map_or(false, |k| set.contains(&k))
+        self.peek().is_some_and(|k| set.contains(&k))
     }
 
     /// Bumps when `kind` is the current token's kind and errors otherwise.
@@ -287,16 +290,16 @@ impl<'t, 'input> Parser<'t, 'input> {
             let is_last = idx == num_expected - 1;
 
             if is_first {
-                write!(message, "{}", expected_kind).ok();
+                write!(message, "{expected_kind}").ok();
             } else if is_last {
-                write!(message, " or {}", expected_kind).ok();
+                write!(message, " or {expected_kind}").ok();
             } else {
-                write!(message, ", {}", expected_kind).ok();
+                write!(message, ", {expected_kind}").ok();
             }
         }
 
         if let Some(kind) = self.peek() {
-            write!(message, ", but found {}", kind).ok();
+            write!(message, ", but found {kind}").ok();
         } else {
             write!(message, ", but found end-of-file").ok();
         }
@@ -337,7 +340,7 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Reports the current token as an error.
     pub fn simple_error(&mut self, message: Cow<'static, str>) {
-        self.fancy_error(message, Vec::new())
+        self.fancy_error(message, Vec::new());
     }
 
     /// Returns the range of the current token if it exists.
@@ -363,8 +366,7 @@ impl<'t, 'input> Parser<'t, 'input> {
                 .prev_next_text()
                 .unwrap()
                 .find('\n')
-                .map(|offset| offset + 1)
-                .unwrap_or(0);
+                .map_or(0, |offset| offset + 1);
             let pos = self.source.prev_next_range().unwrap().start + offset;
             TextRange {
                 start: pos,
@@ -436,17 +438,17 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     #[inline]
     pub fn add_expected(&mut self, expected: Expected) {
-        self.expected.push(expected)
+        self.expected.push(expected);
     }
 
     /// Bumps name tokens into [`TokenKind::Name`].
     pub fn bump_name(&mut self) {
-        self.bump_name_generic(&NAME_SET)
+        self.bump_name_generic(&NAME_SET);
     }
 
     /// Bumps label name tokens into [`TokenKind::Name`].
     pub fn bump_label_name(&mut self) {
-        self.bump_name_generic(&LABEL_NAME_SET)
+        self.bump_name_generic(&LABEL_NAME_SET);
     }
 
     #[inline]
@@ -463,7 +465,7 @@ impl<'t, 'input> Parser<'t, 'input> {
         let mut n_raw_tokens = 0;
         let mut text = String::new();
 
-        while self.peek_immediate().map_or(false, |k| set.contains(&k)) {
+        while self.peek_immediate().is_some_and(|k| set.contains(&k)) {
             let token = self.source.next_token().expect("Tried to bump at EOF");
             n_raw_tokens += 1;
             text.push_str(token.text);
@@ -510,7 +512,7 @@ impl<'t, 'input> Parser<'t, 'input> {
         debug!(pos = self.events.len(), kind = ?self.source.peek_kind(), "push token");
 
         assert!(self.source.next_token().is_some(), "Tried to bump at EOF");
-        self.events.push(Event::AddToken)
+        self.events.push(Event::AddToken);
     }
 }
 

@@ -38,6 +38,7 @@ pub struct Diagnostic {
     pub severity: Severity,
 }
 impl Diagnostic {
+    #[must_use]
     pub fn new(primary_span: TextRange, msg: DiagnosticMessage, severity: Severity) -> Self {
         Self {
             span: MultiSpan::from(primary_span),
@@ -59,24 +60,24 @@ pub trait DiagnosticCollector {
 
 impl DiagnosticCollector for std::sync::Mutex<&mut Vec<Diagnostic>> {
     fn emit(&self, diag: Diagnostic) {
-        self.lock().unwrap().push(diag)
+        self.lock().unwrap().push(diag);
     }
 }
 impl DiagnosticCollector for std::sync::Mutex<Vec<Diagnostic>> {
     fn emit(&self, diag: Diagnostic) {
-        self.lock().unwrap().push(diag)
+        self.lock().unwrap().push(diag);
     }
 }
 
 #[cfg(feature = "parking_lot")]
 impl DiagnosticCollector for parking_lot::Mutex<&mut Vec<Diagnostic>> {
     fn emit(&self, diag: Diagnostic) {
-        self.lock().push(diag)
+        self.lock().push(diag);
     }
 }
 #[cfg(feature = "parking_lot")]
 impl DiagnosticCollector for parking_lot::Mutex<Vec<Diagnostic>> {
     fn emit(&self, diag: Diagnostic) {
-        self.lock().push(diag)
+        self.lock().push(diag);
     }
 }

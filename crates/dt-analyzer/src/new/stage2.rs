@@ -150,9 +150,8 @@ fn merge_root_node(
                     diag.emit(Diagnostic::new(child_ast.syntax().text_range(), Cow::Borrowed("Extension nodes may not be defined in other nodes"), Severity::Error));
                     continue
                 } else {
-                    let name = match child_ast.text_name("") {
-                        Some(name) => name,
-                        None => continue
+                    let Some(name) = child_ast.text_name("") else {
+                        continue
                     };
                     match stage2.children.get_mut(name.as_ref()) {
                         Some(Stage2Tree::Prop(other)) => {
@@ -188,9 +187,8 @@ fn merge_root_node(
                     // Documentation/devicetree/bindings/serial/serial.yaml#L23
                 },
                 ast::DtProperty(prop_ast) => {
-                    let name_ast = match prop_ast.name() {
-                        Some(name_ast) => name_ast,
-                        None => continue
+                    let Some(name_ast) = prop_ast.name() else {
+                        continue
                     };
                     let name = name_ast.syntax().text().as_str();
 
@@ -209,27 +207,26 @@ fn merge_root_node(
                             severity: Severity::Error,
                         });
                         continue
-                    } else {
-                        // TODO: pass diag to Value::from_ast
-                        if let Ok(values) = prop_ast.values().map(|value_ast|
-                            match Value::from_ast(&value_ast, &mut |_| None, macro_db) {
-                                Ok(value) => Ok(value),
-                                Err(err) => {
-                                    diag.emit(Diagnostic::new(
-                                        value_ast.syntax().text_range(),
-                                        Cow::Owned(err.to_string()),
-                                        Severity::Error,
-                                    ));
-                                    Err(())
-                                }
+                    }
+                    // TODO: pass diag to Value::from_ast
+                    if let Ok(values) = prop_ast.values().map(|value_ast|
+                        match Value::from_ast(&value_ast, &mut |_| None, macro_db) {
+                            Ok(value) => Ok(value),
+                            Err(err) => {
+                                diag.emit(Diagnostic::new(
+                                    value_ast.syntax().text_range(),
+                                    Cow::Owned(err.to_string()),
+                                    Severity::Error,
+                                ));
+                                Err(())
                             }
-                        ).collect::<Result<Vec<_>, ()>>() {
-                            let prop = Stage2Property {
-                                ast: prop_ast,
-                                values
-                            };
-                            stage2.children.insert(name.to_owned(), Stage2Tree::Prop(prop));
                         }
+                    ).collect::<Result<Vec<_>, ()>>() {
+                        let prop = Stage2Property {
+                            ast: prop_ast,
+                            values
+                        };
+                        stage2.children.insert(name.to_owned(), Stage2Tree::Prop(prop));
                     }
                 },
                 _ => continue

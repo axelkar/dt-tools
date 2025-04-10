@@ -8,6 +8,8 @@ use dt_parser::{ast, cst2::parser::Entrypoint, TextRange};
 
 use crate::new::stage1::subslice_offset;
 
+// TODO: use this enum
+#[expect(dead_code, reason = "not yet implemented")]
 pub(crate) enum MacroContext {
     /// In value context or extension name context, after ampersand: `foo = &BAR(baz);`
     Reference,
@@ -20,6 +22,7 @@ pub(crate) enum MacroContext {
     /// Item context, e.g. `/ { FOO(bar); };`
     Item,
 }
+#[expect(dead_code, reason = "not yet implemented")]
 impl MacroContext {
     /// Returns the entrypoint for parsing the macro's output.
     fn entrypoint(&self) -> Entrypoint {
@@ -87,7 +90,7 @@ impl Parser<'_, '_> {
         }
         Ok(())
     }
-    #[inline(always)]
+    #[inline]
     fn next(&mut self) -> Option<char> {
         let ch = self.iter.next();
         if ch.is_some() {
@@ -95,18 +98,18 @@ impl Parser<'_, '_> {
         }
         ch
     }
-    #[inline(always)]
+    #[inline]
     fn peek(&mut self) -> Option<&char> {
         self.iter.peek()
     }
-    #[inline(always)]
+    #[inline]
     fn bump(&mut self, ch: char) {
         if self.current_token.is_empty() {
             self.current_token_start_offset = self.offset - 1;
         }
-        self.current_token.push(ch)
+        self.current_token.push(ch);
     }
-    #[inline(always)]
+    #[inline]
     fn push_tok(&mut self, tok: MacroToken) -> Result<(), MacroDefinitionParseError> {
         if self.expect_concat_param.is_some() {
             if let MacroTokenKind::Parameter(i) = tok.kind {
@@ -166,6 +169,197 @@ impl MacroDefinitionParseError {
     }
 }
 
+fn parse_params(iter: &mut Peekable<Chars<'_>>, offset: &mut usize) -> Vec<String> {
+    let mut params = Vec::new();
+
+    if iter.peek() == Some(&'(') {
+        iter.next();
+        *offset += 1;
+        let mut current_param = String::new();
+        for ch in iter.by_ref() {
+            *offset += 1;
+            match ch {
+                ')' => {
+                    if !current_param.trim().is_empty() {
+                        params.push(current_param.trim().to_string());
+                    }
+                    break;
+                }
+                ',' => {
+                    if !current_param.trim().is_empty() {
+                        params.push(current_param.trim().to_string());
+                    }
+                    current_param.clear();
+                }
+                _ => {
+                    current_param.push(ch);
+                }
+            }
+        }
+    }
+    params
+}
+
+fn parse_string(p: &mut Parser, ch: char) -> Result<(), MacroDefinitionParseError> {
+    p.complete_token()?;
+    p.bump(ch);
+    let mut escaped = false;
+    while let Some(ch) = p.next() {
+        p.bump(ch);
+
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+
+        if ch == '"' && !escaped {
+            break;
+        }
+    }
+
+    let text_range = p.text_range();
+    let tok = std::mem::take(&mut p.current_token);
+    p.push_tok(MacroToken {
+        kind: MacroTokenKind::Symbol(tok),
+        text_range,
+    })
+}
+
+fn parse_double_special_characters(
+    p: &mut Parser,
+    ch: char,
+) -> Result<(), MacroDefinitionParseError> {
+    // These change meaning when two are pasted together
+    p.complete_token()?;
+    if p.peek() == Some(&ch) {
+        p.next();
+        p.push_tok(MacroToken {
+            text_range: TextRange {
+                start: p.offset - 2,
+                end: p.offset,
+            },
+            kind: MacroTokenKind::Word({
+                let mut s = String::with_capacity(2);
+                s.push(ch);
+                s.push(ch);
+                s
+            }),
+        })?;
+        p.next();
+    } else {
+        p.push_tok(MacroToken {
+            text_range: TextRange {
+                start: p.offset - 1,
+                end: p.offset,
+            },
+            kind: MacroTokenKind::Word(ch.to_string()),
+        })?;
+    }
+    Ok(())
+}
+
+fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
+    // TODO: comment support
+    while let Some(ch) = p.next() {
+        match ch {
+            '\\' => {
+                p.complete_token()?;
+                if let Some('\n') = p.peek() {
+                    p.next(); // Consume the newline for line continuation
+                } else {
+                    p.next();
+                    return Err(MacroDefinitionParseError::InvalidBackslash {
+                        text_range: TextRange {
+                            start: p.offset - 2,
+                            end: p.offset,
+                        },
+                    });
+                }
+            }
+            '"' => parse_string(p, ch)?,
+            '#' => {
+                p.complete_token()?;
+                if let Some('#') = p.peek() {
+                    p.next();
+                    let concat_text_range = TextRange {
+                        start: p.offset - 2,
+                        end: p.offset,
+                    };
+
+                    match p.body_tokens.last() {
+                        Some(MacroToken {
+                            kind: MacroTokenKind::Parameter(i),
+                            ..
+                        }) => {
+                            p.dont_prescan_indices.push(*i);
+                        }
+                        Some(MacroToken {
+                            kind: MacroTokenKind::Word(_),
+                            ..
+                        }) => {}
+                        Some(tok) => {
+                            return Err(MacroDefinitionParseError::ConcatInvalidToken {
+                                text_range: tok.text_range,
+                            })
+                        }
+                        None => {
+                            return Err(MacroDefinitionParseError::ConcatAtStart {
+                                text_range: concat_text_range,
+                            })
+                        }
+                    }
+
+                    p.push_tok(MacroToken {
+                        kind: MacroTokenKind::ConcatOperator,
+                        text_range: concat_text_range,
+                    })?;
+                    p.expect_concat_param = Some(concat_text_range);
+                    continue;
+                }
+                p.push_tok(MacroToken {
+                    kind: MacroTokenKind::StringifyOperator,
+                    text_range: TextRange {
+                        start: p.offset - 1,
+                        end: p.offset,
+                    },
+                })?;
+
+                p.expect_stringify_param = true;
+            }
+            _ if ch.is_whitespace() => {
+                p.complete_token()?;
+            }
+            // Special characters, break the word
+            '<' | '>' | '&' | '|' => parse_double_special_characters(p, ch)?,
+            '(' | ')' | '{' | '}' | ';' | '+' | '*' | '/' | '~' | '?' | ':' => {
+                p.complete_token()?;
+                p.push_tok(MacroToken {
+                    text_range: TextRange {
+                        start: p.offset - 1,
+                        end: p.offset,
+                    },
+                    kind: MacroTokenKind::Symbol(ch.to_string()),
+                })?;
+            }
+            '-' => {
+                // Can't be pasted next to words
+                p.complete_token()?;
+                p.push_tok(MacroToken {
+                    text_range: TextRange {
+                        start: p.offset - 1,
+                        end: p.offset,
+                    },
+                    kind: MacroTokenKind::Word(ch.to_string()),
+                })?;
+            }
+            _ => {
+                p.bump(ch);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MacroDefinition {
     /// Macro name
@@ -183,13 +377,13 @@ impl MacroDefinition {
         let s = input
             .get(1..)
             .expect("lexer safe")
-            .trim_start_matches(|ch| ch == ' ' || ch == '\t');
+            .trim_start_matches([' ', '\t']);
 
         debug_assert!(s.starts_with("define"));
         let s = s
             .get("define".len()..)
             .expect("lexer safe")
-            .trim_start_matches(|ch| ch == ' ' || ch == '\t');
+            .trim_start_matches([' ', '\t']);
 
         let mut iter = s.chars().peekable();
         let mut offset = subslice_offset(input, s).unwrap();
@@ -209,33 +403,7 @@ impl MacroDefinition {
             return Err(MacroDefinitionParseError::MissingName);
         }
 
-        let mut params = Vec::new();
-
-        if iter.peek() == Some(&'(') {
-            iter.next();
-            offset += 1;
-            let mut current_param = String::new();
-            for ch in iter.by_ref() {
-                offset += 1;
-                match ch {
-                    ')' => {
-                        if !current_param.trim().is_empty() {
-                            params.push(current_param.trim().to_string());
-                        }
-                        break;
-                    }
-                    ',' => {
-                        if !current_param.trim().is_empty() {
-                            params.push(current_param.trim().to_string());
-                        }
-                        current_param.clear();
-                    }
-                    _ => {
-                        current_param.push(ch);
-                    }
-                }
-            }
-        }
+        let params = parse_params(&mut iter, &mut offset);
 
         let mut p = Parser {
             offset,
@@ -249,158 +417,7 @@ impl MacroDefinition {
             expect_concat_param: None,
         };
 
-        // TODO: comment support
-        while let Some(ch) = p.next() {
-            match ch {
-                '\\' => {
-                    p.complete_token()?;
-                    match p.peek() {
-                        Some('\n') => {
-                            p.next(); // Consume the newline for line continuation
-                        }
-                        _ => {
-                            p.next();
-                            return Err(MacroDefinitionParseError::InvalidBackslash {
-                                text_range: TextRange {
-                                    start: p.offset - 2,
-                                    end: p.offset,
-                                },
-                            });
-                        }
-                    }
-                }
-                '"' => {
-                    p.complete_token()?;
-                    p.bump(ch);
-                    let mut escaped = false;
-                    while let Some(ch) = p.next() {
-                        p.bump(ch);
-
-                        if ch == '\\' {
-                            escaped = true;
-                            continue;
-                        }
-
-                        if ch == '"' && !escaped {
-                            break;
-                        }
-                    }
-
-                    let text_range = p.text_range();
-                    let tok = std::mem::take(&mut p.current_token);
-                    p.push_tok(MacroToken {
-                        kind: MacroTokenKind::Symbol(tok),
-                        text_range,
-                    })?;
-                }
-                '#' => {
-                    p.complete_token()?;
-                    if let Some('#') = p.peek() {
-                        p.next();
-                        let concat_text_range = TextRange {
-                            start: p.offset - 2,
-                            end: p.offset,
-                        };
-
-                        match p.body_tokens.last() {
-                            Some(MacroToken {
-                                kind: MacroTokenKind::Parameter(i),
-                                ..
-                            }) => {
-                                p.dont_prescan_indices.push(*i);
-                            }
-                            Some(MacroToken {
-                                kind: MacroTokenKind::Word(_),
-                                ..
-                            }) => {}
-                            Some(tok) => {
-                                return Err(MacroDefinitionParseError::ConcatInvalidToken {
-                                    text_range: tok.text_range,
-                                })
-                            }
-                            None => {
-                                return Err(MacroDefinitionParseError::ConcatAtStart {
-                                    text_range: concat_text_range,
-                                })
-                            }
-                        }
-
-                        p.push_tok(MacroToken {
-                            kind: MacroTokenKind::ConcatOperator,
-                            text_range: concat_text_range,
-                        })?;
-                        p.expect_concat_param = Some(concat_text_range);
-                        continue;
-                    } else {
-                        p.push_tok(MacroToken {
-                            kind: MacroTokenKind::StringifyOperator,
-                            text_range: TextRange {
-                                start: p.offset - 1,
-                                end: p.offset,
-                            },
-                        })?;
-
-                        p.expect_stringify_param = true;
-                    }
-                }
-                _ if ch.is_whitespace() => {
-                    p.complete_token()?;
-                }
-                // Special characters, break the word
-                '<' | '>' | '&' | '|' => {
-                    // These change meaning when two are pasted together
-                    p.complete_token()?;
-                    if p.peek() == Some(&ch) {
-                        p.next();
-                        p.push_tok(MacroToken {
-                            text_range: TextRange {
-                                start: p.offset - 2,
-                                end: p.offset,
-                            },
-                            kind: MacroTokenKind::Word({
-                                let mut s = String::with_capacity(2);
-                                s.push(ch);
-                                s.push(ch);
-                                s
-                            }),
-                        })?;
-                        p.next();
-                    } else {
-                        p.push_tok(MacroToken {
-                            text_range: TextRange {
-                                start: p.offset - 1,
-                                end: p.offset,
-                            },
-                            kind: MacroTokenKind::Word(ch.to_string()),
-                        })?;
-                    }
-                }
-                '(' | ')' | '{' | '}' | ';' | '+' | '*' | '/' | '~' | '?' | ':' => {
-                    p.complete_token()?;
-                    p.push_tok(MacroToken {
-                        text_range: TextRange {
-                            start: p.offset - 1,
-                            end: p.offset,
-                        },
-                        kind: MacroTokenKind::Symbol(ch.to_string()),
-                    })?;
-                }
-                '-' => {
-                    // Can't be pasted next to words
-                    p.complete_token()?;
-                    p.push_tok(MacroToken {
-                        text_range: TextRange {
-                            start: p.offset - 1,
-                            end: p.offset,
-                        },
-                        kind: MacroTokenKind::Word(ch.to_string()),
-                    })?;
-                }
-                _ => {
-                    p.bump(ch);
-                }
-            }
-        }
+        parse_body(&mut p)?;
 
         if p.current_token.is_empty() {
             if p.expect_stringify_param {
@@ -534,7 +551,7 @@ pub(crate) fn evaluate_macro(
             })
             .collect::<Vec<String>>()
     });
-    if def.params.len() != arguments.as_ref().map_or(0, |args| args.len()) {
+    if def.params.len() != arguments.as_ref().map_or(0, std::vec::Vec::len) {
         return Err("ERROR: invalid argument length".to_owned());
     }
     let out = def.substitute(arguments.as_ref().map_or(&[], |args| args));
@@ -612,9 +629,7 @@ mod tests {
     fn test_stringify() {
         #[track_caller]
         fn assert_str_eq(left: &str, right: &str) {
-            if left != right {
-                panic!("strings are not equal:\n<{left}\n>{right}\n")
-            }
+            assert!(left == right, "strings are not equal:\n<{left}\n>{right}\n");
         }
         assert_str_eq(&stringify(""), r#""""#);
         assert_str_eq(
@@ -768,13 +783,13 @@ mod tests {
             })
         );
         assert_eq!(
-            MacroDefinition::parse(r#"#define FOO(a) abc ##"#),
+            MacroDefinition::parse("#define FOO(a) abc ##"),
             Err(MacroDefinitionParseError::ConcatAtEnd {
                 text_range: (19..21).into(),
             })
         );
         assert_eq!(
-            MacroDefinition::parse(r#"#define FOO(a) ##"#),
+            MacroDefinition::parse("#define FOO(a) ##"),
             Err(MacroDefinitionParseError::ConcatAtStart {
                 text_range: (15..17).into(),
             })

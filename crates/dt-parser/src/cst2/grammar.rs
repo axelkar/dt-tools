@@ -55,9 +55,8 @@ fn macro_invocation(m: Marker, p: &mut Parser) -> CompletedMarker {
                     Some(TokenKind::RParen) => {
                         if level == 0 {
                             break;
-                        } else {
-                            level -= 1
                         }
+                        level -= 1;
                     }
                     Some(TokenKind::Comma) if level == 0 => {
                         param_m.complete(p, NodeKind::MacroArgument);
@@ -83,9 +82,6 @@ fn macro_invocation(m: Marker, p: &mut Parser) -> CompletedMarker {
 // TODO: ternary expressions in macros, see `linux/arch/arm64/boot/dts/marvell/cn9130.dtsi` `CP11X_PCIEx_MEM_BASE`
 // TODO: label names from macros, see `linux/arch/arm64/boot/dts/marvell/armada-cp11x.dtsi` line 28
 fn dt_expr(p: &mut Parser) {
-    vis!(begin);
-    let m = p.start();
-
     // TODO: https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
     const OPERATOR_SET: &[TokenKind] = &[
         TokenKind::Plus,
@@ -98,6 +94,9 @@ fn dt_expr(p: &mut Parser) {
 
     const EXPR_RECOVERY_SET: &[TokenKind] =
         &[TokenKind::Number, TokenKind::Ident, TokenKind::LParen];
+
+    vis!(begin);
+    let m = p.start();
 
     assert!(p.eat(TokenKind::LParen));
 
@@ -272,7 +271,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
         if p.silent_at(TokenKind::String) {
             p.bump();
         } else if p.silent_at(TokenKind::LAngle) {
-            dt_cell_list(p)?
+            dt_cell_list(p)?;
         } else if p.silent_at(TokenKind::Ampersand) {
             reference(p);
         } else if p.silent_at(TokenKind::Ident) {
@@ -366,8 +365,9 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     vis!(end);
 }
 
-/// TODO: mod_contents: while !(p.at(EOF) || (p.at(T!['}']) && stop_on_r_curly)) {
+// TODO: mod_contents: while !(p.at(EOF) || (p.at(T!['}']) && stop_on_r_curly)) {
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
+#[expect(clippy::too_many_lines, reason = "no good way to make this shorter")]
 fn item(p: &mut Parser) {
     vis!(begin);
     #[cfg(feature = "grammar-tracing")]
@@ -426,7 +426,7 @@ fn item(p: &mut Parser) {
             // unit address
             p.bump();
             if !p.eat_name() {
-                p.emit_expect_error()
+                p.emit_expect_error();
             }
             m.complete(p, NodeKind::UnitAddress);
         }
@@ -523,7 +523,7 @@ fn item(p: &mut Parser) {
         if p.at(TokenKind::Ampersand) {
             reference(p);
         } else if !p.eat_name() {
-            p.emit_expect_error()
+            p.emit_expect_error();
         }
         m_params.complete(p, NodeKind::DirectiveArguments);
 
@@ -559,10 +559,10 @@ pub(super) fn entry_name(p: &mut Parser) {
     if p.at_name() {
         p.bump_name();
         if !p.at_end() {
-            p.emit_expect_error()
+            p.emit_expect_error();
         }
     } else {
-        p.error2()
+        p.error2();
     }
 }
 
@@ -582,7 +582,7 @@ pub(super) mod tests {
     pub fn node(kind: NodeKind, children: Vec<GreenItem>) -> GreenItem {
         GreenItem::Node(Arc::new(GreenNode {
             kind,
-            width: children.iter().map(|item| item.length()).sum(),
+            width: children.iter().map(super::super::TreeItem::length).sum(),
             children,
         }))
     }
@@ -603,7 +603,7 @@ pub(super) mod tests {
     }
 
     #[track_caller]
-    fn check(input: &str, expected_children: Vec<GreenItem>, expected_errors: Vec<ParseError>) {
+    fn check(input: &str, expected_children: &[GreenItem], expected_errors: &[ParseError]) {
         let parse_output = parse(input);
         assert_eq!(parse_output.errors, expected_errors);
         assert_eq!(parse_output.green_node.children, expected_children);
@@ -613,8 +613,8 @@ pub(super) mod tests {
     fn check_ep(
         ep: Entrypoint,
         input: &str,
-        expected_children: Vec<GreenItem>,
-        expected_errors: Vec<ParseError>,
+        expected_children: &[GreenItem],
+        expected_errors: &[ParseError],
     ) {
         let parse_output = ep.parse(input);
         assert_eq!(parse_output.errors, expected_errors);
@@ -626,38 +626,38 @@ pub(super) mod tests {
         check_ep(
             Entrypoint::Name,
             "foo",
-            vec![dynamic_token(TokenKind::Name, "foo")],
-            Vec::new(),
+            &[dynamic_token(TokenKind::Name, "foo")],
+            &[],
         );
         check_ep(
             Entrypoint::ReferenceNoamp,
             "foo",
-            vec![dynamic_token(TokenKind::Name, "foo")],
-            Vec::new(),
+            &[dynamic_token(TokenKind::Name, "foo")],
+            &[],
         );
 
         check_ep(
             Entrypoint::PropValues,
             "\"foo\", \"bar\"",
-            vec![
+            &[
                 dynamic_token(TokenKind::String, "\"foo\""),
                 static_token(TokenKind::Comma),
                 ws(" "),
                 dynamic_token(TokenKind::String, "\"bar\""),
             ],
-            Vec::new(),
+            &[],
         );
         check_ep(
             Entrypoint::PropValues,
             "\"foo\";",
-            vec![
+            &[
                 dynamic_token(TokenKind::String, "\"foo\""),
                 node(
                     NodeKind::ParseError,
                     vec![static_token(TokenKind::Semicolon)],
                 ),
             ],
-            vec![ParseError {
+            &[ParseError {
                 message: Cow::Borrowed("Expected ‘,’ or end-of-file, but found ‘;’"),
                 primary_span: (5..6).into(),
                 span_labels: Vec::new(),
@@ -667,24 +667,24 @@ pub(super) mod tests {
         check_ep(
             Entrypoint::Cells,
             "1 2",
-            vec![
+            &[
                 dynamic_token(TokenKind::Number, "1"),
                 ws(" "),
                 dynamic_token(TokenKind::Number, "2"),
             ],
-            Vec::new(),
+            &[],
         );
 
         check_ep(
             Entrypoint::Cells,
             "1 2>",
-            vec![
+            &[
                 dynamic_token(TokenKind::Number, "1"),
                 ws(" "),
                 dynamic_token(TokenKind::Number, "2"),
                 node(NodeKind::ParseError, vec![static_token(TokenKind::RAngle)]),
             ],
-            vec![ParseError {
+            &[ParseError {
                 message: Cow::Borrowed("Expected cell or end-of-file, but found ‘>’"),
                 primary_span: (3..4).into(),
                 span_labels: Vec::new(),
@@ -699,7 +699,7 @@ pub(super) mod tests {
         check_ep(
             Entrypoint::PropValues,
             "&foo, &123_foo",
-            vec![
+            &[
                 node(
                     NodeKind::DtPhandle,
                     vec![
@@ -717,7 +717,7 @@ pub(super) mod tests {
                     ],
                 ),
             ],
-            Vec::new(),
+            &[],
         );
     }
 
@@ -740,10 +740,17 @@ pub(super) mod tests {
             vec![dynamic_token(TokenKind::Ident, "FOO")],
         );
 
-        // Item name, extension
+        macro_positions_as_item_name_extension(&macro_invoc_bar);
+        macro_positions_as_label_def(&macro_invoc_bar);
+        macro_positions_as_value_cell(&macro_invoc, &macro_invoc_bar);
+        macro_positions_as_reference(&macro_invoc_bar);
+    }
+
+    /// Item name, extension
+    fn macro_positions_as_item_name_extension(macro_invoc_bar: &GreenItem) {
         check(
             "FOO {}; FOO(bar) {}; &FOO {}; &FOO(bar) {};",
-            vec![
+            &[
                 node(
                     NodeKind::DtNode,
                     vec![
@@ -797,13 +804,15 @@ pub(super) mod tests {
                     ],
                 ),
             ],
-            Vec::new(),
+            &[],
         );
+    }
 
-        // Label definition
+    /// Label definition
+    fn macro_positions_as_label_def(macro_invoc_bar: &GreenItem) {
         check(
             "FOO: bar {}; FOO(bar): bar {};",
-            vec![
+            &[
                 node(
                     NodeKind::DtNode,
                     vec![
@@ -839,14 +848,16 @@ pub(super) mod tests {
                     ],
                 ),
             ],
-            Vec::new(),
+            &[],
         );
+    }
 
-        // As value/cell
+    /// As value/cell
+    fn macro_positions_as_value_cell(macro_invoc: &GreenItem, macro_invoc_bar: &GreenItem) {
         check_ep(
             Entrypoint::PropValues,
             "<FOO FOO(bar)>, FOO, FOO(bar)",
-            vec![
+            &[
                 node(
                     NodeKind::DtCellList,
                     vec![
@@ -864,14 +875,16 @@ pub(super) mod tests {
                 ws(" "),
                 macro_invoc_bar.clone(),
             ],
-            Vec::new(),
+            &[],
         );
+    }
 
-        // As reference
+    /// As reference
+    fn macro_positions_as_reference(macro_invoc_bar: &GreenItem) {
         check_ep(
             Entrypoint::PropValues,
             "<&FOO &FOO(bar)>, &FOO, &FOO(bar)",
-            vec![
+            &[
                 node(
                     NodeKind::DtCellList,
                     vec![
@@ -907,7 +920,7 @@ pub(super) mod tests {
                     vec![static_token(TokenKind::Ampersand), macro_invoc_bar.clone()],
                 ),
             ],
-            Vec::new(),
+            &[],
         );
     }
 
@@ -917,7 +930,7 @@ pub(super) mod tests {
         fn check_directive(input: &str, kind: TokenKind, args: Option<Vec<GreenItem>>) {
             check(
                 input,
-                vec![node(
+                &[node(
                     NodeKind::Directive,
                     if let Some(args) = args {
                         vec![
@@ -930,8 +943,8 @@ pub(super) mod tests {
                         vec![static_token(kind), static_token(TokenKind::Semicolon)]
                     },
                 )],
-                Vec::new(),
-            )
+                &[],
+            );
         }
 
         check_directive("/dts-v1/;", TokenKind::V1Directive, None);
@@ -972,8 +985,8 @@ pub(super) mod tests {
         let src = include_str!("../../test_data/1.dts");
 
         let parse_output = parse(src);
-        assert_eq!(parse_output.lex_errors, Vec::new());
-        assert_eq!(parse_output.errors, Vec::new());
+        assert_eq!(parse_output.lex_errors, &[]);
+        assert_eq!(parse_output.errors, &[]);
 
         assert_eq!(
             parse_output.green_node.print_tree(),
@@ -986,8 +999,8 @@ pub(super) mod tests {
         let src = include_str!("../../test_data/2-macro-def.dts");
 
         let parse_output = parse(src);
-        assert_eq!(parse_output.lex_errors, Vec::new());
-        assert_eq!(parse_output.errors, Vec::new());
+        assert_eq!(parse_output.lex_errors, &[]);
+        assert_eq!(parse_output.errors, &[]);
 
         assert_eq!(
             parse_output.green_node.print_tree(),
@@ -999,7 +1012,7 @@ pub(super) mod tests {
     fn parse_node() {
         check(
             "/ {};",
-            vec![node(
+            &[node(
                 NodeKind::DtNode,
                 vec![
                     static_token(TokenKind::Slash),
@@ -1009,12 +1022,12 @@ pub(super) mod tests {
                     static_token(TokenKind::Semicolon),
                 ],
             )],
-            Vec::new(),
+            &[],
         );
 
         check(
             "/ { a = <>; };",
-            vec![node(
+            &[node(
                 NodeKind::DtNode,
                 vec![
                     static_token(TokenKind::Slash),
@@ -1046,7 +1059,7 @@ pub(super) mod tests {
                     static_token(TokenKind::Semicolon),
                 ],
             )],
-            Vec::new(),
+            &[],
         );
     }
 
@@ -1055,7 +1068,7 @@ pub(super) mod tests {
         // Odd syntax supported by dtc:
         check(
             "123 = \"foo\";",
-            vec![node(
+            &[node(
                 NodeKind::DtProperty,
                 vec![
                     dynamic_token(TokenKind::Name, "123"),
@@ -1069,12 +1082,12 @@ pub(super) mod tests {
                     static_token(TokenKind::Semicolon),
                 ],
             )],
-            Vec::new(),
+            &[],
         );
 
         check(
             "123, = \"foo\";",
-            vec![node(
+            &[node(
                 NodeKind::DtProperty,
                 vec![
                     dynamic_token(TokenKind::Name, "123,"),
@@ -1088,12 +1101,12 @@ pub(super) mod tests {
                     static_token(TokenKind::Semicolon),
                 ],
             )],
-            Vec::new(),
+            &[],
         );
 
         check(
             ",,, = \"foo\";",
-            vec![node(
+            &[node(
                 NodeKind::DtProperty,
                 vec![
                     dynamic_token(TokenKind::Name, ",,,"),
@@ -1107,21 +1120,21 @@ pub(super) mod tests {
                     static_token(TokenKind::Semicolon),
                 ],
             )],
-            Vec::new(),
+            &[],
         );
     }
 
     #[test]
     fn parse_trivia() {
-        check("  ", vec![ws("  ")], Vec::new());
+        check("  ", &[ws("  ")], &[]);
         check(
             "/* test */ // test",
-            vec![
+            &[
                 dynamic_token(TokenKind::BlockComment, "/* test */"),
                 ws(" "),
                 dynamic_token(TokenKind::LineComment, "// test"),
             ],
-            Vec::new(),
+            &[],
         );
     }
 
@@ -1129,7 +1142,7 @@ pub(super) mod tests {
     fn parse_macro_invocation() {
         check(
             "a = <FOO(bar, 1234)>, FOO((()), ()), FOO(), FOO;",
-            vec![node(
+            &[node(
                 NodeKind::DtProperty,
                 vec![
                     dynamic_token(TokenKind::Name, "a"),
@@ -1213,7 +1226,7 @@ pub(super) mod tests {
                     static_token(TokenKind::Semicolon),
                 ],
             )],
-            Vec::new(),
+            &[],
         );
     }
 }

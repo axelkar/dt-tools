@@ -12,7 +12,6 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-bstr = "1.10"
 drop_bomb = "0.1"
 either = "1.13"
 enum-as-inner = "0.6"
@@ -34,3 +33,6 @@ serde_json = "1.0" # visualizer
 default = []
 grammar-tracing = []
 visualize = []
+
+[lints]
+workspace = true

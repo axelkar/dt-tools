@@ -13,7 +13,7 @@ struct FormatterContext {
 
 pub fn format(root: &mut GreenNode) {
     let ctx = FormatterContext { block_indent: 0 };
-    for child in root.children.iter_mut() {
+    for child in &mut root.children {
         match child {
             GreenItem::Node(node) => format_node(ctx, node),
             GreenItem::Token(token) => format_token(ctx, token),
@@ -28,7 +28,7 @@ fn format_node(mut ctx: FormatterContext, node: &mut Arc<GreenNode>) {
         ctx.block_indent += 1;
     }
     // TODO: only make_mut when needed?
-    for child in Arc::make_mut(node).children.iter_mut() {
+    for child in &mut Arc::make_mut(node).children {
         match child {
             GreenItem::Node(node) => format_node(ctx, node),
             GreenItem::Token(token) => format_token(ctx, token),
@@ -38,7 +38,7 @@ fn format_node(mut ctx: FormatterContext, node: &mut Arc<GreenNode>) {
 
 #[cfg(test)]
 mod tests {
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "not yet implemented")]
     #[track_caller]
     fn check(src: &'static str, expected: &'static str) {
         let parse = dt_parser::cst2::parser::parse(src);
@@ -47,7 +47,7 @@ mod tests {
             std::process::exit(1);
         };
 
-        // TODO
+        // TODO: add tests
 
         assert_eq!(parse.green_node.print_tree(), expected);
     }

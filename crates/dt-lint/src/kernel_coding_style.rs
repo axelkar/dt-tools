@@ -67,10 +67,10 @@ impl EarlyLintPass for KernelCodingStyle {
         }
         for property in node.properties() {
             // TODO: property order, maybe easier after analyzation
-            self.check_property(cx, &property)
+            self.check_property(cx, &property);
         }
         for node in node.subnodes() {
-            self.check_node(cx, &node)
+            self.check_node(cx, &node);
         }
     }
     fn check_property(&mut self, cx: &mut crate::EarlyContext<'_>, property: &ast::DtProperty) {

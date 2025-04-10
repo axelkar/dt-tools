@@ -31,33 +31,30 @@ mod types {
     fn is_int_type(value: &Value) -> bool {
         match value {
             Value::Number(n) if n.is_i64() => true,
-            Value::Sequence(vec) => vec.first().map(is_int_type).unwrap_or_default(),
+            Value::Sequence(vec) => vec.first().is_some_and(is_int_type),
             _ => false,
         }
     }
     fn is_string_type(value: &Value) -> bool {
         match value {
             Value::String(_) => true,
-            Value::Sequence(vec) => vec.first().map(is_string_type).unwrap_or_default(),
+            Value::Sequence(vec) => vec.first().is_some_and(is_string_type),
             _ => false,
         }
     }
 
     pub fn is_int(schema: &Mapping) -> bool {
         ty_eq(schema, "integer")
-            || schema.get("const").map(is_int_type).unwrap_or_default()
-            || schema.get("enum").map(is_int_type).unwrap_or_default()
-            || schema.get("minimum").map(is_int_type).unwrap_or_default()
-            || schema.get("maximum").map(is_int_type).unwrap_or_default()
+            || schema.get("const").is_some_and(is_int_type)
+            || schema.get("enum").is_some_and(is_int_type)
+            || schema.get("minimum").is_some_and(is_int_type)
+            || schema.get("maximum").is_some_and(is_int_type)
     }
     pub fn is_string(schema: &Mapping) -> bool {
         ty_eq(schema, "string")
-            || schema.get("const").map(is_string_type).unwrap_or_default()
-            || schema.get("enum").map(is_string_type).unwrap_or_default()
-            || schema
-                .get("pattern")
-                .map(is_string_type)
-                .unwrap_or_default()
+            || schema.get("const").is_some_and(is_string_type)
+            || schema.get("enum").is_some_and(is_string_type)
+            || schema.get("pattern").is_some_and(is_string_type)
     }
 }
 
@@ -169,8 +166,7 @@ pub fn fixup_node(schema: &mut Mapping) {
             k.starts_with("pinctrl-")
                 && k.chars()
                     .nth("pinctrl-".len())
-                    .map(|c| c.is_ascii_digit())
-                    .unwrap_or_default()
+                    .is_some_and(|c| c.is_ascii_digit())
         });
         if !has_pinctrl {
             props
@@ -178,7 +174,7 @@ pub fn fixup_node(schema: &mut Mapping) {
                 .or_insert(Value::Bool(true));
             let Some(pat_props) = schema
                 .entry("patternProperties".into())
-                .or_insert(Value::Mapping(Default::default()))
+                .or_insert(Value::Mapping(Mapping::default()))
                 .as_mapping_mut()
             else {
                 return;

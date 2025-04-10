@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     vec.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, value) in vec {
         let name = name.join("/");
-        eprintln!("{} -> {:#?}", name, value);
+        eprintln!("{name} -> {value:#?}");
     }
 
     if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {

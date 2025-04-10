@@ -26,8 +26,8 @@ pub enum NodeKind {
     DtCellList,
     DtExpr,
     DtLabel,
-    /// TODO: How to model enum ast::DtPropValue in ungrammar?
-    /// PropValueList = (('String' | 'DtBytestring' | DtCellList | DtPhandle) ','?)*
+    // TODO: How to model enum ast::DtPropValue in ungrammar?
+    // PropValueList = (('String' | 'DtBytestring' | DtCellList | DtPhandle) ','?)*
     PropValueList,
     DtPhandle,
     UnitAddress,
@@ -47,6 +47,8 @@ pub struct GreenNode {
 }
 impl GreenNode {
     /// Print a tree like rust-analyzer's debug AST
+    #[must_use]
+    #[expect(clippy::missing_panics_doc, reason = "Writing to a String can't panic")]
     pub fn print_tree(&self) -> String {
         let mut out = String::new();
         self.print_tree_file(&mut out).unwrap();
@@ -54,7 +56,11 @@ impl GreenNode {
     }
 
     /// Print a tree like rust-analyzer's debug AST
-    #[inline(always)]
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` if writing to `out` fails
+    #[inline]
     pub fn print_tree_file(&self, out: &mut impl std::fmt::Write) -> std::fmt::Result {
         self.print_tree_rec(0, 0, out)
     }
@@ -75,7 +81,7 @@ impl GreenNode {
             offset + self.width
         )?;
 
-        for child in self.children.iter() {
+        for child in &self.children {
             match child {
                 GreenItem::Node(ref node) => node.print_tree_rec(level + 1, offset, out)?,
                 GreenItem::Token(ref token) => writeln!(
@@ -95,12 +101,12 @@ impl GreenNode {
 
     /// Returns an iterator over immediate child nodes.
     pub fn child_nodes(&self) -> impl Iterator<Item = &Arc<GreenNode>> + '_ {
-        self.children.iter().flat_map(GreenItem::as_node)
+        self.children.iter().filter_map(GreenItem::as_node)
     }
 
     /// Returns an iterator over immediate child tokens.
     pub fn child_tokens(&self) -> impl Iterator<Item = &Arc<GreenToken>> + '_ {
-        self.children.iter().flat_map(GreenItem::as_token)
+        self.children.iter().filter_map(GreenItem::as_token)
     }
 }
 
@@ -113,6 +119,7 @@ pub enum TokenText {
 }
 impl TokenText {
     /// Creates a `String` by cloning the current value's reference.
+    #[must_use]
     pub fn to_owned(&self) -> String {
         match self {
             Self::Static(str) => (*str).to_owned(),
@@ -120,12 +127,14 @@ impl TokenText {
         }
     }
     /// Extracts the owned `String`.
+    #[must_use]
     pub fn into_owned(self) -> String {
         match self {
             Self::Static(str) => str.to_owned(),
             Self::Dynamic(str) => str,
         }
     }
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             Self::Static(str) => str,
@@ -170,6 +179,7 @@ pub struct GreenToken {
 impl GreenToken {
     /// Returns the length of the textual contents.
     #[inline]
+    #[must_use]
     pub fn length(&self) -> usize {
         match &self.text {
             TokenText::Static(s) => s.len(),
@@ -185,6 +195,7 @@ pub struct RedToken {
     /// Offset in the source file
     pub text_offset: usize,
 }
+#[expect(clippy::missing_fields_in_debug, reason = "we can't print `parent`")]
 impl std::fmt::Debug for RedToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RedToken")
@@ -194,7 +205,8 @@ impl std::fmt::Debug for RedToken {
 }
 impl RedToken {
     /// Returns the text range.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn text_range(&self) -> TextRange {
         TextRange {
             start: self.text_offset,
@@ -203,26 +215,27 @@ impl RedToken {
     }
 
     /// Returns the text the token represents.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn text(&self) -> &TokenText {
         &self.green.text
     }
 
     /// Returns the length of the textual contents.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn length(&self) -> usize {
         self.green.length()
     }
 
     /// Returns the text the token represents from `src`.
+    #[must_use]
     pub fn text_from_source<'i>(&self, src: &'i str) -> &'i str {
         let opt = src.get(self.text_offset..(self.text_offset + self.green.length()));
 
-        if cfg!(debug_assertions) {
-            opt.expect("Invalid text offset, wrong source?")
-        } else {
-            opt.unwrap_or("")
-        }
+        debug_assert!(opt.is_some(), "Invalid text offset, wrong source?");
+
+        opt.unwrap_or("")
     }
 
     /// Iterator over all the ancestors of this token excluding itself.
@@ -250,6 +263,7 @@ pub struct RedNode {
 
 impl RedNode {
     /// Creates a new red node with no parent.
+    #[must_use]
     pub fn new(root: Arc<GreenNode>) -> Arc<Self> {
         Arc::new(RedNode {
             parent: None,
@@ -259,7 +273,8 @@ impl RedNode {
     }
 
     /// Returns the text range.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn text_range(&self) -> TextRange {
         TextRange {
             start: self.text_offset,
@@ -268,6 +283,7 @@ impl RedNode {
     }
 
     /// Returns the node at the specified byte offset if found.
+    #[must_use]
     pub fn node_at_offset(self: &Arc<RedNode>, offset: usize) -> Option<Arc<RedNode>> {
         // TODO: non recursing algorithm? binary search?
         self.child_nodes()
@@ -276,6 +292,7 @@ impl RedNode {
     }
 
     /// Returns the token at the specified byte offset if found.
+    #[must_use]
     pub fn token_at_offset(self: &Arc<RedNode>, offset: usize) -> Option<Arc<RedToken>> {
         // TODO: non recursing algorithm? binary search?
         self.child_nodes()
@@ -351,12 +368,12 @@ impl RedNode {
 
     /// Returns an iterator over the child nodes.
     pub fn child_nodes<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = Arc<RedNode>> + 'a {
-        self.children().flat_map(RedItem::into_node)
+        self.children().filter_map(RedItem::into_node)
     }
 
     /// Returns an iterator over the child tokens.
     pub fn child_tokens<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = Arc<RedToken>> + 'a {
-        self.children().flat_map(RedItem::into_token)
+        self.children().filter_map(RedItem::into_token)
     }
 
     /// Iterator over all the ancestors of this node excluding itself.
@@ -365,6 +382,7 @@ impl RedNode {
     }
 }
 
+#[expect(clippy::missing_fields_in_debug, reason = "we can't print `parent`")]
 impl fmt::Debug for RedNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RedNode")
@@ -440,6 +458,7 @@ pub type RedItemRef<'a> = TreeItem<&'a Arc<RedNode>, &'a Arc<RedToken>>;
 impl GreenItem {
     /// Returns the length of the textual contents.
     #[inline]
+    #[must_use]
     pub fn length(&self) -> usize {
         match self {
             TreeItem::Node(node) => node.width,
@@ -450,7 +469,8 @@ impl GreenItem {
 
 impl RedItem {
     /// Returns the text range.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn text_range(&self) -> TextRange {
         match self {
             TreeItem::Node(node) => node.text_range(),
@@ -461,7 +481,8 @@ impl RedItem {
 
 impl RedItemRef<'_> {
     /// Returns the text range.
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn text_range(&self) -> TextRange {
         match self {
             TreeItem::Node(node) => node.text_range(),

@@ -80,9 +80,7 @@ fn print_tree(node: Arc<GreenNode>) {
             }
         } else if let Some(new_current_node) = stack.pop() {
             // No more children -> go to parent
-            if current_node.0.kind == NodeKind::ParseError
-                && error_level.map_or(false, |level| indent_level == level)
-            {
+            if current_node.0.kind == NodeKind::ParseError && error_level == Some(indent_level) {
                 error_level = None;
             }
             current_node = new_current_node;

@@ -18,6 +18,17 @@ pub struct BindingSchema {
     pub maintainers: Option<Value>,
 }
 impl BindingSchema {
+    /// Compiles a binding schema
+    ///
+    /// # Errors
+    ///
+    /// Will return `Err` if any of the following conditions are met:
+    ///
+    /// - Loading the YAML file fails
+    /// - Schema is invalid according to [the `dt-schema` validations](https://github.com/devicetree-org/dt-schema)
+    /// - Full JSON Schema compilation fails
+    /// - Select JSON Schema compilation fails
+    #[expect(clippy::missing_panics_doc, reason = "fixups should add select key")]
     pub fn compile(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let mut yaml: Value = serde_yaml::from_str(&std::fs::read_to_string(path)?)?;
         let Some(yaml_map) = yaml.as_mapping_mut() else {
@@ -90,6 +101,7 @@ pub fn get_compatible_items(map: &Mapping) -> HashSet<String> {
     list
 }
 
+#[must_use]
 pub fn find_select(tree: DefinitionTreeNode, select: &JSONSchema) -> Option<DefinitionTreeNode> {
     // TODO: return path too?
     // TODO: compare into_json with `dtc example.dts -O yaml | yq '.[]'`
@@ -135,7 +147,7 @@ mod tests {
         let json = find_select(def.tree, &schema.select)
             .expect("Couldn't find selected")
             .into_json();
-        eprintln!("{:#?}", json);
+        eprintln!("{json:#?}");
         if let Err(e) = schema.schema.validate(&json) {
             eprintln!("{:#?}", e.collect::<Vec<_>>());
         };

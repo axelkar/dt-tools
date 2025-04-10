@@ -61,7 +61,7 @@ pub trait CompilerMetaSchemaExt {
 }
 impl CompilerMetaSchemaExt for CompilationOptions {
     fn with_dt_meta_schemas(&mut self) -> &mut Self {
-        for (id, schema) in META_SCHEMAS.clone().into_iter() {
+        for (id, schema) in META_SCHEMAS.clone() {
             self.with_document(id, schema);
         }
         self

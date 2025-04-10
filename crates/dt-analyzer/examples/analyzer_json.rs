@@ -1,6 +1,6 @@
 //! Parses the file at argv 1 and prints the analyzed data as JSON
 //!
-//! Use `--assert` in argv[2] to pretty_assertions::assert_eq
+//! Use `--assert` in argv[2] to `pretty_assertions::assert_eq`
 
 use dt_parser::ast::SourceFile;
 use owo_colors::{colors::xterm::Gray, OwoColorize as _};
@@ -14,9 +14,9 @@ fn remove_first<T>(vec: &mut Vec<T>) -> Option<T> {
     Some(vec.swap_remove(0))
 }
 
-/// This should be more efficient than "re-serializing" serde_yaml::Value into serde_json::Value
+/// This should be more efficient than "re-serializing" `serde_yaml::Value` into `serde_json::Value`
 /// but more importantly, this never errors and skips tags (not the values though), because thay
-/// can't be represented as serde_json::Value
+/// can't be represented as `serde_json::Value`
 ///
 /// NOTE: this cuts out node children with the name phandle and returns `-1` for anything with the
 /// YAML tag `phandle` e.g. `!phandle 0x1`
@@ -157,10 +157,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     };
 
-    if !assert {
-        eprintln!("DTC output: {}", serde_json::to_string(&dtc_json).unwrap());
-    } else {
+    if assert {
         pretty_assertions::assert_eq!(own_json, dtc_json);
+    } else {
+        eprintln!("DTC output: {}", serde_json::to_string(&dtc_json).unwrap());
     }
     eprintln!(
         "{}{:?}",

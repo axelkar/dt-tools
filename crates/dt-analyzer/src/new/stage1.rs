@@ -30,6 +30,7 @@ pub enum AnalyzedToplevel {
 
 impl AnalyzedToplevel {
     /// Returns the range of the textual contents.
+    #[must_use]
     pub fn text_range(&self) -> TextRange {
         match self {
             Self::Node(node) => node.text_range,
@@ -96,13 +97,13 @@ impl AnalyzedInclude {
         let s = input
             .get(1..)
             .expect("lexer safe")
-            .trim_start_matches(|ch| ch == ' ' || ch == '\t');
+            .trim_start_matches([' ', '\t']);
 
         debug_assert!(s.starts_with("include"));
         let s = s
             .get("include".len()..)
             .expect("lexer safe")
-            .trim_start_matches(|ch| ch == ' ' || ch == '\t');
+            .trim_start_matches([' ', '\t']);
 
         let (relative, (path, rest)) = match s
             .as_bytes()
@@ -244,7 +245,7 @@ pub fn analyze_file(
                         is_extension: node.is_extension(),
                         name: node
                             .text_name(src)
-                            .map(|c| c.into_owned())
+                            .map(std::borrow::Cow::into_owned)
                             .unwrap_or_default(),
                         text_range: node.syntax().text_range(),
                         ast: node,
@@ -326,7 +327,7 @@ pub fn analyze_file(
         .collect();
 
     // Parallelism makes it unpredictable
-    analyzed.sort_unstable_by_key(|top| top.text_range());
+    analyzed.sort_unstable_by_key(AnalyzedToplevel::text_range);
 
     analyzed
 }

@@ -16,7 +16,7 @@ mod kernel_coding_style;
 pub mod lints {
     //! The full collection of lints upstream.
     //!
-    //! Currently all lints in here are applied by the [default_lint](crate::default_lint) function
+    //! Currently all lints in here are applied by the [`default_lint`](crate::default_lint) function
     //! used by the LSP.
     pub use crate::dtc_style::DtcStyle;
     pub use crate::kernel_coding_style::KernelCodingStyle;
@@ -105,7 +105,7 @@ pub trait EarlyLintPass {
     /// Lint a source file's [AST](ast::SourceFile)
     fn check_document(&mut self, cx: &mut EarlyContext<'_>, file: &ast::SourceFile) {
         for node in file.nodes() {
-            self.check_node(cx, &node)
+            self.check_node(cx, &node);
         }
     }
     /// Lint a node's [AST](ast::DtNode)
@@ -114,10 +114,10 @@ pub trait EarlyLintPass {
             self.check_label(cx, &label);
         }
         for property in node.properties() {
-            self.check_property(cx, &property)
+            self.check_property(cx, &property);
         }
         for node in node.subnodes() {
-            self.check_node(cx, &node)
+            self.check_node(cx, &node);
         }
     }
     /// Lint a property's [AST](ast::DtProperty)
@@ -130,6 +130,7 @@ pub trait EarlyLintPass {
     fn check_label(&mut self, _cx: &mut EarlyContext, _label: &ast::DtLabel) {}
 }
 
+#[must_use]
 pub fn default_lint(file: &ast::SourceFile, src: &str, is_main_file: bool) -> Vec<EarlyLint> {
     let mut cx = EarlyContext {
         lints: Vec::new(),

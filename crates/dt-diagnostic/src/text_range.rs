@@ -22,6 +22,7 @@ impl Display for TextRange {
 
 impl TextRange {
     /// Creates a new `TextRange`.
+    #[must_use]
     pub const fn new(start: usize, end: usize) -> TextRange {
         TextRange { start, end }
     }
@@ -38,7 +39,8 @@ impl TextRange {
     /// let span = TextRange { start: 4, end: 4 };
     /// assert_eq!(span.length(), 0);
     /// ```
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn length(&self) -> usize {
         self.end - self.start
     }
@@ -52,7 +54,8 @@ impl TextRange {
     /// let span = TextRange { start: 4, end: 7 };
     /// assert_eq!(span.offset(2), TextRange { start: 6, end: 9 });
     /// ```
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn offset(self, offset: usize) -> Self {
         TextRange {
             start: self.start + offset,
@@ -76,7 +79,8 @@ impl TextRange {
     /// let span = TextRange { start: 11, end: 12 };
     /// assert_eq!(span.text(source), None);
     /// ```
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub fn text<'i>(&self, source: &'i str) -> Option<&'i str> {
         source.get(self.start..self.end)
     }
@@ -91,7 +95,8 @@ impl TextRange {
     /// let span = TextRange { start: 4, end: 7 };
     /// assert_eq!(span.byte_range(), 4..7);
     /// ```
-    #[inline(always)]
+    #[inline]
+    #[must_use]
     pub const fn byte_range(&self) -> Range<usize> {
         self.start..self.end
     }
@@ -108,6 +113,7 @@ impl TextRange {
     ///     self lorem ipsum end
     ///     ^^^^^^^^^^^^^^^^^^^^
     /// ```
+    #[must_use]
     pub fn to(self, end: TextRange) -> TextRange {
         TextRange::new(self.start.min(end.start), self.end.max(end.end))
     }
@@ -119,6 +125,7 @@ impl TextRange {
     ///     self lorem ipsum end
     ///         ^^^^^^^^^^^^^
     /// ```
+    #[must_use]
     pub fn between(self, end: TextRange) -> TextRange {
         TextRange::new(self.end.min(end.end), self.start.max(end.start))
     }
@@ -130,13 +137,14 @@ impl TextRange {
     ///     self lorem ipsum end
     ///     ^^^^^^^^^^^^^^^^^
     /// ```
+    #[must_use]
     pub fn until(self, end: TextRange) -> TextRange {
         TextRange::new(self.start.min(end.start), self.start.max(end.start))
     }
 }
 
 impl From<Range<usize>> for TextRange {
-    #[inline(always)]
+    #[inline]
     fn from(value: Range<usize>) -> Self {
         Self {
             start: value.start,
@@ -145,7 +153,7 @@ impl From<Range<usize>> for TextRange {
     }
 }
 impl From<TextRange> for Range<usize> {
-    #[inline(always)]
+    #[inline]
     fn from(value: TextRange) -> Self {
         value.start..value.end
     }

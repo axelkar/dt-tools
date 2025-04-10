@@ -105,10 +105,7 @@ impl<'t, 'input> Source<'t, 'input> {
     }
 
     pub(super) fn skip_trivia(&mut self) {
-        while self
-            .peek_kind_immediate()
-            .map_or(false, TokenKind::is_trivia)
-        {
+        while self.peek_kind_immediate().is_some_and(TokenKind::is_trivia) {
             self.cursor += 1;
             self.steps.set(0);
         }

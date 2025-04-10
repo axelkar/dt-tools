@@ -12,11 +12,8 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-compact_str = "0.8.0"
 dashmap.workspace = true
 ropey = "1.6.1"
-smallstr = "0.3.0"
-smallvec = "1.13.1"
 tokio = { version = "1.36.0", features = ["fs", "rt-multi-thread", "macros", "io-std", "net", "io-util"] }
 tower-lsp = "0.20.0"
 dt-parser.workspace = true
@@ -27,7 +24,9 @@ itertools.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 rayon.workspace = true
-axka-rcu = { version = "1.0.0", features = ["triomphe"] }
+axka-rcu = { version = "1.0.0", features = ["triomphe"] } # FIXME: yanked
 rustc-hash.workspace = true
-thiserror = "1.0.63"
 dt-diagnostic = { workspace = true, features = ["parking_lot"] }
+
+[lints]
+workspace = true
