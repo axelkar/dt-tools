@@ -214,14 +214,6 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.peek_immediate() == Some(kind)
     }
 
-    /// Returns true if `first_kind` is the current token's kind and `second_kind` is the immediate
-    /// next token's kind.
-    ///
-    /// - This does not add kinds to `expected_kinds`.
-    pub fn silent_at2(&mut self, first_kind: TokenKind, second_kind: TokenKind) -> bool {
-        self.silent_at(first_kind) && self.source.peek_immediate_next_kind() == Some(second_kind)
-    }
-
     /// Bumps and returns true if `kind` is the current token's kind.
     ///
     /// Basically a combination of [`Parser::at`] and [`Parser::bump`]
@@ -361,6 +353,13 @@ impl<'t, 'input> Parser<'t, 'input> {
         }
     }
 
+    /// Returns true if at a macro invocation with arguments.
+    pub fn silent_at_macro_invocation_with_args(&mut self) -> bool {
+        // TODO: don't peek the next token after the current one
+        self.silent_at(TokenKind::Ident)
+            && self.source.peek_immediate_next_kind() == Some(TokenKind::LParen)
+    }
+
     #[inline]
     pub fn add_expected(&mut self, expected: Expected) {
         self.expected.push(expected);
@@ -386,7 +385,6 @@ impl<'t, 'input> Parser<'t, 'input> {
         // Make sure no trivia tokens get into the combined token
         self.source.skip_trivia();
 
-        //let name_m = self.start();
         let mut n_raw_tokens = 0;
         let mut text = String::new();
 
@@ -619,16 +617,16 @@ mod tests {
     }
 
     #[test]
-    fn silent_at2() {
+    fn silent_at_macro_invocation_with_args() {
         let tokens: Vec<_> = Lexer::new(" foo (").collect();
         let mut parser = Parser::new(Source::new(&tokens));
 
-        assert!(parser.silent_at2(TokenKind::Ident, TokenKind::Whitespace));
+        assert!(!parser.silent_at_macro_invocation_with_args());
 
         let tokens: Vec<_> = Lexer::new(" foo(").collect();
         let mut parser = Parser::new(Source::new(&tokens));
 
-        assert!(parser.silent_at2(TokenKind::Ident, TokenKind::LParen));
+        assert!(parser.silent_at_macro_invocation_with_args());
     }
 
     #[test]

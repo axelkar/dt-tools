@@ -150,7 +150,7 @@ pub(super) fn reference_noamp(p: &mut Parser) {
             }
         }
         p.expect(TokenKind::RCurly);
-    } else if p.silent_at2(TokenKind::Ident, TokenKind::LParen) {
+    } else if p.silent_at_macro_invocation_with_args() {
         macro_invocation(p.start(), p);
     } else if p.at_label_name() {
         p.bump_label_name();
@@ -390,7 +390,7 @@ fn item(p: &mut Parser) {
         let mut m = m;
         // parse a node or a property
 
-        if p.silent_at2(TokenKind::Ident, TokenKind::LParen) {
+        if p.silent_at_macro_invocation_with_args() {
             m = macro_invocation(m, p).precede(p);
         } else {
             p.bump_name();
@@ -404,7 +404,7 @@ fn item(p: &mut Parser) {
             m = m.complete(p, NodeKind::DtLabel).precede(p);
 
             while p.at_name() {
-                if p.silent_at2(TokenKind::Ident, TokenKind::LParen) {
+                if p.silent_at_macro_invocation_with_args() {
                     m = macro_invocation(m, p).precede(p);
                 } else {
                     p.bump_name();
