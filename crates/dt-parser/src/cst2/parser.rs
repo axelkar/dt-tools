@@ -1,5 +1,7 @@
+//! Module to help with implementing the grammar. Ties together the token source, the syntax tree
+//! sink and errors.
+//!
 //! - <https://rust-analyzer.github.io/blog/2020/09/16/challeging-LR-parsing.html#error-resilience>
-//! - <https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html>
 
 use std::sync::Arc;
 
@@ -229,6 +231,8 @@ impl<'t, 'input> Parser<'t, 'input> {
     /// Returns true if `kind` is the current token's kind.
     ///
     /// - This does not add `kind` to `expected_kinds`.
+    ///
+    /// Use for error recovery or with [`Parser::add_expected`]
     pub fn silent_at(&mut self, kind: TokenKind) -> bool {
         self.peek() == Some(kind)
     }

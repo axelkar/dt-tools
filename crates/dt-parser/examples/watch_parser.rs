@@ -1,4 +1,4 @@
-//! Parses the file at argv 1 and prints the CST
+//! Parses the file at argv 1 and prints the CST, and redoes this every time the file is modified
 
 use std::{
     mem,

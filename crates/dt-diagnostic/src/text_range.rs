@@ -101,8 +101,6 @@ impl TextRange {
         self.start..self.end
     }
 
-    // TODO: lsp_range(&self, rope: ropey::Rope) -> lsp_types::Range?
-
     /// Returns a `TextRange` that would enclose both `self` and `end`.
     ///
     /// Note that this can also be used to extend the span "backwards":

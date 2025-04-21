@@ -8,6 +8,58 @@ const PARSER_STEP_LIMIT: u32 = 1_000;
 #[derive(Debug)]
 pub(super) struct Source<'t, 'input> {
     tokens: &'t [Token<'input>],
+    /// The index of the (possibly trivia) token after the previous non-trivia token if it exists.
+    ///
+    /// ```text
+    /// foo   bar
+    /// ^^^ cursor
+    /// prev_next_cursor = uninitialized (impl detail: 0)
+    /// ```
+    ///
+    /// ```ignore
+    /// assert_eq!(source.peek_kind(), Some(Foo));
+    /// assert_eq!(source.next_token().unwrap().kind.unwrap(), Foo);
+    /// ```
+    ///
+    /// ```text
+    /// foo   bar
+    ///    ^^^ cursor
+    ///    ^^^ prev_next_cursor
+    /// ```
+    ///
+    /// ## Branch A
+    ///
+    /// ```ignore
+    /// assert_eq!(source.peek_kind(), Some(Bar));
+    /// ```
+    ///
+    /// ```text
+    /// foo   bar
+    ///       ^^^ cursor
+    ///    ^^^ prev_next_cursor
+    /// ```
+    ///
+    /// ```ignore
+    /// assert_eq!(source.next_token().unwrap().kind.unwrap(), Bar);
+    /// ```
+    ///
+    /// ```text
+    /// foo   bar
+    ///          ^ cursor
+    ///          ^ prev_next_cursor
+    /// ```
+    ///
+    /// ## Branch B
+    ///
+    /// ```ignore
+    /// assert_eq!(source.next_token().unwrap().kind.unwrap(), Bar);
+    /// ```
+    ///
+    /// ```text
+    /// foo   bar
+    ///          ^ cursor
+    ///          ^ prev_next_cursor
+    /// ```
     prev_next_cursor: usize,
     /// From which index the next immediate token will be read from.
     cursor: usize,
@@ -71,8 +123,9 @@ impl<'t, 'input> Source<'t, 'input> {
         Some(token)
     }
 
-    /// Returns the last token's range if it exists.
+    /// Returns the last token's range if it exists. The token may be trivia.
     pub(crate) fn last_token_range(&self) -> Option<TextRange> {
+        tracing::debug!(last_token = ?self.tokens.last());
         Some(self.tokens.last()?.text_range)
     }
 
@@ -81,13 +134,24 @@ impl<'t, 'input> Source<'t, 'input> {
         Some(self.peek_token_immediate()?.text_range)
     }
 
-    /// Returns the range of the first (possibly trivia) token after the previous non-trivia token if it exists.
+    /// Returns the range of the (possibly trivia) token after the previous non-trivia token if it exists.
     ///
     /// Unless `cursor` is 0 (meaning no bumps have occurred), this will always return `Some`.
+    ///
+    /// Usually this is like so:
+    /// ```text
+    /// foo   bar
+    ///       ^^^ if cursor is here
+    ///    ^^^ prev_next_cursor is here
+    /// ```
+    // FIXME: this will usually return Some since prev_next_cursor is initialized to 0, except at
+    // EOF!!
     pub(crate) fn prev_next_range(&self) -> Option<TextRange> {
         Some(self.tokens.get(self.prev_next_cursor)?.text_range)
     }
-    /// Returns the text of the first (possibly trivia) token after the previous non-trivia token if it exists.
+
+    #[cfg(test)]
+    /// Returns the text of the (possibly trivia) token after the previous non-trivia token if it exists.
     ///
     /// Unless `cursor` is 0 (meaning no bumps have occurred), this will always return `Some`.
     pub(crate) fn prev_next_text(&self) -> Option<&str> {
