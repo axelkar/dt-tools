@@ -15,7 +15,7 @@ vim.api.nvim_create_autocmd("FileType", {
       name = 'DeviceTreeLSP',
       --cmd = {'../../target/debug/dt-lsp'},
       --cmd = {'cargo', 'run'},
-      cmd = vim.lsp.rpc.connect('127.0.0.1', '9257'),
+      cmd = vim.lsp.rpc.connect('127.0.0.1', 9257),
       root_dir = vim.fs.root(args.buf, {'.git'}),
     })
   end
@@ -30,7 +30,7 @@ vim.api.nvim_create_autocmd({"BufRead", "BufNewFile"}, {
       name = 'DeviceTreeLSP',
       --cmd = {'../../target/debug/dt-lsp'},
       --cmd = {'cargo', 'run'},
-      cmd = vim.lsp.rpc.connect('127.0.0.1', '9257'),
+      cmd = vim.lsp.rpc.connect('127.0.0.1', 9257),
       root_dir = vim.fs.root(args.buf, {'.git'}),
     })
   end
