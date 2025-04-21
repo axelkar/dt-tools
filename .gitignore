@@ -1,2 +1,5 @@
 /target
 .direnv
+
+# Code coverage files
+*.profraw

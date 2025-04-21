@@ -56,6 +56,15 @@
               rust-analyzer
 
               cargo-release
+              cargo-nextest
+
+              # It needs llvm-profdata and llvm-cov from bintools, but doesn't currently pick them up from PATH:
+              # https://github.com/mozilla/grcov/issues/848
+              # Normally they get added to the shell by llvmPackages.bintools's setup hook
+              (writeShellScriptBin "grcov" ''
+                exec ${grcov}/bin/grcov --llvm-path ${llvmPackages.llvm}/bin "$@"
+              '')
+              fd
             ];
           };
           vscode = pkgs.mkShellNoCC {
