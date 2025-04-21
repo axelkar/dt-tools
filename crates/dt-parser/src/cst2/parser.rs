@@ -1,18 +1,16 @@
 //! - <https://rust-analyzer.github.io/blog/2020/09/16/challeging-LR-parsing.html#error-resilience>
 //! - <https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html>
 
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 use crate::{ast, TextRange};
 
 use self::event::Event;
 use self::source::Source;
-use itertools::Itertools;
 pub(crate) use marker::{CompletedMarker, Marker};
 use smallvec::SmallVec;
-use tracing::debug;
 #[cfg(feature = "grammar-tracing")]
-use tracing::error;
+use tracing::debug;
 
 use super::{grammar, lexer::TokenKind, GreenNode, NodeKind};
 
@@ -22,7 +20,7 @@ mod marker;
 mod sink;
 mod source;
 
-pub(crate) use errors::Expected;
+pub(crate) use errors::{ErrorBuilder, Expected};
 pub use errors::{ParseError, WrappedLexError};
 
 // TODO: axka style naming naming lints
@@ -131,9 +129,10 @@ impl Entrypoint {
             }
             Self::PropValues => {
                 grammar::propvalues(p, &[]).ok();
+                // TODO: should this be added to the other branches?
                 if !p.at_end() {
                     p.add_expected(Expected::Eof);
-                    p.error2();
+                    p.error().msg_expected().bump_wrap_err().emit();
                 }
                 NodeKind::EntryPropValues
             }
@@ -266,50 +265,13 @@ impl<'t, 'input> Parser<'t, 'input> {
         if self.at(kind) {
             self.bump();
         } else {
-            self.emit_expect_error();
+            self.error().msg_expected().emit();
         }
     }
 
-    pub fn emit_expect_error(&mut self) {
-        #[cfg(feature = "grammar-tracing")]
-        error!("emit_expect_error");
-
-        use std::fmt::Write;
-        let mut message = "Expected ".to_owned();
-
-        self.expected = std::mem::take(&mut self.expected)
-            .into_iter()
-            .unique()
-            .collect::<Vec<_>>()
-            .into();
-
-        let num_expected = self.expected.len();
-
-        for (idx, expected_kind) in self.expected.iter().enumerate() {
-            let is_first = idx == 0;
-            let is_last = idx == num_expected - 1;
-
-            if is_first {
-                write!(message, "{expected_kind}").ok();
-            } else if is_last {
-                write!(message, " or {expected_kind}").ok();
-            } else {
-                write!(message, ", {expected_kind}").ok();
-            }
-        }
-
-        if let Some(kind) = self.peek() {
-            write!(message, ", but found {kind}").ok();
-        } else {
-            write!(message, ", but found end-of-file").ok();
-        }
-
-        self.simple_error(message.into());
-    }
-
-    /// Errors when the current token's kind isn't `kind`.
+    /// Errors when the current token's kind isn't `kind` and bumps when not at `recovery_set`.
     ///
-    /// - Doesn't bump when at `recovery_set`.
+    /// Use this when you know that `recovery_set` will be bumped.
     pub fn expect_recoverable(&mut self, kind: TokenKind, recovery_set: &[TokenKind]) {
         #[cfg(feature = "grammar-tracing")]
         debug!(?kind, ?recovery_set, "expect_recoverable");
@@ -317,65 +279,42 @@ impl<'t, 'input> Parser<'t, 'input> {
         if self.at(kind) {
             self.bump();
         } else if self.silent_at_set(recovery_set) {
-            self.emit_expect_error();
+            self.error().msg_expected().emit();
         } else {
-            self.error2();
+            self.error().msg_expected().bump_wrap_err().emit();
         }
     }
 
-    /// Reports the current token as an expect error.
-    // TODO: rename this function to expect_error
-    pub fn error2(&mut self) {
-        #[cfg(feature = "grammar-tracing")]
-        error!("error2");
-
-        self.emit_expect_error();
-
-        if !self.at_end() {
-            let e = self.start();
-            self.bump();
-            e.complete(self, NodeKind::ParseError);
-        }
+    /// Returns an error builder, which will report the current token (the one that is tested by
+    /// [`Parser::at`]) as an error.
+    ///
+    /// Note that everything is only done at [`ErrorBuilder::emit`].
+    #[inline]
+    #[must_use]
+    pub fn error(&mut self) -> ErrorBuilder<'_, 't, 'input, errors::MessageMissing> {
+        ErrorBuilder::new(self)
     }
 
-    /// Reports the current token as an error.
-    pub fn simple_error(&mut self, message: Cow<'static, str>) {
-        self.fancy_error(message, Vec::new());
+    // For the error builder
+    fn emit_parse_error(&mut self, error: ParseError) {
+        self.events.push(Event::Error(error));
     }
-
-    /// Returns the range of the current token if it exists.
-    pub fn range(&self) -> Option<crate::TextRange> {
-        self.source.range()
-    }
-
-    /// Reports the current token as an error.
-    pub fn fancy_error(
-        &mut self,
-        message: Cow<'static, str>,
-        span_labels: Vec<dt_diagnostic::SpanLabel>,
-    ) {
-        let primary_span = if self.at_end() {
-            let pos = self.source.last_token_range().map_or(0, |tr| tr.start);
-            TextRange {
-                start: pos,
-                end: pos + 1,
-            }
-        } else if let [Expected::Kind(TokenKind::RCurly)] = self.expected.as_slice() {
-            let offset = self
-                .source
-                .prev_next_text()
-                .unwrap()
-                .find('\n')
-                .map_or(0, |offset| offset + 1);
-            let pos = self.source.prev_next_range().unwrap().start + offset;
-            TextRange {
-                start: pos,
-                end: pos + 1,
-            }
+    fn current_token_error_range(&mut self) -> TextRange {
+        if self.at_end() {
+            // Emit the error at the second-last character before EOF, if possible. This is so the
+            // errors show consistently in editors that don't display the trailing newline.
+            self.source
+                .last_token_range()
+                .map_or(TextRange { start: 0, end: 0 }, |tr| TextRange {
+                    start: tr.end - 1,
+                    end: tr.end,
+                })
         } else if let [Expected::Kind(TokenKind::Semicolon | TokenKind::Comma)]
         | [Expected::Kind(TokenKind::Comma), Expected::Kind(TokenKind::Semicolon)] =
             self.expected.as_slice()
         {
+            // TODO: don't hardcode it here and make it explicit in the grammar
+            // Display the error at the start of the token after the previous non-trivia token
             let pos = self.source.prev_next_range().unwrap().start;
             TextRange {
                 start: pos,
@@ -383,27 +322,12 @@ impl<'t, 'input> Parser<'t, 'input> {
             }
         } else {
             self.source.range().unwrap()
-        };
-
-        debug!(?primary_span, %message, "fancy_error");
-
-        self.events.push(Event::Error(ParseError {
-            message,
-            primary_span,
-            span_labels,
-        }));
+        }
     }
 
-    /// Sets the hint for the error.
-    ///
-    /// Does nothing if the last event was not an error.
-    pub fn add_hint(&mut self, hint: Cow<'static, str>) {
-        if let Some(Event::Error(err)) = self.events.last_mut() {
-            err.span_labels.push(dt_diagnostic::SpanLabel {
-                msg: hint,
-                span: err.primary_span,
-            });
-        }
+    /// Returns the range of the current token if it exists.
+    pub fn range(&self) -> Option<crate::TextRange> {
+        self.source.range()
     }
 
     /// Returns true if at a label name token.
@@ -411,6 +335,7 @@ impl<'t, 'input> Parser<'t, 'input> {
         if self.silent_at_set(&LABEL_NAME_SET) {
             true
         } else {
+            // TODO: does moving these expected additions to before the check break any tests?
             self.expected.push(Expected::LabelName);
             false
         }
@@ -566,6 +491,8 @@ pub mod visualizer {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::sink::Sink;
     use crate::cst2::lexer::{LexError, Lexer};
     use crate::cst2::{GreenNode, NodeKind};
@@ -714,6 +641,8 @@ mod tests {
 
         let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
 
+        // FIXME: this is NOT an example for prev_next currently. expect comma, semicolon or both!!
+        // oh and the code that does it will be defined in the grammar instead of the parser later
         assert_eq!(
             output,
             Parse {
@@ -729,7 +658,7 @@ mod tests {
                 lex_errors: Vec::new(),
                 errors: vec![ParseError {
                     message: Cow::Borrowed("Expected ‘}’, but found end-of-file"),
-                    primary_span: TextRange::new(4, 5),
+                    primary_span: TextRange::new(9, 10),
                     span_labels: Vec::new(),
                 }]
             }

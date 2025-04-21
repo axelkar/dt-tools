@@ -105,7 +105,7 @@ fn dt_expr(p: &mut Parser) {
             // Recover if an argument is missing and only got a delimiter,
             // e.g. `a + + b`.
             // TODO: add "Expecter number or preprocessor macro"
-            p.error2();
+            p.error().msg_expected().bump_wrap_err().emit();
             continue;
         }
 
@@ -117,7 +117,7 @@ fn dt_expr(p: &mut Parser) {
             // Start a parantesized expression
             dt_expr(p);
         } else {
-            p.error2();
+            p.error().msg_expected().bump_wrap_err().emit();
             break;
         }
 
@@ -126,7 +126,7 @@ fn dt_expr(p: &mut Parser) {
         } else if p.silent_at_set(ITEM_RECOVERY_SET) {
             break;
         } else if p.silent_at_set(EXPR_RECOVERY_SET) {
-            p.emit_expect_error();
+            p.error().msg_expected().emit();
         } else {
             break;
         }
@@ -146,7 +146,7 @@ pub(super) fn reference_noamp(p: &mut Parser) {
             // TODO: don't allow spaces in path references
             p.expect(TokenKind::Slash);
             if !p.eat_name() {
-                p.emit_expect_error();
+                p.error().msg_expected().emit();
             }
         }
         p.expect(TokenKind::RCurly);
@@ -155,7 +155,7 @@ pub(super) fn reference_noamp(p: &mut Parser) {
     } else if p.at_label_name() {
         p.bump_label_name();
     } else {
-        p.emit_expect_error();
+        p.error().msg_expected().bump_wrap_err().emit();
     }
 }
 
@@ -206,10 +206,10 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
         } else if p.silent_at_set(&[TokenKind::Semicolon, TokenKind::LCurly, TokenKind::RCurly])
             || p.at_end()
         {
-            p.emit_expect_error();
+            p.error().msg_expected().emit();
             return Err(());
         } else {
-            p.error2();
+            p.error().msg_expected().bump_wrap_err().emit();
         }
     }
 
@@ -279,15 +279,19 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
         } else if p.silent_at(TokenKind::DtBytestring) {
             p.bump();
         } else {
-            p.error2();
+            p.error().msg_expected().bump_wrap_err().emit();
             break;
         }
 
         if p.at(TokenKind::Comma) {
             p.bump();
         } else if p.silent_at_set(PROPERTY_VALUE_RECOVERY_SET) {
+            // TODO: add semicolon to expected list, so it stays consistent. How to do this
+            // idiomatically? (don't hardcode that the parser wrapping this will expect a
+            // semicolon)
+
             // Missing comma but can be recovered
-            p.emit_expect_error();
+            p.error().msg_expected().emit();
         } else {
             break;
         }
@@ -333,7 +337,9 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     #[cfg(feature = "grammar-tracing")]
     debug!("dt_node_body start");
 
-    let lcurly_span = p.range().expect("should not be at end-of-file");
+    let lcurly_span = p
+        .range()
+        .expect("should not be at end-of-file with caller guarantee");
 
     // TODO: convert other grammars to assert eat
     assert!(p.eat(TokenKind::LCurly));
@@ -343,13 +349,11 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     }
 
     if p.at_end() {
-        p.fancy_error(
-            Cow::Borrowed("Expected `}`, but found end-of-file"),
-            vec![dt_diagnostic::SpanLabel {
-                span: lcurly_span,
-                msg: Cow::Borrowed("Unclosed delimiter"),
-            }],
-        );
+        // TODO: Is there a way to combine this with `,` and `;`
+        p.error()
+            .msg_custom(Cow::Borrowed("Expected `}`, but found end-of-file"))
+            .add_span_label(lcurly_span, Cow::Borrowed("Unclosed delimiter"))
+            .emit();
         m.complete(p, NodeKind::DtNode);
         return;
     }
@@ -365,7 +369,7 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     vis!(end);
 }
 
-// TODO: mod_contents: while !(p.at(EOF) || (p.at(T!['}']) && stop_on_r_curly)) {
+// TODO: from r-a: mod_contents: while !(p.at(EOF) || (p.at(T!['}']) && stop_on_r_curly)) {
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 #[expect(clippy::too_many_lines, reason = "no good way to make this shorter")]
 fn item(p: &mut Parser) {
@@ -380,8 +384,7 @@ fn item(p: &mut Parser) {
             dt_node_body(p, m);
             // node
         } else {
-            p.emit_expect_error();
-            m.complete(p, NodeKind::ParseError);
+            p.error().msg_expected().complete(m).emit();
         }
     } else if p.at_name() {
         let mut m = m;
@@ -396,6 +399,7 @@ fn item(p: &mut Parser) {
         if p.at(TokenKind::Colon) {
             // label
             // TODO: include this in the DtNode or DtProperty
+            // Actually I think this _is_ included because of the precede
             p.bump();
             m = m.complete(p, NodeKind::DtLabel).precede(p);
 
@@ -426,7 +430,7 @@ fn item(p: &mut Parser) {
             // unit address
             p.bump();
             if !p.eat_name() {
-                p.emit_expect_error();
+                p.error().msg_expected().emit();
             }
             m.complete(p, NodeKind::UnitAddress);
         }
@@ -435,14 +439,13 @@ fn item(p: &mut Parser) {
             dt_property(p, m);
         } else if p.silent_at(TokenKind::RCurly) {
             // TODO: what if inside a node?
+            // axka 2025-04-21: I think this could just be "ignored" and left to the caller of item
 
-            p.emit_expect_error();
-            p.bump();
-            m.complete(p, NodeKind::ParseError);
+            p.error().bump().complete(m).msg_expected().emit();
         } else if p.at(TokenKind::LCurly) {
             dt_node_body(p, m);
         } else {
-            p.emit_expect_error();
+            p.error().msg_expected().emit();
 
             if !p.silent_at_set(ITEM_RECOVERY_SET) && !p.at_end() {
                 p.bump();
@@ -467,26 +470,29 @@ fn item(p: &mut Parser) {
         } else if p.at(TokenKind::LCurly) {
             dt_node_body(p, m);
         } else {
-            p.emit_expect_error();
-            m.complete(p, NodeKind::ParseError);
+            p.error().msg_expected().complete(m).emit();
         }
     } else if p.silent_at(TokenKind::Equals) {
-        p.emit_expect_error();
-        p.add_hint(Cow::Borrowed("Recovered as unnamed property"));
+        p.error()
+            .msg_expected()
+            .add_hint(Cow::Borrowed("Recovered as unnamed property"))
+            .emit();
 
         let m_prop = p.start();
         dt_property(p, m_prop);
         m.complete(p, NodeKind::ParseError);
     } else if p.silent_at(TokenKind::LCurly) {
         // TODO: lint & analyze unnamed nodes, remove ParseError wrap
-        p.emit_expect_error();
-        p.add_hint(Cow::Borrowed("Recovered as unnamed node"));
+        p.error()
+            .msg_expected()
+            .add_hint(Cow::Borrowed("Recovered as unnamed node"))
+            .emit();
 
         let m_node = p.start();
         dt_node_body(p, m_node);
         m.complete(p, NodeKind::ParseError);
     } else if p.silent_at(TokenKind::Semicolon) {
-        p.simple_error(Cow::Borrowed("Unmatched `;`"));
+        p.error().msg_custom(Cow::Borrowed("Unmatched `;`")).emit();
 
         p.bump();
         m.complete(p, NodeKind::ParseError);
@@ -523,15 +529,14 @@ fn item(p: &mut Parser) {
         if p.at(TokenKind::Ampersand) {
             reference(p);
         } else if !p.eat_name() {
-            p.emit_expect_error();
+            p.error().msg_expected().emit();
         }
         m_params.complete(p, NodeKind::DirectiveArguments);
 
         p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::Directive);
     } else {
-        p.error2();
-        m.complete(p, NodeKind::ParseError);
+        p.error().bump().complete(m).msg_expected().emit();
     }
 
     #[cfg(feature = "grammar-tracing")]
@@ -544,7 +549,7 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
         if p.at_preprocessor_directive() {
             p.bump();
         } else if p.silent_at(TokenKind::RCurly) {
-            p.simple_error(Cow::Borrowed("Unmatched `}`"));
+            p.error().msg_custom(Cow::Borrowed("Unmatched `}`")).emit();
 
             let e = p.start();
             p.bump();
@@ -558,11 +563,12 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
 pub(super) fn entry_name(p: &mut Parser) {
     if p.at_name() {
         p.bump_name();
+        // TODO: move to Entrypoint struct?
         if !p.at_end() {
-            p.emit_expect_error();
+            p.error().msg_expected().emit();
         }
     } else {
-        p.error2();
+        p.error().msg_expected().bump_wrap_err().emit();
     }
 }
 
