@@ -328,33 +328,20 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Returns true if at a label name token.
     pub fn at_label_name(&mut self) -> bool {
-        if self.silent_at_set(&LABEL_NAME_SET) {
-            true
-        } else {
-            // TODO: does moving these expected additions to before the check break any tests?
-            self.expected.push(Expected::LabelName);
-            false
-        }
+        self.expected.push(Expected::LabelName);
+        self.silent_at_set(&LABEL_NAME_SET)
     }
 
     /// Returns true if at a name token.
     pub fn at_name(&mut self) -> bool {
-        if self.silent_at_set(&NAME_SET) {
-            true
-        } else {
-            self.expected.push(Expected::Kind(TokenKind::Name));
-            false
-        }
+        self.expected.push(Expected::Kind(TokenKind::Name));
+        self.silent_at_set(&NAME_SET)
     }
 
     /// Returns true if at a preprocessor directive token.
     pub fn at_preprocessor_directive(&mut self) -> bool {
-        if self.silent_at_set(&PREPROCESSOR_DIRECTIVE_SET) {
-            true
-        } else {
-            self.expected.push(Expected::PreprocessorDirective);
-            false
-        }
+        self.expected.push(Expected::PreprocessorDirective);
+        self.silent_at_set(&PREPROCESSOR_DIRECTIVE_SET)
     }
 
     /// Returns true if at a macro invocation with arguments.
