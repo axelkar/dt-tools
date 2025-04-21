@@ -6,11 +6,11 @@ use tracing::debug;
 macro_rules! vis {
     (begin) => {
         #[cfg(feature = "visualize")]
-        crate::cst2::parser::visualizer::Event::GramBegin(vis!(@function_name)).visualize();
+        crate::parser::visualizer::Event::GramBegin(vis!(@function_name)).visualize();
     };
     (end) => {
         #[cfg(feature = "visualize")]
-        crate::cst2::parser::visualizer::Event::GramEnd(vis!(@function_name)).visualize();
+        crate::parser::visualizer::Event::GramEnd(vis!(@function_name)).visualize();
     };
     (@function_name) => {{
         // Okay, this is ugly, I get it. However, this is the best we can get on a stable rust.
@@ -24,12 +24,10 @@ macro_rules! vis {
     }};
 }
 
-use crate::cst2::parser::Expected;
-
-use super::{
+use crate::{
+    cst::NodeKind,
     lexer::TokenKind,
-    parser::{CompletedMarker, Marker, Parser},
-    NodeKind,
+    parser::{CompletedMarker, Expected, Marker, Parser},
 };
 
 /// Parses a macro invocation.
@@ -104,7 +102,7 @@ fn dt_expr(p: &mut Parser) {
         if p.silent_at_set(OPERATOR_SET) {
             // Recover if an argument is missing and only got a delimiter,
             // e.g. `a + + b`.
-            // TODO: add "Expecter number or preprocessor macro"
+            // TODO: add "Expected number or preprocessor macro"
             p.error().msg_expected().bump_wrap_err().emit();
             continue;
         }
@@ -143,7 +141,6 @@ pub(super) fn reference_noamp(p: &mut Parser) {
         p.bump();
         while !p.at(TokenKind::RCurly) && !p.at_end() {
             // TODO: better recovery
-            // TODO: don't allow spaces in path references
             p.expect(TokenKind::Slash);
             if !p.eat_name() {
                 p.error().msg_expected().emit();
@@ -266,7 +263,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
         TokenKind::Ampersand,
     ];
 
-    while !p.at_set(ending_kinds) && !p.at_end() {
+    while !p.at_end() {
         p.add_expected(Expected::Value);
         if p.silent_at(TokenKind::String) {
             p.bump();
@@ -285,11 +282,11 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
 
         if p.at(TokenKind::Comma) {
             p.bump();
+        } else if p.at_set(ending_kinds) {
+            // This is here and not in the while loop's head to add them to the `expected` list,
+            // for the proper error message.
+            break;
         } else if p.silent_at_set(PROPERTY_VALUE_RECOVERY_SET) {
-            // TODO: add semicolon to expected list, so it stays consistent. How to do this
-            // idiomatically? (don't hardcode that the parser wrapping this will expect a
-            // semicolon)
-
             // Missing comma but can be recovered
             p.error().msg_expected().emit();
         } else {
@@ -568,6 +565,7 @@ pub(super) fn entry_name(p: &mut Parser) {
             p.error().msg_expected().emit();
         }
     } else {
+        // This just quits parsing. Is this preferred?
         p.error().msg_expected().bump_wrap_err().emit();
     }
 }
@@ -576,10 +574,10 @@ pub(super) fn entry_name(p: &mut Parser) {
 pub(super) mod tests {
     use std::sync::Arc;
 
-    use crate::cst2::{
+    use crate::{
+        cst::{GreenItem, GreenNode, GreenToken, TokenText, TreeItem},
         lexer::TokenKind,
         parser::{parse, Entrypoint, ParseError},
-        GreenItem, GreenNode, GreenToken, TokenText,
     };
 
     use super::*;
@@ -588,7 +586,7 @@ pub(super) mod tests {
     pub fn node(kind: NodeKind, children: Vec<GreenItem>) -> GreenItem {
         GreenItem::Node(Arc::new(GreenNode {
             kind,
-            width: children.iter().map(super::super::TreeItem::length).sum(),
+            width: children.iter().map(TreeItem::length).sum(),
             children,
         }))
     }
@@ -988,7 +986,7 @@ pub(super) mod tests {
 
     #[test]
     fn parse_from_test_data_1() {
-        let src = include_str!("../../test_data/1.dts");
+        let src = include_str!("../test_data/1.dts");
 
         let parse_output = parse(src);
         assert_eq!(parse_output.lex_errors, &[]);
@@ -996,13 +994,13 @@ pub(super) mod tests {
 
         assert_eq!(
             parse_output.green_node.print_tree(),
-            include_str!("../../test_data/1.dts.expect")
+            include_str!("../test_data/1.dts.expect")
         );
     }
 
     #[test]
     fn parse_from_test_data_2() {
-        let src = include_str!("../../test_data/2-macro-def.dts");
+        let src = include_str!("../test_data/2-macro-def.dts");
 
         let parse_output = parse(src);
         assert_eq!(parse_output.lex_errors, &[]);
@@ -1010,7 +1008,7 @@ pub(super) mod tests {
 
         assert_eq!(
             parse_output.green_node.print_tree(),
-            include_str!("../../test_data/2-macro-def.dts.expect")
+            include_str!("../test_data/2-macro-def.dts.expect")
         );
     }
 

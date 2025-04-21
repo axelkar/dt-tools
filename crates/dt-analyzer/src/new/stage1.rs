@@ -9,7 +9,7 @@ use std::{
 use dt_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
 use dt_parser::{
     ast::{self, AstNode, AstNodeOrToken, AstToken, HasLabel, HasName, SourceFile},
-    cst2::lexer::TokenKind,
+    lexer::TokenKind,
     TextRange,
 };
 use enum_as_inner::EnumAsInner;

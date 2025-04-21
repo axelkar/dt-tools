@@ -2,7 +2,7 @@ use std::{num::ParseIntError, sync::Arc};
 
 use dt_parser::{
     ast::{self, AstToken, DtNode, HasName},
-    cst2::RedToken,
+    cst::RedToken,
 };
 use either::Either;
 use rustc_hash::FxHashMap;

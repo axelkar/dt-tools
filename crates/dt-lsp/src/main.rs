@@ -3,10 +3,8 @@ use dt_analyzer::new::stage1::AnalyzedToplevel;
 use dt_diagnostic::DiagnosticCollector;
 use dt_parser::{
     ast::{self, AstNode},
-    cst2::{
-        parser::{parse, Parse},
-        RedNode,
-    },
+    cst::RedNode,
+    parser::{parse, Parse},
     SourceId, TextRange,
 };
 use ropey::Rope;

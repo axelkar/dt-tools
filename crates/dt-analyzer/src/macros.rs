@@ -4,7 +4,7 @@
 
 use std::{iter::Peekable, str::Chars};
 
-use dt_parser::{ast, cst2::parser::Entrypoint, TextRange};
+use dt_parser::{ast, parser::Entrypoint, TextRange};
 
 use crate::new::stage1::subslice_offset;
 

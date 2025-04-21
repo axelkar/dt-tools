@@ -1,7 +1,8 @@
 use crate::{offset_to_position, position_to_offset};
 use dt_parser::{
     ast::{self, AstNode},
-    cst2::{lexer::TokenKind, NodeKind},
+    cst::NodeKind,
+    lexer::TokenKind,
     match_ast, SourceId,
 };
 use itertools::Itertools;

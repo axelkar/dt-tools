@@ -1,6 +1,7 @@
 use dt_parser::{
     ast::{self, AstNode, AstNodeOrToken, HasLabel as _},
-    cst2::{lexer::TokenKind, NodeKind},
+    cst::NodeKind,
+    lexer::TokenKind,
 };
 
 use crate::{EarlyLintPass, LintId, LintSeverity};

@@ -5,7 +5,13 @@
 
 use std::sync::Arc;
 
-use crate::{ast, TextRange};
+use crate::{
+    ast,
+    cst::{GreenNode, NodeKind},
+    grammar,
+    lexer::TokenKind,
+    TextRange,
+};
 
 use self::event::Event;
 use self::source::Source;
@@ -13,8 +19,6 @@ pub(crate) use marker::{CompletedMarker, Marker};
 use smallvec::SmallVec;
 #[cfg(feature = "grammar-tracing")]
 use tracing::debug;
-
-use super::{grammar, lexer::TokenKind, GreenNode, NodeKind};
 
 mod errors;
 mod event;
@@ -53,9 +57,12 @@ const PREPROCESSOR_DIRECTIVE_SET: [TokenKind; 9] = [
 // kinda like duct-taping different parts of the parse tree together
 
 // TODO: take inspiration from rust-analyzer syntax::Parse
-// TODO: rust-analyzer syntax::validation
 // TODO: Parse::ok
 // TODO: remove 'input bound so I can just clone this wherever
+
+/// The result from the parser.
+///
+/// To traverse the syntax tree up and down, wrap `green_node` with [`RedNode`](crate::cst::RedNode).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parse<'input> {
     pub green_node: GreenNode,
@@ -69,7 +76,7 @@ impl Parse<'_> {
     #[must_use]
     pub fn source_file(&self) -> ast::SourceFile {
         use ast::AstNode as _;
-        ast::SourceFile::cast(super::RedNode::new(Arc::new(self.green_node.clone()))).unwrap()
+        ast::SourceFile::cast(crate::cst::RedNode::new(Arc::new(self.green_node.clone()))).unwrap()
     }
 }
 
@@ -94,7 +101,6 @@ impl Entrypoint {
     /// Parses the input according to the entrypoint.
     #[must_use]
     pub fn parse(self, input: &str) -> Parse {
-        // TODO: make NodeKind::Root
         // TODO: typesafe Entrypoint -> correct AST struct
         use super::lexer::Lexer;
         let tokens: Vec<_> = Lexer::new(input).collect();
@@ -150,6 +156,7 @@ impl Entrypoint {
     }
 }
 
+/// Parses the `input` as an [`Entrypoint::SourceFile`].
 #[must_use]
 pub fn parse(input: &str) -> Parse {
     Entrypoint::SourceFile.parse(input)
@@ -160,7 +167,7 @@ pub fn parse(input: &str) -> Parse {
 pub(crate) struct Parser<'t, 'input> {
     /// The token source.
     source: Source<'t, 'input>,
-    /// Events to feed into [`Sink`].
+    /// Events to feed into [`Sink`](sink::Sink).
     events: Vec<Event>,
     /// The values that are expected at the current position.
     expected: SmallVec<[Expected; 2]>,
@@ -435,7 +442,7 @@ pub mod visualizer {
     use super::*;
     use std::cell::RefCell;
 
-    use crate::cst2::lexer::{LexError, TokenKind};
+    use crate::lexer::{LexError, TokenKind};
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct OwnedToken {
@@ -483,8 +490,10 @@ mod tests {
     use std::borrow::Cow;
 
     use super::sink::Sink;
-    use crate::cst2::lexer::{LexError, Lexer};
-    use crate::cst2::{GreenNode, NodeKind};
+    use crate::{
+        cst::{GreenNode, NodeKind},
+        lexer::{LexError, Lexer},
+    };
 
     use super::*;
     use grammar::tests::{dynamic_token, node, static_token};

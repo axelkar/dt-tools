@@ -1,24 +1,38 @@
+//! The module implementing the Concrete Syntax Tree for dt-tools.
+//!
+//! <span style="color:lime;">Green items</span> are returned from the parser. They cannot traverse
+//! their parents.
+//!
+//! <span style="color:red;">Red items</span> are built on the fly on top of green nodes and can
+//! traverse their parents. You basically get a tree you can go up and down in without cyclic
+//! references!
+//!
+//! _"Items"_ are used to mean both nodes and tokens.
+// TODO: insert picture of a visual explanation to CSTs
+
 use std::{fmt, sync::Arc};
 
-use self::lexer::TokenKind;
+use crate::lexer::TokenKind;
 use crate::TextRange;
 
-pub mod grammar;
-pub mod lexer;
-pub mod parser;
-
+/// The kind of a CST node
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
     // Entrypoints
+    /// See [`Entrypoint`](super::parser::Entrypoint)
     SourceFile,
+    /// See [`Entrypoint`](super::parser::Entrypoint)
     EntryName,
+    /// See [`Entrypoint`](super::parser::Entrypoint)
     EntryPropValues,
+    /// See [`Entrypoint`](super::parser::Entrypoint)
     EntryCells,
 
-    /// A parse error
+    /// A node wrapping a parse error
     ParseError,
+    /// A node wrapping a DTS directive
     Directive,
-    /// A directive's arguments, if any.
+    /// A node wrapping a DTS directive's arguments
     DirectiveArguments,
     PreprocessorDirective,
     DtNode,
@@ -35,12 +49,14 @@ pub enum NodeKind {
     MacroArgument,
 }
 
+/// A node as returned by the parser. It cannot traverse its parents.
+///
+/// See the [crate documentation](crate) for more info.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-/// A "green node".
 pub struct GreenNode {
     /// The kind of node
     pub kind: NodeKind,
-    /// Cached length of all of the textual contents
+    /// Cached bytewise length of all of the textual contents
     pub width: usize,
     /// The child nodes and tokens
     pub children: Vec<GreenItem>,
@@ -170,6 +186,9 @@ impl std::ops::Deref for TokenText {
     }
 }
 
+/// A token as returned by the parser. It cannot traverse its parents.
+///
+/// See the [crate documentation](crate) for more info.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GreenToken {
     pub kind: TokenKind,
@@ -188,6 +207,9 @@ impl GreenToken {
     }
 }
 
+/// A red token on top of a green token. It can traverse its parents.
+///
+/// See the [crate documentation](crate) for more info.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct RedToken {
     pub parent: Arc<RedNode>,
@@ -244,11 +266,9 @@ impl RedToken {
     }
 }
 
-/// A "red node".
+/// A red node on top of a green node. It can traverse its parents.
 ///
-/// This references the green nodes and its own parent nodes.
-///
-/// You basically get a tree you can go up and down in without cyclic references!
+/// See the [crate documentation](crate) for more info.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct RedNode {
     /// The parent node if it exists.
@@ -304,9 +324,9 @@ impl RedNode {
             })
     }
 
-    /// Returns an iterator over all children.
+    /// Returns an iterator over all immediate children.
     ///
-    /// The iterator returned owns `Arc<RedNode>`, and thus the iterator does not have a specific lifetime.
+    /// The iterator returned owns `self`, and thus the iterator does not have a specific lifetime.
     pub fn owned_children(self: Arc<RedNode>) -> impl Iterator<Item = RedItem> {
         let mut current_text_offset = self.text_offset;
 
@@ -335,7 +355,7 @@ impl RedNode {
         })
     }
 
-    /// Returns an iterator over all children.
+    /// Returns an iterator over all immediate children.
     pub fn children<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = RedItem> + 'a {
         let mut current_text_offset = self.text_offset;
 
@@ -366,12 +386,12 @@ impl RedNode {
             })
     }
 
-    /// Returns an iterator over the child nodes.
+    /// Returns an iterator over immediate child nodes.
     pub fn child_nodes<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = Arc<RedNode>> + 'a {
         self.children().filter_map(RedItem::into_node)
     }
 
-    /// Returns an iterator over the child tokens.
+    /// Returns an iterator over immediate child tokens.
     pub fn child_tokens<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = Arc<RedToken>> + 'a {
         self.children().filter_map(RedItem::into_token)
     }
@@ -392,67 +412,55 @@ impl fmt::Debug for RedNode {
     }
 }
 
+/// Something that has distinct types for representing nodes and tokens. See [`GreenItem`] and
+/// [`RedItem`] for more.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TreeItem<Node, Token> {
     Node(Node),
     Token(Token),
 }
 impl<Node, Token> TreeItem<Node, Token> {
+    /// Returns the node wrapped in a `Some` if this is a node.
     pub fn as_node(&self) -> Option<&Node> {
         match self {
             Self::Node(node) => Some(node),
             _ => None,
         }
     }
+    /// Returns the token wrapped in a `Some` if this is a token.
     pub fn as_token(&self) -> Option<&Token> {
         match self {
             Self::Token(token) => Some(token),
             _ => None,
         }
     }
+    /// Returns the node wrapped in a `Some` if this is a node.
     pub fn into_node(self) -> Option<Node> {
         match self {
             Self::Node(node) => Some(node),
             _ => None,
         }
     }
+    /// Returns the token wrapped in a `Some` if this is a token.
     pub fn into_token(self) -> Option<Token> {
         match self {
             Self::Token(token) => Some(token),
             _ => None,
         }
     }
-    pub fn map_node<NewNode>(self, f: impl FnOnce(Node) -> NewNode) -> TreeItem<NewNode, Token> {
-        match self {
-            Self::Node(node) => TreeItem::Node(f(node)),
-            Self::Token(token) => TreeItem::Token(token),
-        }
-    }
-    pub fn map_token<NewToken>(
-        self,
-        f: impl FnOnce(Token) -> NewToken,
-    ) -> TreeItem<Node, NewToken> {
-        match self {
-            Self::Node(node) => TreeItem::Node(node),
-            Self::Token(token) => TreeItem::Token(f(token)),
-        }
-    }
-    pub fn filter_node(self, f: impl FnOnce(&Node) -> bool) -> Option<Self> {
-        match self {
-            Self::Node(node) if !f(&node) => None,
-            other => Some(other),
-        }
-    }
-    pub fn filter_token(self, f: impl FnOnce(&Token) -> bool) -> Option<Self> {
-        match self {
-            Self::Token(token) if !f(&token) => None,
-            other => Some(other),
-        }
-    }
 }
 
+/// An item as returned by the parser. It cannot traverse its parents.
+///
+/// See the [crate documentation](crate) for more info.
 pub type GreenItem = TreeItem<Arc<GreenNode>, Arc<GreenToken>>;
+
+/// A red item on top of a green item. It can traverse its parents.
+///
+/// See the [crate documentation](crate) for more info.
 pub type RedItem = TreeItem<Arc<RedNode>, Arc<RedToken>>;
+
+/// Similar to [`RedItem`], but with only references to the red items.
 pub type RedItemRef<'a> = TreeItem<&'a Arc<RedNode>, &'a Arc<RedToken>>;
 
 impl GreenItem {

@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Should have a path as an argument");
     let text = std::fs::read_to_string(path)?;
 
-    let parse = dt_parser::cst2::parser::parse(&text);
+    let parse = dt_parser::parser::parse(&text);
 
     eprintln!("{}", "Parsed!".green());
     if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(feature = "visualize")]
 fn visualize() {
-    use dt_parser::cst2::parser::visualizer;
+    use dt_parser::parser::visualizer;
     use owo_colors::OwoColorize;
     use serde_json::json;
 

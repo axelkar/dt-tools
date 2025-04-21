@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use dt_parser::cst2::{GreenItem, GreenNode, GreenToken, NodeKind};
+use dt_parser::cst::{GreenItem, GreenNode, GreenToken, NodeKind};
 
 // TODO: better perf by just printing the new dts directly without mutability?
 // TODO: multithreading?
@@ -41,7 +41,7 @@ mod tests {
     #[expect(dead_code, reason = "not yet implemented")]
     #[track_caller]
     fn check(src: &'static str, expected: &'static str) {
-        let parse = dt_parser::cst2::parser::parse(src);
+        let parse = dt_parser::parser::parse(src);
         if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
             eprintln!("Invalid DTS!");
             std::process::exit(1);

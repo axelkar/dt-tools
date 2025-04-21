@@ -1,12 +1,13 @@
 use dt_diagnostic::SpanLabel;
 use itertools::Itertools;
-use tracing::debug;
 use std::borrow::Cow;
+use tracing::debug;
 
-use super::{super::TokenKind, Marker, Parser};
+use super::{Marker, Parser};
 
 use crate::{
-    cst2::{lexer::LexError, NodeKind},
+    cst::NodeKind,
+    lexer::{LexError, TokenKind},
     TextRange,
 };
 
@@ -70,17 +71,21 @@ fn fmt_expected_message(p: &mut Parser) -> String {
     message
 }
 
-/// CST parser error
+/// An error from the parser.
 // TODO: From rust-analyzer: If possible, errors are not reported during parsing and are postponed
 // for a separate validation step. For example, parser accepts visibility modifiers on trait
 // methods, but then a separate tree traversal flags all such visibilities as erroneous.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
+    /// The error message
     pub message: Cow<'static, str>,
+    /// The primary range of text this error points to
     pub primary_span: TextRange,
+    /// Additional hints in the error
     pub span_labels: Vec<SpanLabel>,
 }
 
+/// [`LexError`] wrapped with a text range and the source text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrappedLexError<'input> {
     pub inner: LexError,
@@ -203,7 +208,7 @@ impl ErrorBuilder<'_, '_, '_, MessageFilled> {
         for hint in self.hints {
             self.span_labels.push(SpanLabel {
                 span: primary_span,
-                msg: hint
+                msg: hint,
             });
         }
 
@@ -212,7 +217,7 @@ impl ErrorBuilder<'_, '_, '_, MessageFilled> {
         self.p.emit_parse_error(ParseError {
             message: self.msg.0,
             primary_span,
-            span_labels: self.span_labels
+            span_labels: self.span_labels,
         });
 
         match self.bump {

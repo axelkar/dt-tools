@@ -1,18 +1,33 @@
-//! Should we parse some stuff like strings here and store them in [`Token`]?
-//!
-//! How about ditching the source after lexing and storing all dynamic details in tuple enums?
+//! The module containing the lexer.
+
+// TODO: Should we parse some stuff like strings here and store them in [`Token`]?
+// TODO: How about ditching the source after lexing and storing all dynamic details in tuple enums?
 
 use logos::Logos;
 
 use crate::TextRange;
 
+/// Runs the lexer and returns a list of tokens.
+///
+/// # Example
+///
+/// ```
+/// use dt_parser::lexer::{lex, TokenKind, LexError};
+/// let tokens = lex("example 1\"");
+///
+/// assert_eq!(tokens[0].kind, Ok(TokenKind::Ident));
+/// assert_eq!(tokens[1].kind, Ok(TokenKind::Whitespace));
+/// assert_eq!(tokens[2].kind, Ok(TokenKind::Number));
+/// assert_eq!(tokens[3].kind, Err(LexError::UnexpectedEofString));
+/// assert!(tokens.get(4).is_none());
+/// ```
 #[must_use]
 pub fn lex(input: &str) -> Vec<Token> {
     Lexer::new(input).collect()
 }
 
+/// [`logos::Lexer`] wrapper for also returning the slice and text range in the iterator
 #[derive(Debug, Clone)]
-/// [`logos::Lexer`] wrapper for also returning the slice in the iterator
 pub(crate) struct Lexer<'input> {
     inner: logos::Lexer<'input, TokenKind>,
 }
@@ -41,6 +56,7 @@ impl<'input> Iterator for Lexer<'input> {
     }
 }
 
+/// A structure representing a token from the lexer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token<'input> {
     pub kind: Result<TokenKind, LexError>,
@@ -48,43 +64,45 @@ pub struct Token<'input> {
     pub text_range: TextRange,
 }
 
-#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// An error returned from the lexer.
+#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Default, displaydoc::Display)]
 pub enum LexError {
-    #[error("Unexpected EOF (hint: unterminated incbin directive)")]
+    /// Unexpected EOF (hint: unterminated incbin directive)
     UnexpectedEofIncbin,
 
-    #[error("Missing ( in incbin directive")]
+    /// Missing ( in incbin directive
     IncbinMissingLParen,
 
-    #[error("Missing ) in incbin directive")]
+    /// Missing ) in incbin directive
     IncbinMissingRParen,
 
-    #[error("Missing number in incbin directive")]
+    /// Missing number in incbin directive
     IncbinMissingNumber,
 
-    #[error("Missing comma in incbin directive")]
+    /// Missing comma in incbin directive
     IncbinMissingComma,
 
-    #[error("Missing string in incbin directive")]
+    /// Missing string in incbin directive
     IncbinMissingString,
 
-    #[error("Unexpected EOF (hint: unterminated string literal)")]
+    /// Unexpected EOF (hint: unterminated string literal)
     UnexpectedEofString,
 
-    #[error("Unexpected EOF (hint: unterminated bytestring literal)")]
+    /// Unexpected EOF (hint: unterminated bytestring literal)
     UnexpectedEofBytestring,
 
-    #[error("Unexpected EOF (hint: unterminated char literal)")]
+    /// Unexpected EOF (hint: unterminated char literal)
     UnexpectedEofChar,
 
-    #[error("Unexpected EOF (hint: unterminated block comment)")]
+    /// Unexpected EOF (hint: unterminated block comment)
     UnexpectedEofBlockComment,
 
+    /// Unexpected input or EOF
     #[default]
-    #[error("Unexpected input or EOF")]
     Default,
 }
 
+/// The kind of a token
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[logos(error = LexError)]
 // TODO: #[logos(source = [u8])] ?
@@ -144,10 +162,10 @@ pub enum TokenKind {
     #[token("/plugin/")]
     PluginDirective,
 
-    /// A lex error!!
+    /// A lex error!
     Unrecognized,
 
-    /// Combined token only generated in the parser.
+    /// **Combined token**, which is only generated in the parser.
     Name,
 
     #[regex(r#"[^ \t\r\n"'/*+%|{}<>\[()?;:&=@,0-9-][^ \t\r\n"'/*+%|{}<>\[()?;:&=@,-]*"#)]
@@ -172,7 +190,7 @@ pub enum TokenKind {
     #[token("\"", callback = lex_string)]
     String,
 
-    /// A single character (e.g '\x41', 'a', '\0')
+    /// A single character literal like `'\x41'`, `'a'` or `'\0'`
     #[token("'", callback = lex_char)]
     Char,
 
@@ -221,6 +239,12 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    /// Returns the static text of the token kind, if applicable.
+    /// ```
+    /// use dt_parser::lexer::TokenKind;
+    /// assert_eq!(TokenKind::Comma.static_text(), Some(","));
+    /// assert_eq!(TokenKind::Ident.static_text(), None);
+    /// ```
     #[must_use]
     pub fn static_text(self) -> Option<&'static str> {
         Some(match self {
@@ -459,7 +483,7 @@ fn lex_preprocessor_directive(lex: &mut logos::Lexer<TokenKind>) -> Result<(), L
 // in quotes = a\\"b -> a\\"b
 // in quotes = a\"b -> a\"b
 // in quotes = "a\\\\\nb" -> a\b
-// NOTE: this lexes "a\nb" succesfully, but it should be a deny error
+// FIXME: this lexes "a\nb" succesfully, but it should be a deny error
 fn lex_preprocessor_string(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
     let remainder: &str = lex.remainder();
     let mut escaped = false;
@@ -669,16 +693,16 @@ mod tests {
 
     #[test]
     fn lex_from_test_data_1() {
-        let src = include_str!("../../test_data/1.dts");
-        let expected = include_str!("../../test_data/1.lex.expected");
+        let src = include_str!("../test_data/1.dts");
+        let expected = include_str!("../test_data/1.lex.expected");
 
         test_expected(src, expected);
     }
 
     #[test]
     fn lex_from_test_data_2_macros() {
-        let src = include_str!("../../test_data/2-macro-def.dts");
-        let expected = include_str!("../../test_data/2-macro-def.lex.expected");
+        let src = include_str!("../test_data/2-macro-def.dts");
+        let expected = include_str!("../test_data/2-macro-def.lex.expected");
 
         test_expected(src, expected);
     }

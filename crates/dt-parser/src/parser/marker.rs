@@ -1,8 +1,7 @@
 use drop_bomb::DropBomb;
 
-use crate::cst2::{parser::event::Event, NodeKind};
-
-use super::Parser;
+use super::{event::Event, Parser};
+use crate::cst::NodeKind;
 
 pub struct Marker {
     pos: usize,

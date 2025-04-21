@@ -47,16 +47,17 @@ use std::sync::Arc;
 use either::Either;
 use enum_as_inner::EnumAsInner;
 
-use crate::cst2::{
-    lexer::TokenKind, parser::Parse, GreenToken, NodeKind, RedItem, RedItemRef, RedNode, RedToken,
-    TreeItem,
+use crate::{
+    cst::{GreenToken, NodeKind, RedItem, RedItemRef, RedNode, RedToken, TreeItem},
+    lexer::TokenKind,
+    parser::Parse,
 };
 
 /// Trait used for downcasting from [`RedNode`]s to AST nodes.
 pub trait AstNode: Sized {
     /// Try to cast a [`RedNode`] to an AST node.
     ///
-    /// The implementor must check [`GreenNode::kind`](crate::cst2::GreenNode::kind)!
+    /// The implementor must check [`GreenNode::kind`](crate::cst::GreenNode::kind)!
     ///
     /// All functions which reference children (e.g. [`SourceFile::nodes`]) should return [`Option`]s
     /// or similar!
@@ -70,7 +71,7 @@ pub trait AstNode: Sized {
 pub trait AstToken: Sized {
     /// Try to cast a [`RedToken`] to an AST token.
     ///
-    /// The implementor must check [`GreenToken::kind`](crate::cst2::GreenToken::kind)!
+    /// The implementor must check [`GreenToken::kind`](crate::cst::GreenToken::kind)!
     fn cast(syntax: Arc<RedToken>) -> Option<Self>;
 
     /// Returns a reference to the syntax token.
@@ -99,7 +100,7 @@ pub trait AstNodeOrToken: Sized {
 
     /// Try to cast a [`RedNode`] to an AST node.
     ///
-    /// The implementor must check [`GreenNode::kind`](crate::cst2::GreenNode::kind)!
+    /// The implementor must check [`GreenNode::kind`](crate::cst::GreenNode::kind)!
     ///
     /// All functions which reference children (e.g. [`SourceFile::nodes`]) should return [`Option`]s
     /// or similar!
@@ -107,7 +108,7 @@ pub trait AstNodeOrToken: Sized {
 
     /// Try to cast a [`RedToken`] to an AST token.
     ///
-    /// The implementor must check [`GreenToken::kind`](crate::cst2::GreenToken::kind)!
+    /// The implementor must check [`GreenToken::kind`](crate::cst::GreenToken::kind)!
     fn cast_token(syntax: Arc<RedToken>) -> Option<Self>;
 
     /// Returns a reference to the syntax node or token.
@@ -225,7 +226,7 @@ impl SourceFile {
     // TODO: return a RedNode or SourceFile
     #[must_use]
     pub fn parse(text: &str) -> Parse {
-        let parse = crate::cst2::parser::parse(text);
+        let parse = crate::parser::parse(text);
         // TODO:
         //errors.extend(validation::validate(&root));
 
@@ -277,7 +278,7 @@ impl AstNode for DtProperty {
     }
 }
 impl DtProperty {
-    /// Returns an iterator over direct [`DtPropValue`] children.
+    /// Returns an iterator over direct [`PropValue`] children.
     ///
     /// # Example
     ///

@@ -2,7 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use dt_parser::{
     ast::{self, AstNode, AstNodeOrToken, AstToken, DtPhandle, HasMacroInvocation, HasName},
-    cst2::parser::Entrypoint,
+    cst::RedNode,
+    parser::Entrypoint,
     TextRange,
 };
 
@@ -166,7 +167,7 @@ impl Cell {
 
                 let parse = Entrypoint::Cells.parse(&s);
 
-                let cells = dt_parser::cst2::RedNode::new(Arc::new(parse.green_node.clone()));
+                let cells = RedNode::new(Arc::new(parse.green_node.clone()));
 
                 let cell = ast::Cell::cast(cells.children().next().unwrap()).unwrap();
                 // TODO: handle errors & map textranges somehow?!
@@ -228,10 +229,7 @@ fn reference_eval(
     let s = evaluate_macro(macro_ast.as_ref(), macro_def).expect("FIXME: no error");
 
     let parse = Entrypoint::ReferenceNoamp.parse(&s);
-    let phandle = ast::DtPhandle::cast(dt_parser::cst2::RedNode::new(Arc::new(
-        parse.green_node.clone(),
-    )))
-    .unwrap();
+    let phandle = ast::DtPhandle::cast(RedNode::new(Arc::new(parse.green_node.clone()))).unwrap();
     // TODO: handle errors & map textranges somehow?!
 
     reference_eval(&phandle, macro_resolver)

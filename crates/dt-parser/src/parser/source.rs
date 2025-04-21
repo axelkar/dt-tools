@@ -1,5 +1,5 @@
 use crate::{
-    cst2::lexer::{Token, TokenKind},
+    lexer::{Token, TokenKind},
     TextRange,
 };
 
@@ -229,7 +229,7 @@ impl<'t, 'input> Source<'t, 'input> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cst2::lexer::Lexer;
+    use crate::lexer::Lexer;
 
     use super::*;
 

@@ -1,10 +1,12 @@
+//! The [`Sink`] turns the parser's output to a concrete syntax tree.
+
 use std::{mem, sync::Arc};
 
 // TODO: && and || as joined https://nnethercote.github.io/2022/10/05/quirks-of-rusts-token-representation.html
 
-use crate::cst2::{
+use crate::{
+    cst::{GreenItem, GreenNode, GreenToken, NodeKind, TokenText},
     lexer::{Token, TokenKind},
-    GreenItem, GreenNode, GreenToken, NodeKind, TokenText,
 };
 
 use super::{event::Event, Parse, ParseError, WrappedLexError};
@@ -50,6 +52,7 @@ impl<'t, 'input> Sink<'t, 'input> {
         }
     }
 
+    /// Turns the parser's output to a concrete syntax tree.
     pub(super) fn finish(mut self) -> Parse<'input> {
         for idx in 0..self.events.len() {
             #[cfg(feature = "grammar-tracing")]

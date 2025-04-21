@@ -7,13 +7,13 @@ use std::{
     time::Duration,
 };
 
-use dt_parser::cst2::{GreenItem, GreenNode, NodeKind};
+use dt_parser::cst::{GreenItem, GreenNode, NodeKind};
 use notify::{Config, PollWatcher, RecursiveMode, Watcher as _};
 use owo_colors::OwoColorize;
 
 fn run(path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(path)?;
-    let parse = dt_parser::cst2::parser::parse(&text);
+    let parse = dt_parser::parser::parse(&text);
     //if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
     //    eprintln!("Invalid DTS!");
     //    std::process::exit(1);
