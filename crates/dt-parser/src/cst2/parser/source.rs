@@ -1,5 +1,3 @@
-use std::cell::Cell;
-
 use crate::{
     cst2::lexer::{Token, TokenKind},
     TextRange,
@@ -13,7 +11,7 @@ pub(super) struct Source<'t, 'input> {
     prev_next_cursor: usize,
     /// From which index the next immediate token will be read from.
     cursor: usize,
-    steps: Cell<u32>,
+    steps: u32,
     // for debugger:
     #[cfg(debug_assertions)]
     byte_offset: usize,
@@ -27,7 +25,7 @@ impl<'t, 'input> Source<'t, 'input> {
             tokens,
             prev_next_cursor: 0,
             cursor: 0,
-            steps: Cell::new(0),
+            steps: 0,
             #[cfg(debug_assertions)]
             byte_offset: 0,
             #[cfg(debug_assertions)]
@@ -57,7 +55,7 @@ impl<'t, 'input> Source<'t, 'input> {
 
         let token = self.tokens.get(self.cursor)?;
         self.cursor += 1;
-        self.steps.set(0);
+        self.steps = 0;
         self.prev_next_cursor = self.cursor;
 
         #[cfg(debug_assertions)]
@@ -107,7 +105,7 @@ impl<'t, 'input> Source<'t, 'input> {
     pub(super) fn skip_trivia(&mut self) {
         while self.peek_kind_immediate().is_some_and(TokenKind::is_trivia) {
             self.cursor += 1;
-            self.steps.set(0);
+            self.steps = 0;
         }
 
         #[cfg(feature = "visualize")]
@@ -125,11 +123,9 @@ impl<'t, 'input> Source<'t, 'input> {
     /// Doesn't skip trivia.
     ///
     /// Returns None on EOF.
-    pub(super) fn peek_kind_immediate(&self) -> Option<TokenKind> {
-        let steps = self.steps.get();
-        assert!(steps < PARSER_STEP_LIMIT, "the parser seems stuck");
-        // TODO: remove Cell and make this function take &mut self
-        self.steps.set(steps + 1);
+    pub(super) fn peek_kind_immediate(&mut self) -> Option<TokenKind> {
+        assert!(self.steps < PARSER_STEP_LIMIT, "the parser seems stuck");
+        self.steps += 1;
 
         #[cfg(feature = "visualize")]
         super::visualizer::Event::PeekKindImmediate.visualize();
@@ -174,7 +170,7 @@ mod tests {
     use super::*;
 
     #[track_caller]
-    fn expect_text(source: &mut Source, expected: &str) {
+    fn expect_next_token_text(source: &mut Source, expected: &str) {
         let tok = source.next_token().expect("should have a token");
         assert_eq!(tok.text, expected);
     }
@@ -190,19 +186,19 @@ mod tests {
         //assert_eq!(source.prev_next_text(), None);
         assert_eq!(source.prev_next_text(), Some("a"));
 
-        expect_text(&mut source, "a");
+        expect_next_token_text(&mut source, "a");
 
         assert_eq!(source.cursor, 1);
         assert_eq!(source.prev_next_cursor, 1);
         assert_eq!(source.prev_next_text(), Some(" "));
 
-        expect_text(&mut source, "b");
+        expect_next_token_text(&mut source, "b");
 
         assert_eq!(source.cursor, 4);
         assert_eq!(source.prev_next_cursor, 4);
         assert_eq!(source.prev_next_text(), Some("\t"));
 
-        expect_text(&mut source, "c");
+        expect_next_token_text(&mut source, "c");
 
         assert_eq!(source.cursor, 7);
         assert_eq!(source.prev_next_cursor, 7);
@@ -227,19 +223,19 @@ mod tests {
         //assert_eq!(source.prev_next_text(), None);
         assert_eq!(source.prev_next_text(), Some("a"));
 
-        expect_text(&mut source, "a");
+        expect_next_token_text(&mut source, "a");
 
         assert_eq!(source.cursor, 1);
         assert_eq!(source.prev_next_cursor, 1);
         assert_eq!(source.prev_next_text(), Some(" "));
 
-        expect_text(&mut source, "b");
+        expect_next_token_text(&mut source, "b");
 
         assert_eq!(source.cursor, 4);
         assert_eq!(source.prev_next_cursor, 4);
         assert_eq!(source.prev_next_text(), Some("\t"));
 
-        expect_text(&mut source, "c");
+        expect_next_token_text(&mut source, "c");
 
         assert_eq!(source.cursor, 7);
         assert_eq!(source.prev_next_cursor, 7);
