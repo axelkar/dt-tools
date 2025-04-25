@@ -9,19 +9,19 @@ use dt_parser::{
 
 use crate::macros::{evaluate_macro, MacroDefinition};
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, displaydoc::Display)]
 pub enum ValueFromAstError {
-    #[error("failed to parse string: {0}")]
+    /// failed to parse string: {0}
     StringParseError(#[from] crate::StringParseError),
-    #[error("failed to parse number: {0}")]
+    /// failed to parse number: {0}
     ParseIntError(#[from] std::num::ParseIntError),
-    #[error("failed to parse number: missing hex prefix")]
+    /// failed to parse number: missing hex prefix
     MissingHexPrefix,
-    #[error("AST is missing items")]
+    /// AST is missing items
     MissingAst,
-    #[error("bytestring is missing a hex digit")]
+    /// bytestring is missing a hex digit
     IncompleteBytestring,
-    #[error("Unrecognized macro name {0}")]
+    /// Unrecognized macro name {0}
     UnrecognizedMacro(String),
 }
 

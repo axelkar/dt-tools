@@ -242,15 +242,15 @@ pub enum Value {
     Stringlist(Vec<String>),
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, displaydoc::Display)]
 pub enum ValueFromAstError {
-    #[error("failed to parse string: {0}")]
+    /// failed to parse string: {0}
     StringParseError(#[from] StringParseError),
-    #[error("failed to parse number: {0}")]
+    /// failed to parse number: {0}
     ParseIntError(#[from] ParseIntError),
-    #[error("failed to parse number: missing hex prefix")]
+    /// failed to parse number: missing hex prefix
     MissingHexPrefix,
-    #[error("AST is missing items")]
+    /// AST is missing items
     MissingAst,
 }
 use crate::string::StringParseError;

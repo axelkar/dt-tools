@@ -43,13 +43,13 @@ impl AnalyzedToplevel {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
 pub enum PPIncludeParseError {
-    #[error("Nothing after `#include`")]
+    /// Nothing after `#include`
     NothingAfterInclude,
-    #[error("Unexpected character after `#include`")]
+    /// Unexpected character after `#include`
     UnexpectedCharacter,
-    #[error("Missing string terminator")]
+    /// Missing string terminator
     MissingStringTerminator,
 }
 

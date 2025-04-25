@@ -405,6 +405,7 @@ version = "0.1.0"
 dependencies = [
  "codespan-reporting",
  "derive_more",
+ "displaydoc",
  "dt-diagnostic",
  "dt-parser",
  "either",

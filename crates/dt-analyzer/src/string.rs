@@ -1,10 +1,10 @@
 use std::{iter::Peekable, str::Chars};
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, displaydoc::Display)]
 pub enum StringParseError {
-    #[error("escape at end of string")]
+    /// escape at end of string
     EscapeAtEndOfString,
-    #[error("hex escape with no valid digits")]
+    /// hex escape with no valid digits
     HexNoDigits,
 }
 

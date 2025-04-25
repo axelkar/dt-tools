@@ -138,19 +138,19 @@ impl Parser<'_, '_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
 pub enum MacroDefinitionParseError {
-    #[error("Missing name")]
+    /// Missing name
     MissingName,
-    #[error("'#' not followed by a macro parameter")]
+    /// '#' not followed by a macro parameter
     StringifyNotAParam { text_range: TextRange },
-    #[error("invalid token for '##'")]
+    /// invalid token for '##'
     ConcatInvalidToken { text_range: TextRange },
-    #[error("'##' cannot be at start")]
+    /// '##' cannot be at start
     ConcatAtStart { text_range: TextRange },
-    #[error("'##' cannot be at end")]
+    /// '##' cannot be at end
     ConcatAtEnd { text_range: TextRange },
-    #[error("Invalid backslash")]
+    /// Invalid backslash
     InvalidBackslash { text_range: TextRange },
 }
 impl MacroDefinitionParseError {
