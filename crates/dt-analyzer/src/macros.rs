@@ -1,6 +1,7 @@
 //! Preprocessor macro implementation
 //!
 //! Macro substitution, parameters, ternary operator are evaluated here
+// TODO: rewrite the parser to understand UTF-8 and to have clearer code
 
 use std::{iter::Peekable, str::Chars};
 
@@ -40,7 +41,8 @@ impl MacroContext {
 enum MacroTokenKind {
     Word(String),
     Parameter(usize),
-    Symbol(String),
+    /// Only difference to `Word` is that this can be pasted next to any token
+    WordNoWhitespace(String),
     ConcatOperator,
     StringifyOperator,
 }
@@ -58,6 +60,7 @@ struct Parser<'params, 'input> {
     iter: Peekable<Chars<'input>>,
     current_token: String,
     params: &'params [String],
+    /// List of (already) processed tokens
     body_tokens: Vec<MacroToken>,
     dont_prescan_indices: Vec<usize>,
     expect_stringify_param: bool,
@@ -71,6 +74,7 @@ impl Parser<'_, '_> {
             end: self.current_token_start_offset + self.current_token.len(),
         }
     }
+    /// Flush the data from [`Self::current_token`] into a new `Word` or `Parameter` token
     fn complete_token(&mut self) -> Result<(), MacroDefinitionParseError> {
         if !self.current_token.is_empty() {
             // Check if current token is a parameter
@@ -90,21 +94,25 @@ impl Parser<'_, '_> {
         }
         Ok(())
     }
+    /// Consumes a character from the input, and returns it. Increments `offset`.
     #[inline]
     fn next(&mut self) -> Option<char> {
         let ch = self.iter.next();
-        if ch.is_some() {
-            self.offset += 1;
+        if let Some(ch) = ch {
+            self.offset += ch.len_utf8();
         }
         ch
     }
+    /// Peeks ahead and returns the character which will be returned by `next()`.
     #[inline]
     fn peek(&mut self) -> Option<&char> {
         self.iter.peek()
     }
+    /// Pushes `ch` to `current_token`, usually to be used by `complete_token()`.
     #[inline]
     fn bump(&mut self, ch: char) {
         if self.current_token.is_empty() {
+            // FIXME: assumes thet the character is a single byte
             self.current_token_start_offset = self.offset - 1;
         }
         self.current_token.push(ch);
@@ -220,16 +228,16 @@ fn parse_string(p: &mut Parser, ch: char) -> Result<(), MacroDefinitionParseErro
     let text_range = p.text_range();
     let tok = std::mem::take(&mut p.current_token);
     p.push_tok(MacroToken {
-        kind: MacroTokenKind::Symbol(tok),
+        kind: MacroTokenKind::WordNoWhitespace(tok),
         text_range,
     })
 }
 
+/// These change meaning when two are pasted together
 fn parse_double_special_characters(
     p: &mut Parser,
     ch: char,
 ) -> Result<(), MacroDefinitionParseError> {
-    // These change meaning when two are pasted together
     p.complete_token()?;
     if p.peek() == Some(&ch) {
         p.next();
@@ -338,7 +346,7 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
                         start: p.offset - 1,
                         end: p.offset,
                     },
-                    kind: MacroTokenKind::Symbol(ch.to_string()),
+                    kind: MacroTokenKind::WordNoWhitespace(ch.to_string()),
                 })?;
             }
             '-' => {
@@ -448,16 +456,23 @@ impl MacroDefinition {
             params,
         })
     }
-    fn substitute(&self, arguments: &[String]) -> String {
+    #[expect(clippy::too_many_lines, reason = "Hard to make this shorter")]
+    fn substitute(&self, arguments: &[String]) -> (Vec<TextRangeMap>, String) {
         let mut s = String::new();
         let mut iter = self.body_tokens.iter().peekable();
         let mut push_ws = false;
+        let mut trmaps = Vec::new();
+
         while let Some(token) = iter.next() {
             match &token.kind {
                 MacroTokenKind::Word(text) => {
                     if push_ws {
                         s.push(' ');
                     }
+                    trmaps.push(TextRangeMap {
+                        from_offset: s.len(),
+                        to: TextRangeMapTo::MacroTextOffset(token.text_range.start),
+                    });
                     s.push_str(text);
                 }
                 MacroTokenKind::Parameter(idx) => {
@@ -465,67 +480,155 @@ impl MacroDefinition {
                     if push_ws {
                         s.push(' ');
                     }
+                    trmaps.push(TextRangeMap {
+                        from_offset: s.len(),
+                        to: TextRangeMapTo::ArgumentIdx(*idx),
+                    });
                     s.push_str(text);
                 }
-                MacroTokenKind::Symbol(text) => {
+                MacroTokenKind::WordNoWhitespace(text) => {
+                    trmaps.push(TextRangeMap {
+                        from_offset: s.len(),
+                        to: TextRangeMapTo::MacroTextOffset(token.text_range.start),
+                    });
                     s.push_str(text);
                     push_ws = false;
                     continue;
                 }
-                MacroTokenKind::ConcatOperator => match iter.next() {
-                    Some(MacroToken {
-                        kind: MacroTokenKind::Word(text),
-                        ..
-                    }) => {
-                        s.push_str(text);
+                MacroTokenKind::ConcatOperator => {
+                    let map_to = match iter.next() {
+                        Some(MacroToken {
+                            kind: MacroTokenKind::Word(text),
+                            ..
+                        }) => {
+                            s.push_str(text);
+                            TextRangeMapTo::MacroTextOffset(token.text_range.start)
+                        }
+                        Some(MacroToken {
+                            kind: MacroTokenKind::Parameter(idx),
+                            ..
+                        }) => {
+                            let text = &arguments[*idx];
+                            s.push_str(text);
+                            TextRangeMapTo::ArgumentIdx(*idx)
+                        }
+                        Some(MacroToken {
+                            kind:
+                                MacroTokenKind::WordNoWhitespace(_)
+                                | MacroTokenKind::ConcatOperator
+                                | MacroTokenKind::StringifyOperator,
+                            ..
+                        })
+                        | None => {
+                            // Forbidden by parser
+                            unreachable!()
+                        }
+                    };
+
+                    // The parser assures that there is a token before a concat
+                    let prev = trmaps.last_mut().unwrap();
+
+                    // Extend previous concat or make a new text range
+                    if let TextRangeMapTo::Concat(concat) = &mut prev.to {
+                        concat.push(map_to);
+                    } else {
+                        prev.to = TextRangeMapTo::Concat(vec![prev.to.clone(), map_to]);
                     }
-                    Some(MacroToken {
-                        kind: MacroTokenKind::Parameter(idx),
-                        ..
-                    }) => {
-                        let text = &arguments[*idx];
-                        s.push_str(text);
-                    }
-                    Some(MacroToken {
-                        kind:
-                            MacroTokenKind::Symbol(_)
-                            | MacroTokenKind::ConcatOperator
-                            | MacroTokenKind::StringifyOperator,
-                        ..
-                    })
-                    | None => {
-                        unreachable!()
-                    }
-                },
-                MacroTokenKind::StringifyOperator => match iter.next() {
-                    Some(MacroToken {
-                        kind: MacroTokenKind::Word(text),
-                        ..
-                    }) => {
-                        s.push_str(&stringify(text));
-                    }
-                    Some(MacroToken {
-                        kind: MacroTokenKind::Parameter(idx),
-                        ..
-                    }) => {
-                        let text = &arguments[*idx];
-                        s.push_str(&stringify(text));
-                    }
-                    Some(MacroToken {
-                        kind:
-                            MacroTokenKind::Symbol(_)
-                            | MacroTokenKind::ConcatOperator
-                            | MacroTokenKind::StringifyOperator,
-                        ..
-                    })
-                    | None => {
-                        unreachable!()
-                    }
-                },
+                }
+                MacroTokenKind::StringifyOperator => {
+                    let argument_idx = match iter.next() {
+                        Some(MacroToken {
+                            kind: MacroTokenKind::Parameter(idx),
+                            ..
+                        }) => {
+                            let text = &arguments[*idx];
+                            s.push_str(&stringify(text));
+                            idx
+                        }
+                        Some(MacroToken {
+                            kind:
+                                MacroTokenKind::Word(_)
+                                | MacroTokenKind::WordNoWhitespace(_)
+                                | MacroTokenKind::ConcatOperator
+                                | MacroTokenKind::StringifyOperator,
+                            ..
+                        })
+                        | None => {
+                            // Forbidden by parser
+                            unreachable!()
+                        }
+                    };
+                    trmaps.push(TextRangeMap {
+                        from_offset: s.len(),
+                        to: TextRangeMapTo::Stringify {
+                            macro_text_offset: token.text_range.start,
+                            argument_idx: *argument_idx,
+                        },
+                    });
+                }
             }
             push_ws = true;
         }
-        s
+        (trmaps, s)
+    }
+}
+
+/// A mapping from text in the output to some text ranges related to macros.
+///
+/// Use this to map errors' text ranges in macros.
+///
+/// Also known as `trmap`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TextRangeMap {
+    /// Map ranges in the output from `from_offset` to the next `TextRangeMap`'s `from_offset`
+    pub from_offset: usize,
+    /// Where to map it to
+    pub to: TextRangeMapTo,
+}
+impl TextRangeMap {
+    #[cfg(test)]
+    fn test_fmt(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        write!(f, "{}.. ", self.from_offset)?;
+        self.to.test_fmt(f)
+    }
+}
+
+// TODO: concat into stringification?
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TextRangeMapTo {
+    /// Forward to argument at index
+    ArgumentIdx(usize),
+    /// Forward to offset in macro definition string
+    MacroTextOffset(usize),
+    /// Forward to two or more places
+    Concat(Vec<TextRangeMapTo>),
+    /// Forward to offset inrmacro definition and argument at index
+    Stringify {
+        macro_text_offset: usize,
+        argument_idx: usize,
+    },
+}
+impl TextRangeMapTo {
+    #[cfg(test)]
+    fn test_fmt(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        match self {
+            Self::ArgumentIdx(idx) => write!(f, "arg_{idx}"),
+            Self::MacroTextOffset(offset) => write!(f, "macro+{offset}"),
+            Self::Concat(vec) => {
+                for (i, to) in vec.iter().enumerate() {
+                    if i != 0 {
+                        f.write_str(" ## ")?;
+                    }
+                    to.test_fmt(f)?;
+                }
+                Ok(())
+            }
+            Self::Stringify {
+                macro_text_offset: macro_text,
+                argument_idx: argument,
+            } => write!(f, "stringify(macro+{macro_text}, arg_{argument})"),
+        }
     }
 }
 
@@ -540,7 +643,7 @@ impl MacroDefinition {
 pub(crate) fn evaluate_macro(
     ast: Option<&ast::MacroInvocation>,
     def: &MacroDefinition,
-) -> Result<String, String> {
+) -> Result<(Vec<TextRangeMap>, String), String> {
     let arguments = ast.map(|ast| {
         ast.arguments()
             .map(|arg| {
@@ -614,9 +717,19 @@ fn stringify(input: &str) -> String {
     result
 }
 
+// TODO: validate number of arguments!
+// TODO: vararg macros??
+
 #[cfg(test)]
+#[expect(
+    clippy::needless_raw_string_hashes,
+    reason = "expect-test auto update adds r#"
+)]
 mod tests {
+    use std::fmt::Write;
+
     use super::*;
+    use expect_test::{expect, Expect};
     use pretty_assertions::assert_eq;
     fn mt(kind: MacroTokenKind, range: std::ops::Range<usize>) -> MacroToken {
         MacroToken {
@@ -627,72 +740,211 @@ mod tests {
 
     #[test]
     fn test_stringify() {
-        #[track_caller]
-        fn assert_str_eq(left: &str, right: &str) {
-            assert!(left == right, "strings are not equal:\n<{left}\n>{right}\n");
+        #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+        fn check(actual: &str, expect: Expect) {
+            expect.assert_eq(actual);
         }
-        assert_str_eq(&stringify(""), r#""""#);
-        assert_str_eq(
+        check(&stringify(""), expect![[r#""""#]]);
+        check(
             &stringify(r#"Hello "world"!\nNewline and \\ backslash."#),
-            r#""Hello \"world\"!\nNewline and \\ backslash.""#,
+            expect![[r#""Hello \"world\"!\nNewline and \\ backslash.""#]],
         );
-        assert_str_eq(
+        check(
             &stringify(r#""Hello \"world\"!\nNewline and \ backslash.""#),
-            r#""\"Hello \\\"world\\\"!\\nNewline and \\ backslash.\"""#,
+            expect![[r#""\"Hello \\\"world\\\"!\\nNewline and \\ backslash.\"""#]],
+        );
+    }
+
+    /// `trmaps_expect`: offset in `output_expect` and then map sources
+    /// ```text
+    /// 0.. $1 ## $2
+    /// ```
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn check_substitute(
+        def_input: &str,
+        arguments: &[String],
+        output_expect: Expect,
+        trmaps_expect: Expect,
+    ) {
+        let def = MacroDefinition::parse(def_input).unwrap();
+        let (text_range_maps, output) = def.substitute(arguments);
+
+        output_expect.assert_eq(&output);
+
+        let mut trmaps_str = String::new();
+        for trmap in text_range_maps {
+            trmap.test_fmt(&mut trmaps_str).ok();
+            trmaps_str.push('\n');
+        }
+        trmaps_expect.assert_eq(&trmaps_str);
+    }
+
+    #[test]
+    fn substitute_concat() {
+        check_substitute(
+            "#define CONCAT(a, b) a ## b",
+            &["foo".to_owned(), "bar".to_owned()],
+            expect![[r#"foobar"#]],
+            expect![[r#"
+                0.. arg_0 ## arg_1
+            "#]],
         );
     }
 
     #[test]
-    fn substitute() {
-        let def = MacroDefinition::parse("#define CONCAT(a, b) a ## b").unwrap();
-        assert_eq!(
-            def.substitute(&["foo".to_owned(), "bar".to_owned()]),
-            "foobar".to_owned()
+    fn substitute_stringify() {
+        check_substitute(
+            "#define STRINGIFY(a) #a",
+            &["1 + 2".to_owned()],
+            expect![[r#""1 + 2""#]],
+            expect![[r#"
+                7.. stringify(macro+21, arg_0)
+            "#]],
         );
+    }
 
-        let def = MacroDefinition::parse("#define STRINGIFY(a) #a").unwrap();
-        assert_eq!(
-            def.substitute(&["1 + 2".to_owned()]),
-            "\"1 + 2\"".to_owned()
+    /// Special characters break the word and add spaces to make sure the reparsing doesn't combine
+    /// them with other special characters or words. The output isn't identical with clangd's
+    /// pretty printing but it works perfectly.
+    #[test]
+    fn substitute_break_the_word() {
+        check_substitute(
+            r#"#define FOO "bar" <123>"#,
+            &[],
+            expect![[r#""bar"< 123 >"#]],
+            expect![[r#"
+                0.. macro+12
+                5.. macro+18
+                7.. macro+19
+                11.. macro+22
+            "#]],
         );
+    }
 
-        let def = MacroDefinition::parse(r#"#define FOO "bar" <123>"#).unwrap();
-        assert_eq!(def.substitute(&[]), "\"bar\"< 123 >".to_owned());
+    /// Like above. Example from Linux `include/dt-bindings/input/input.h`
+    // TODO: combine applicable macro trmaps; the trmaps expect below could be a lot smaller
+    #[test]
+    fn substitute_break_the_word_example() {
+        check_substitute(
+            r#"#define MATRIX_KEY(row, col, code) \
+                ((((row) & 0xFF) << 24) | (((col) & 0xFF) << 16) | ((code) & 0xFFFF))"#,
+            &["0x00".to_owned(), "0x02".to_owned(), "KEY_BACK".to_owned()],
+            expect!["((((0x00)& 0xFF)<< 24)|(((0x02)& 0xFF)<< 16)|((KEY_BACK)& 0xFFFF))"],
+            expect![[r#"
+                0.. macro+53
+                1.. macro+54
+                2.. macro+55
+                3.. macro+56
+                4.. arg_0
+                8.. macro+60
+                9.. macro+62
+                11.. macro+64
+                15.. macro+68
+                16.. macro+70
+                19.. macro+73
+                21.. macro+75
+                22.. macro+77
+                23.. macro+79
+                24.. macro+80
+                25.. macro+81
+                26.. arg_1
+                30.. macro+85
+                31.. macro+87
+                33.. macro+89
+                37.. macro+93
+                38.. macro+95
+                41.. macro+98
+                43.. macro+100
+                44.. macro+102
+                45.. macro+104
+                46.. macro+105
+                47.. arg_2
+                55.. macro+110
+                56.. macro+112
+                58.. macro+114
+                64.. macro+120
+                65.. macro+121
+            "#]],
+        );
+    }
 
-        let def = MacroDefinition::parse(
-            "#define MATRIX_KEY(row, col, code) \
-                ((((row) & 0xFF) << 24) | (((col) & 0xFF) << 16) | ((code) & 0xFFFF))",
+    #[test]
+    fn substitute_double_special_characters() {
+        check_substitute(
+            r#"#define FOO < < > > & & | |"#,
+            &[],
+            expect!["< < > > & & | |"],
+            expect![[r#"
+                0.. macro+12
+                2.. macro+14
+                4.. macro+16
+                6.. macro+18
+                8.. macro+20
+                10.. macro+22
+                12.. macro+24
+                14.. macro+26
+            "#]],
+        );
+        check_substitute(
+            r#"#define FOO << >> && ||"#,
+            &[],
+            expect!["<< >> && ||"],
+            expect![[r#"
+                0.. macro+12
+                3.. macro+15
+                6.. macro+18
+                9.. macro+21
+            "#]],
+        );
+    }
+
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn check_parse(input: &str, expect: Expect) {
+        let def = MacroDefinition::parse(input).unwrap();
+
+        let mut actual = String::new();
+        actual.push_str(&def.name);
+        actual.push('(');
+
+        for (i, param) in def.params.iter().enumerate() {
+            if i != 0 {
+                actual.push_str(", ");
+            }
+            actual.push_str(param);
+        }
+
+        actual.push_str(")\n");
+
+        for body_token in def.body_tokens {
+            writeln!(
+                &mut actual,
+                "{:?} {}",
+                body_token.kind, body_token.text_range
+            )
+            .ok();
+        }
+
+        writeln!(
+            &mut actual,
+            "dont_prescan_indices: {:?}",
+            def.dont_prescan_indices
         )
-        .unwrap();
+        .ok();
 
-        assert_eq!(
-            def.substitute(&["0x00".to_owned(), "0x02".to_owned(), "KEY_BACK".to_owned()]),
-            "((((0x00)& 0xFF)<< 24)|(((0x02)& 0xFF)<< 16)|((KEY_BACK)& 0xFFFF))".to_owned()
-        );
-    }
-
-    #[test]
-    fn substitute_double_symbols() {
-        let def = MacroDefinition::parse("#define FOO < < > > & & | |").unwrap();
-        assert_eq!(def.substitute(&[]), "< < > > & & | |".to_owned());
-        let def = MacroDefinition::parse("#define FOO << >> && ||").unwrap();
-        assert_eq!(def.substitute(&[]), "<< >> && ||".to_owned());
+        expect.assert_eq(&actual);
     }
 
     #[test]
     fn parse_basic() {
-        assert_eq!(
-            MacroDefinition::parse("#define CONCAT(a, b) a \\\n ## b"),
-            Ok(MacroDefinition {
-                name: "CONCAT".to_owned(),
-                params: vec!["a".to_owned(), "b".to_owned()],
-                body_tokens: vec![
-                    mt(MacroTokenKind::Parameter(0), 21..22),
-                    mt(MacroTokenKind::ConcatOperator, 26..28),
-                    mt(MacroTokenKind::Parameter(1), 29..30),
-                ],
-                dont_prescan_indices: vec![0, 1]
-            })
+        check_parse(
+            "#define CONCAT(a, b) a \\\n## b",
+            expect![[r#"
+                CONCAT(a, b)
+                Parameter(0) 21..22
+                ConcatOperator 25..27
+                Parameter(1) 28..29
+                dont_prescan_indices: [0, 1]
+            "#]],
         );
         assert_eq!(
             MacroDefinition::parse("#define FOO \\\\\n"),
@@ -701,46 +953,37 @@ mod tests {
             })
         );
 
-        assert_eq!(
-            MacroDefinition::parse("#define FOO 1 + 2"),
-            Ok(MacroDefinition {
-                name: "FOO".to_owned(),
-                params: Vec::new(),
-                body_tokens: vec![
-                    mt(MacroTokenKind::Word("1".to_owned()), 12..13),
-                    mt(MacroTokenKind::Symbol("+".to_owned()), 14..15),
-                    mt(MacroTokenKind::Word("2".to_owned()), 16..17),
-                ],
-                dont_prescan_indices: Vec::new()
-            })
+        check_parse(
+            "#define FOO 1 + 2",
+            expect![[r#"
+                FOO()
+                Word("1") 12..13
+                WordNoWhitespace("+") 14..15
+                Word("2") 16..17
+                dont_prescan_indices: []
+            "#]],
         );
     }
 
     #[test]
     fn parse_stringify() {
-        assert_eq!(
-            MacroDefinition::parse("#define FOO(a) #a"),
-            Ok(MacroDefinition {
-                name: "FOO".to_owned(),
-                params: vec!["a".to_owned()],
-                body_tokens: vec![
-                    mt(MacroTokenKind::StringifyOperator, 15..16),
-                    mt(MacroTokenKind::Parameter(0), 16..17),
-                ],
-                dont_prescan_indices: vec![0]
-            })
+        check_parse(
+            "#define FOO(a) #a",
+            expect![[r#"
+                FOO(a)
+                StringifyOperator 15..16
+                Parameter(0) 16..17
+                dont_prescan_indices: [0]
+            "#]],
         );
-        assert_eq!(
-            MacroDefinition::parse("#define FOO(a) # a"),
-            Ok(MacroDefinition {
-                name: "FOO".to_owned(),
-                params: vec!["a".to_owned()],
-                body_tokens: vec![
-                    mt(MacroTokenKind::StringifyOperator, 15..16),
-                    mt(MacroTokenKind::Parameter(0), 17..18),
-                ],
-                dont_prescan_indices: vec![0]
-            })
+        check_parse(
+            "#define FOO(a) # a",
+            expect![[r#"
+                FOO(a)
+                StringifyOperator 15..16
+                Parameter(0) 17..18
+                dont_prescan_indices: [0]
+            "#]],
         );
         assert_eq!(
             MacroDefinition::parse("#define FOO(a) #"),
@@ -798,19 +1041,62 @@ mod tests {
 
     #[test]
     fn parse_words_symbols() {
-        assert_eq!(
-            MacroDefinition::parse(r#"#define FOO "bar" <123>"#),
-            Ok(MacroDefinition {
-                name: "FOO".to_owned(),
-                params: Vec::new(),
-                body_tokens: vec![
-                    mt(MacroTokenKind::Symbol("\"bar\"".to_owned()), 12..17),
-                    mt(MacroTokenKind::Word("<".to_owned()), 18..19),
-                    mt(MacroTokenKind::Word("123".to_owned()), 19..22),
-                    mt(MacroTokenKind::Word(">".to_owned()), 22..23),
-                ],
-                dont_prescan_indices: Vec::new()
-            })
+        check_parse(
+            r#"#define FOO "bar" <123>"#,
+            expect![[r#"
+                FOO()
+                WordNoWhitespace("\"bar\"") 12..17
+                Word("<") 18..19
+                Word("123") 19..22
+                Word(">") 22..23
+                dont_prescan_indices: []
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_symbols_not_together() {
+        check_parse(
+            r#"#define FOO << >> && ||"#,
+            expect![[r#"
+                FOO()
+                Word("<<") 12..14
+                Word(">>") 15..17
+                Word("&&") 18..20
+                Word("||") 21..23
+                dont_prescan_indices: []
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_symbols_together() {
+        // FIXME: parsed improperly
+        check_parse(
+            r#"#define FOO <<>>&&||"#,
+            expect![[r#"
+                FOO()
+                Word("<<") 12..14
+                Word(">") 15..16
+                Word("&&") 16..18
+                Word("|") 19..20
+                dont_prescan_indices: []
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_utf8() {
+        // FIXME: parsed improperly
+        check_parse(
+            r#"#define FOO ä a a"#,
+            expect![[r#"
+                FOO()
+                Word("ä") 13..15
+                Word("a") 15..16
+                Word("a") 17..18
+                dont_prescan_indices: []
+            "#]],
         );
     }
 }

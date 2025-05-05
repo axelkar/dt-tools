@@ -2,13 +2,12 @@
 
 #define BAR(suffix) bar_ ## suffix
 #define FOO foo
-#define FOO_PBR {/FOO}
 
 / {
   BAR(test): FOO {
     a = <1>;
   };
-  myref = &BAR(test); //, &FOO_PBR;
+  myref = &BAR(test);
 };
 
 &BAR(test) {

@@ -8,13 +8,18 @@ use std::borrow::Cow;
 
 use dt_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, SpanLabel};
 use dt_parser::{
-    ast::{self, AstNode, AstNodeOrToken, AstToken, HasName},
-    match_ast, TextRange,
+    ast::{self, AstNode, AstNodeOrToken, AstToken, HasMacroInvocation, HasName},
+    match_ast,
+    parser::Entrypoint,
+    TextRange,
 };
 use enum_as_inner::EnumAsInner;
 use rustc_hash::FxHashMap;
 
-use crate::{macros::MacroDefinition, resolved_prop::Value};
+use crate::{
+    macros::{evaluate_macro, MacroDefinition},
+    resolved_prop::Value,
+};
 
 use super::stage1::{AnalyzedToplevel, LabelDef};
 
@@ -134,6 +139,52 @@ pub fn compute(
     Stage2File { root_node }
 }
 
+fn get_node_prop_name(
+    plain_name: Option<&str>,
+    ast: &impl HasMacroInvocation,
+    diag: &impl DiagnosticCollector,
+    macro_db: &FxHashMap<String, (TextRange, &MacroDefinition)>,
+) -> Option<String> {
+    let (macro_ast, macro_def) = match plain_name {
+        Some(name) => {
+            if let Some((_macro_tr, macro_def)) = macro_db.get(name) {
+                (None, macro_def)
+            } else {
+                return Some(name.to_owned());
+            }
+        }
+        None => {
+            if let Some(macro_ast) = ast.macro_invocation() {
+                let macro_name = &macro_ast
+                    .green_ident()
+                    .expect("No macro invocation without a name")
+                    .text;
+
+                let Some((_macro_tr, macro_def)) = macro_db.get(macro_name.as_str()) else {
+                    diag.emit(Diagnostic::new(
+                        macro_ast.syntax().text_range(),
+                        Cow::Owned(format!("Unrecognized macro name {macro_name}")),
+                        Severity::Error,
+                    ));
+                    return None;
+                };
+                (Some(macro_ast), macro_def)
+            } else {
+                return None;
+            }
+        }
+    };
+
+    let s = evaluate_macro(macro_ast.as_ref(), macro_def)
+        .expect("FIXME: no error")
+        .1;
+
+    let parse = Entrypoint::Name.parse(&s);
+
+    let name = &parse.green_node.child_tokens().next().unwrap().text;
+    Some(name.to_owned())
+}
+
 fn merge_root_node(
     ast: &ast::DtNode,
     diag: &impl DiagnosticCollector,
@@ -150,10 +201,11 @@ fn merge_root_node(
                     diag.emit(Diagnostic::new(child_ast.syntax().text_range(), Cow::Borrowed("Extension nodes may not be defined in other nodes"), Severity::Error));
                     continue
                 } else {
-                    let Some(name) = child_ast.text_name("") else {
+                    let Some(name) = get_node_prop_name(child_ast.text_name("").as_deref(), &child_ast, diag, macro_db) else {
                         continue
                     };
-                    match stage2.children.get_mut(name.as_ref()) {
+
+                    match stage2.children.get_mut(&name) {
                         Some(Stage2Tree::Prop(other)) => {
                             // can't mix
                             diag.emit(Diagnostic {
@@ -176,7 +228,7 @@ fn merge_root_node(
                         None => {
                             let mut child_node = Stage2Node::default();
                             merge_root_node(&child_ast, diag, &mut child_node, macro_db);
-                            stage2.children.insert(name.as_ref().to_owned(), Stage2Tree::Node(child_node));
+                            stage2.children.insert(name.clone(), Stage2Tree::Node(child_node));
                         }
                     }
                     // TODO: what to do with unit address?, $nodename (jsonschema property)?

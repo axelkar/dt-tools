@@ -339,6 +339,7 @@ impl DtProperty {
 }
 impl HasName for DtProperty {}
 impl HasLabel for DtProperty {}
+impl HasMacroInvocation for DtProperty {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum PropValue {
@@ -752,6 +753,7 @@ impl DtNode {
 }
 impl HasName for DtNode {}
 impl HasLabel for DtNode {}
+impl HasMacroInvocation for DtNode {}
 
 /// A generic name.
 ///
@@ -829,6 +831,7 @@ impl AstNode for DtLabel {
     }
 }
 impl HasName for DtLabel {}
+impl HasMacroInvocation for DtLabel {}
 
 /// A preprocessor directive
 ///

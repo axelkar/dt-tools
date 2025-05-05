@@ -163,7 +163,9 @@ impl Cell {
                     return Err(ValueFromAstError::UnrecognizedMacro(macro_name.to_owned()));
                 };
 
-                let s = evaluate_macro(Some(macro_ast), macro_def).expect("FIXME: no error");
+                let s = evaluate_macro(Some(macro_ast), macro_def)
+                    .expect("FIXME: no error")
+                    .1;
 
                 let parse = Entrypoint::Cells.parse(&s);
 
@@ -226,7 +228,9 @@ fn reference_eval(
         todo!()
     }
 
-    let s = evaluate_macro(macro_ast.as_ref(), macro_def).expect("FIXME: no error");
+    let s = evaluate_macro(macro_ast.as_ref(), macro_def)
+        .expect("FIXME: no error")
+        .1;
 
     let parse = Entrypoint::ReferenceNoamp.parse(&s);
     let phandle = ast::DtPhandle::cast(RedNode::new(Arc::new(parse.green_node.clone()))).unwrap();
