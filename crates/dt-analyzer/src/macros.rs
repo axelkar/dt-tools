@@ -731,12 +731,6 @@ mod tests {
     use super::*;
     use expect_test::{expect, Expect};
     use pretty_assertions::assert_eq;
-    fn mt(kind: MacroTokenKind, range: std::ops::Range<usize>) -> MacroToken {
-        MacroToken {
-            kind,
-            text_range: range.into(),
-        }
-    }
 
     #[test]
     fn test_stringify() {

@@ -14,7 +14,7 @@ license.workspace = true
 parking_lot = { workspace = true, optional = true }
 
 [features]
-## Enables implements DiagnosticCollector for parking_lot::Mutex<Vec<Diagnostic>>
+## Enables implementation of DiagnosticCollector for parking_lot::Mutex<Vec<Diagnostic>>
 parking_lot = ["dep:parking_lot"]
 
 [lints]

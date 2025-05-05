@@ -13,22 +13,22 @@ license.workspace = true
 
 [dependencies]
 drop_bomb = "0.1"
-either = "1.13"
+either.workspace = true
 enum-as-inner = "0.6"
 itertools.workspace = true
 logos.workspace = true
 smallvec = "1.13"
-thiserror = "1.0"
+thiserror.workspace = true
 tracing.workspace = true
 dt-diagnostic.workspace = true
-displaydoc = "0.2.5"
+displaydoc.workspace = true
 
 [dev-dependencies]
-notify = "6.1.1"
+notify = "8.0.0"
 owo-colors.workspace = true
 pretty_assertions.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-serde_json = "1.0" # visualizer
+serde_json.workspace = true
 
 [features]
 default = []

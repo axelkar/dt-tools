@@ -5,32 +5,32 @@
 //! To get an AST item, use [`AstNode::cast()`] with a [`Arc<RedNode>`] as follows:
 //!
 //! ```
-//! use dt_parser::cst2::RedNode;
+//! use dt_parser::cst::RedNode;
 //! use dt_parser::ast::{self, AstNode as _};
 //!
 //! let red_node: Arc<RedNode>;
 //! # use std::sync::Arc;
-//! # use dt_parser::{TextRange, cst2::{GreenNode, GreenToken, GreenItem, NodeKind,
-//! lexer::TokenKind}};
+//! # use dt_parser::{TextRange, cst::{GreenNode, GreenToken, GreenItem, NodeKind},
+//! lexer::TokenKind};
 //! # let green_node = Arc::new(GreenNode {
 //! #     kind: NodeKind::DtNode,
 //! #     width: 6,
 //! #     children: vec! [
 //! #         GreenItem::Token(Arc::new(GreenToken {
 //! #             kind: TokenKind::Name,
-//! #             text: dt_parser::cst2::TokenText::Static("foo"),
+//! #             text: dt_parser::cst::TokenText::Static("foo"),
 //! #         })),
 //! #         GreenItem::Token(Arc::new(GreenToken {
 //! #             kind: TokenKind::LCurly,
-//! #             text: dt_parser::cst2::TokenText::Static("{"),
+//! #             text: dt_parser::cst::TokenText::Static("{"),
 //! #         })),
 //! #         GreenItem::Token(Arc::new(GreenToken {
 //! #             kind: TokenKind::LCurly,
-//! #             text: dt_parser::cst2::TokenText::Static("}"),
+//! #             text: dt_parser::cst::TokenText::Static("}"),
 //! #         })),
 //! #         GreenItem::Token(Arc::new(GreenToken {
 //! #             kind: TokenKind::LCurly,
-//! #             text: dt_parser::cst2::TokenText::Static(";"),
+//! #             text: dt_parser::cst::TokenText::Static(";"),
 //! #         })),
 //! #     ]
 //! # });
@@ -121,10 +121,10 @@ pub trait AstNodeOrToken: Sized {
 /// # Example:
 ///
 /// ```
-/// # use dt_parser::{match_ast, ast, cst2::RedNode};
+/// # use dt_parser::{match_ast, ast, cst::RedNode};
 /// # use std::sync::Arc;
 /// let node: Arc<RedNode>;
-/// # use dt_parser::cst2::{GreenNode, NodeKind};
+/// # use dt_parser::cst::{GreenNode, NodeKind};
 /// # node = RedNode::new(Arc::new(GreenNode { kind: NodeKind::SourceFile, width: 0, children: Vec::new() }));
 /// # let _ =
 /// match_ast! {
@@ -284,7 +284,7 @@ impl DtProperty {
     ///
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst2::RedNode;
+    /// use dt_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { a = <1 2 3> <4>; };";
@@ -316,7 +316,7 @@ impl DtProperty {
     ///
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, SourceFile, HasName};
-    /// use dt_parser::cst2::RedNode;
+    /// use dt_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { my_prop@unit_address = <1>; };";
@@ -542,7 +542,7 @@ impl DtNode {
     ///
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst2::RedNode;
+    /// use dt_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { a = <0>; b; };";
@@ -565,7 +565,7 @@ impl DtNode {
     ///
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst2::RedNode;
+    /// use dt_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { a = <0>; b { c = <1>; }; d {}; };";
@@ -588,7 +588,7 @@ impl DtNode {
     ///
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, SourceFile, HasName};
-    /// use dt_parser::cst2::RedNode;
+    /// use dt_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { my_node@unit_address { foo = <1>; }; };";
@@ -615,7 +615,7 @@ impl DtNode {
     ///
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, SourceFile, HasName};
-    /// use dt_parser::cst2::RedNode;
+    /// use dt_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { my_node@unit_address { foo = <1>; }; };";
@@ -656,7 +656,7 @@ impl DtNode {
     ///
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst2::RedNode;
+    /// use dt_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "&a { b { .. }; };";
@@ -690,7 +690,7 @@ impl DtNode {
     ///
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst2::RedNode;
+    /// use dt_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "&a { b { c { .. }; }; };";
@@ -713,7 +713,7 @@ impl DtNode {
     ///
     /// ```
     /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst2::RedNode;
+    /// use dt_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "&a { b { c { d { .. }; }; }; };";

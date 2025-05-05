@@ -13,7 +13,7 @@ license.workspace = true
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive", "cargo"] }
-codespan-reporting = "0.11.1"
+codespan-reporting = "0.12.0"
 tracing-subscriber.workspace = true
 dt-parser.workspace = true
 dt-lint.workspace = true

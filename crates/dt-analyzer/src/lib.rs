@@ -7,7 +7,7 @@
 //! ```
 //! use std::collections::HashMap;
 //! use dt_analyzer::{analyze_cst, PropDefinition, Value};
-//! use dt_parser::{ast::{self, AstNode}, cst2::RedNode};
+//! use dt_parser::{ast::{self, AstNode}, cst::RedNode};
 //! use std::sync::Arc;
 //!
 //! let text = "
