@@ -4,7 +4,7 @@ use clap::Parser;
 
 #[derive(Debug, PartialEq, Parser)]
 pub struct CliConfig {
-    #[arg(short, long, value_delimiter = ',')]
+    #[arg(short = 'I', long, value_delimiter = ',')]
     pub include_paths: Vec<PathBuf>,
 }
 

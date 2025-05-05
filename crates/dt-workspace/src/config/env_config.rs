@@ -9,7 +9,7 @@ pub struct EnvConfig {
 
 impl EnvConfig {
     pub fn from_env() -> Result<Self, envy::Error> {
-        envy::from_env()
+        envy::prefixed("DT_TOOLS_").from_env()
     }
 }
 

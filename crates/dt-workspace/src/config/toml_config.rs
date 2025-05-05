@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 use crate::search::search;
-
-use super::ConfigError;
 
 pub const CONFIG_FILENAME: &str = ".dt-tools.toml";
 
@@ -34,6 +33,15 @@ impl TomlConfig {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         toml::from_str(&fs_err::read_to_string(path)?).map_err(ConfigError::Toml)
     }
+}
+
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("Failed to read config")]
+    Io(#[from] std::io::Error),
+
+    #[error("Failed to deserialize config")]
+    Toml(#[from] toml::de::Error),
 }
 
 #[cfg(test)]

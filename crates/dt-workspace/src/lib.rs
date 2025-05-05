@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
-use config::{Config, ConfigError, env_config::EnvConfig, toml_config::TomlConfig};
-use thiserror::Error;
+use config::{CombinedConfig, env_config::EnvConfig, toml_config::TomlConfig};
 
 mod config;
 mod search;
@@ -10,5 +9,5 @@ mod search;
 pub struct Workspace {
     pub path: PathBuf,
 
-    pub config: Config,
+    pub config: CombinedConfig,
 }

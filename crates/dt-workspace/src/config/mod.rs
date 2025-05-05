@@ -3,7 +3,6 @@ use std::path::PathBuf;
 #[cfg(feature = "cli")]
 use cli_config::CliConfig;
 use env_config::EnvConfig;
-use thiserror::Error;
 use toml_config::TomlConfig;
 
 #[cfg(feature = "cli")]
@@ -24,11 +23,11 @@ macro_rules! config_field {
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub struct Config {
+pub struct CombinedConfig {
     include_paths: Vec<PathBuf>,
 }
 
-impl Config {
+impl CombinedConfig {
     pub fn merge(
         toml: Option<TomlConfig>,
         #[cfg(feature = "cli")] cli: Option<CliConfig>,
@@ -41,15 +40,6 @@ impl Config {
             include_paths: config_field!(env, toml; include_paths).unwrap_or_default(),
         }
     }
-}
-
-#[derive(Debug, Error)]
-pub enum ConfigError {
-    #[error("Failed to read config")]
-    Io(#[from] std::io::Error),
-
-    #[error("Failed to deserialize config")]
-    Toml(#[from] toml::de::Error),
 }
 
 #[cfg(test)]
@@ -70,7 +60,7 @@ mod tests {
         };
 
         assert_eq!(
-            Config {
+            CombinedConfig {
                 include_paths: vec![
                     #[cfg(feature = "cli")]
                     "cli".into(),
@@ -78,7 +68,7 @@ mod tests {
                     "env".into(),
                 ],
             },
-            Config::merge(
+            CombinedConfig::merge(
                 Some(toml),
                 #[cfg(feature = "cli")]
                 Some(cli),
