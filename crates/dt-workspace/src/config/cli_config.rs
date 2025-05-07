@@ -18,7 +18,7 @@ mod tests {
             CliConfig {
                 include_paths: vec!["linux".into(), "linux-old".into()],
             },
-            CliConfig::parse_from(["dt-tools", "-i", "linux,linux-old"])
+            CliConfig::parse_from(["dt-tools", "-I", "linux,linux-old"])
         );
     }
 }

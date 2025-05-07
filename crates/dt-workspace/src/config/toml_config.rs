@@ -17,11 +17,12 @@ pub struct TomlConfig {
 
 impl TomlConfig {
     /// Looks for [`CONFIG_FILENAME`] in `start` or cwd
-    pub fn find_config(start: Option<&Path>) -> Option<PathBuf> {
+    ///
+    /// Returns directory and TOML config path
+    pub fn find_path(start: Option<&Path>) -> Option<(&Path, PathBuf)> {
         search(start.unwrap_or(Path::new(".")), CONFIG_FILENAME, |p| {
             p.is_file()
         })
-        .map(|p| p.1)
     }
 
     /// Loads config file from directory
@@ -63,8 +64,9 @@ mod tests {
         // config at cwd
         assert_eq!(
             cwd_with([CONFIG_FILENAME]),
-            TomlConfig::find_config(None)
+            TomlConfig::find_path(None)
                 .unwrap()
+                .1
                 .canonicalize()
                 .unwrap()
         );
@@ -72,8 +74,9 @@ mod tests {
         // config specified by user
         assert_eq!(
             cwd_with(["test_data", CONFIG_FILENAME]),
-            TomlConfig::find_config(Some(Path::new("test_data")))
+            TomlConfig::find_path(Some(Path::new("test_data")))
                 .unwrap()
+                .1
                 .canonicalize()
                 .unwrap()
         );
@@ -81,8 +84,9 @@ mod tests {
         // config at ancestor
         assert_eq!(
             cwd_with(["test_data", CONFIG_FILENAME]),
-            TomlConfig::find_config(Some(&Path::new("test_data").join("empty")))
+            TomlConfig::find_path(Some(&Path::new("test_data").join("empty")))
                 .unwrap()
+                .1
                 .canonicalize()
                 .unwrap()
         );

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use config::{CombinedConfig, env_config::EnvConfig, toml_config::TomlConfig};
+use config::CombinedConfig;
 
 mod config;
 mod search;
