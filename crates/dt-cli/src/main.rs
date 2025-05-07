@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{
     builder::{
@@ -8,6 +8,11 @@ use clap::{
     Parser, Subcommand,
 };
 use tracing_subscriber::filter::LevelFilter;
+
+use dt_workspace::{
+    config::{cli_config::CliConfig, toml_config::TomlConfig, CombinedConfig},
+    Workspace,
+};
 
 fn styles() -> Styles {
     Styles::styled()
@@ -36,6 +41,8 @@ struct Cli {
     verbose: bool,
     #[command(subcommand)]
     command: Command,
+    #[clap(flatten)]
+    config: CliConfig,
 }
 
 #[derive(Subcommand, Debug)]
@@ -69,4 +76,13 @@ fn main() {
         Command::Parse { file: _, output: _ } => {}
         Command::Lint {} => todo!(),
     }
+
+    let (workspace_dir, toml_config) = TomlConfig::find_path(None)
+        .map_or((Path::new("."), None), |(workspace, toml)| {
+            (workspace, Some(TomlConfig::load(&toml).unwrap()))
+        });
+    let _workspace = dbg!(Workspace {
+        path: workspace_dir.to_path_buf(),
+        config: CombinedConfig::merge(toml_config, Some(cli.config), /*TODO*/ None),
+    });
 }
