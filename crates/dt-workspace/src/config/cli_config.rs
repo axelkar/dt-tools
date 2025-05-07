@@ -4,6 +4,7 @@ use clap::Parser;
 
 #[derive(Debug, PartialEq, Parser)]
 pub struct CliConfig {
+    /// List of comma-separated paths to search for C macros
     #[arg(short = 'I', long, value_delimiter = ',')]
     pub include_paths: Vec<PathBuf>,
 }

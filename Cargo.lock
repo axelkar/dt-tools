@@ -435,6 +435,7 @@ dependencies = [
  "dt-analyzer",
  "dt-lint",
  "dt-parser",
+ "dt-workspace",
  "tracing-subscriber",
 ]
 

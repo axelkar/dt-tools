@@ -6,9 +6,9 @@ use env_config::EnvConfig;
 use toml_config::TomlConfig;
 
 #[cfg(feature = "cli")]
-pub(crate) mod cli_config;
-pub(crate) mod env_config;
-pub(crate) mod toml_config;
+pub mod cli_config;
+pub mod env_config;
+pub mod toml_config;
 
 macro_rules! config_field {
   ($start:ident, $($fallback:ident),+; $field:ident) => {

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use config::CombinedConfig;
 
-mod config;
+pub mod config;
 mod search;
 
 #[derive(Debug)]
