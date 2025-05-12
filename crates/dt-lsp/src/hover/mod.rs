@@ -39,7 +39,7 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
     let params = params.text_document_position_params;
     let uri = params.text_document.uri.to_string();
     tracing::info!(?uri);
-    let source_id = SourceId::from(uri.to_string());
+    let source_id = SourceId::from(uri.clone());
     let document = state.state.document_map.get(&source_id)?;
 
     let cst = document.file.as_ref()?.syntax();

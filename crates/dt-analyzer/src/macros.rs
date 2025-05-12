@@ -189,13 +189,13 @@ fn parse_params(iter: &mut Peekable<Chars<'_>>, offset: &mut usize) -> Vec<Strin
             match ch {
                 ')' => {
                     if !current_param.trim().is_empty() {
-                        params.push(current_param.trim().to_string());
+                        params.push(current_param.trim().to_owned());
                     }
                     break;
                 }
                 ',' => {
                     if !current_param.trim().is_empty() {
-                        params.push(current_param.trim().to_string());
+                        params.push(current_param.trim().to_owned());
                     }
                     current_param.clear();
                 }

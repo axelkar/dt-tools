@@ -41,4 +41,6 @@ pedantic = "warn"
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
 should_panic_without_expect = "warn"
+str_to_string = "warn"
+string_to_string = "warn"
 match_wildcard_for_single_variants = { level = "allow", priority = 1 }
