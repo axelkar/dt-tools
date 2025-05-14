@@ -1,20 +1,16 @@
 use std::{collections::HashSet, path::Path};
 
-use anyhow::Context as _;
 use dt_analyzer::DefinitionTreeNode;
-use jsonschema::Validator;
-use metaschemas::SCHEMA_VALIDATOR;
 use serde_yaml::{Mapping, Value};
 
 mod fixups;
-mod metaschemas;
-mod retriever;
+mod loader;
 
-#[derive(Debug)]
 pub struct BindingSchema {
     pub raw_schema: Mapping,
-    pub validator: Validator,
-    pub select_validator: Validator,
+    pub schemas: boon::Schemas,
+    pub main_schema_index: boon::SchemaIndex,
+    pub select_schema_index: boon::SchemaIndex,
     pub maintainers: Option<Value>,
 }
 impl BindingSchema {
@@ -44,39 +40,38 @@ impl BindingSchema {
             .expect("fixed document should always have select");
         let maintainers = yaml_map.remove("maintainers");
 
-        let json = serde_json::to_value(&yaml)?;
+        let select_json = serde_json::to_value(&select)?;
 
-        // FIXME: fix errors
-        let _ = SCHEMA_VALIDATOR;
-        /*SCHEMA_VALIDATOR.validate(&json).map_err(|err| anyhow::anyhow!(err
-            .map(|e| e.to_string())
-            .fold(String::new(), |mut acc, b| {
-                acc.reserve(b.len() + 3);
-                acc.push_str("* ");
-                acc.push_str(&b);
-                acc.push_str("\n");
-                acc
-            }))
-        ).context("Invalid schema!")?;*/
+        let main_json = serde_json::to_value(&yaml)?;
 
-        let validator = jsonschema::options()
-            //.with_dt_meta_schemas()
-            // Jsonschema doesn't follow $schema references. This is declared in
-            // dtschema/meta-schemas/core.yaml
-            //.with_draft(jsonschema::Draft::Draft201909)
-            .with_retriever(retriever::DtJsonSchemaRetriever)
-            .build(&json)
-            .context("Failed to compile schema")?;
+        let mut compiler = boon::Compiler::new();
 
-        let select = serde_json::to_value(&select)?;
-        let select_validator = jsonschema::options()
-            .build(&select)
-            .context("Failed to compile select schema")?;
+        // in 2020, items->prefixItems and additionalItems->unevaluatedItems
+        compiler.set_default_draft(boon::Draft::V2019_09);
+
+        compiler.use_loader(Box::new(loader::DtJsonSchemaLoader));
+        compiler
+            .add_resource("dt-tools:main", main_json)
+            .map_err(|err| anyhow::anyhow!("{:#}", err))?;
+        compiler
+            .add_resource("dt-tools:select", select_json)
+            .map_err(|err| anyhow::anyhow!("{:#}", err))?;
+
+        let mut schemas = boon::Schemas::new();
+
+        let schema_index = compiler
+            .compile("dt-tools:main", &mut schemas)
+            .map_err(|err| anyhow::anyhow!("{:#}", err))?;
+
+        let select_schema_index = compiler
+            .compile("dt-tools:select", &mut schemas)
+            .map_err(|err| anyhow::anyhow!("{:#}", err))?;
 
         Ok(Self {
             raw_schema,
-            validator,
-            select_validator,
+            schemas,
+            main_schema_index: schema_index,
+            select_schema_index,
             maintainers,
         })
     }
@@ -84,7 +79,7 @@ impl BindingSchema {
 
 /// TODO: use this in lsp
 pub fn get_compatible_items(map: &Mapping) -> HashSet<String> {
-    // TODO: handle $ref ? this is currently really lazy
+    // TODO: resolve/handle $ref properties? this is currently really lazy
     let mut list = HashSet::new();
     if let Some(properties) = map.get("properties").and_then(Value::as_mapping) {
         if let Some(compatible) = properties.get("compatible").and_then(Value::as_mapping) {
@@ -102,14 +97,35 @@ pub fn get_compatible_items(map: &Mapping) -> HashSet<String> {
 }
 
 #[must_use]
-pub fn find_select(tree: DefinitionTreeNode, select_validator: &Validator) -> Option<DefinitionTreeNode> {
+#[expect(clippy::missing_panics_doc, reason = "to_string_pretty shoudln't error")]
+pub fn find_select(
+    tree: DefinitionTreeNode,
+    binding_schema: &BindingSchema,
+) -> Option<DefinitionTreeNode> {
     // TODO: return path too?
     // TODO: compare into_json with `dtc example.dts -O yaml | yq '.[]'`
     // TODO: if select is simple, just check for equality or regex pattern (lazy into_json)
     // TODO: don't turn subtrees into JSON multiple times
     Some(
         tree.dfs_iter_nodes()
-            .find(|(_path, node)| select_validator.is_valid(&node.clone().into_json()))?
+            .find(|(path, node)| {
+                eprintln!(
+                    "trying {} {}",
+                    path.iter().fold(String::new(), |a, b| a + b + " . "),
+                    serde_json::to_string_pretty(&node.clone().into_json()).unwrap()
+                );
+                let binding = node.clone().into_json();
+                let res = binding_schema
+                    .schemas
+                    .validate(
+                        &binding,
+                        binding_schema.select_schema_index,
+                    );
+                if let Err(ref errors) = res {
+                    eprintln!("{errors:#}");
+                }
+                res.is_ok()
+            })?
             .1,
     )
 }
@@ -137,35 +153,40 @@ mod tests {
         };
 
         let file = parse.source_file();
-        //eprintln!("Parsed tree: {}", file.syntax().green.print_tree());
 
         let def = dt_analyzer::analyze_cst(&file, example).unwrap();
-        println!(
-            "tree: {:#?} parsed from {}, json = {}",
-            def.tree,
+        eprintln!(
+            "parsed from\n```dts\n{}\n```\njson = {}",
             example,
             serde_json::to_string_pretty(&def.tree.clone().into_json()).unwrap()
         );
-        let json = find_select(def.tree, &binding_schema.select_validator)
+
+        let selected = find_select(def.tree, binding_schema)
             .expect("Couldn't find selected")
             .into_json();
-        eprintln!("{json:#?}");
-        let errors = binding_schema.validator.iter_errors(&json).collect::<Vec<_>>();
-        if !errors.is_empty() {
-            eprintln!("{errors:#?}");
-        };
+        eprintln!(
+            "selected = {}",
+            serde_json::to_string_pretty(&selected).unwrap()
+        );
+
+        if let Err(errors) = binding_schema
+            .schemas
+            .validate(&selected, binding_schema.main_schema_index)
+        {
+            eprintln!("{errors:#}");
+        }
     }
 
     #[test]
-    #[ignore = "Custom meta schemas are not fully implemented: https://github.com/Stranger6667/jsonschema/issues/664"]
     fn test_example() {
         // https://github.com/mrcjkb/rustaceanvim/discussions/231
-        let schema = BindingSchema::compile(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("example.yaml")).unwrap();
+        let schema =
+            BindingSchema::compile(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("example.yaml"))
+                .unwrap();
         compile_example(schema.raw_schema["examples"][0].as_str().unwrap(), &schema);
     }
 
     #[test]
-    #[ignore = "Custom meta schemas are not fully implemented: https://github.com/Stranger6667/jsonschema/issues/664"]
     fn test_leds() {
         let schema = BindingSchema::compile(
             "/home/axel/dev/mainlining/linux/Documentation/devicetree/bindings/leds/leds-bcm6328.yaml",
@@ -175,7 +196,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Custom meta schemas are not fully implemented: https://github.com/Stranger6667/jsonschema/issues/664"]
     fn test_simplefb() {
         let schema = BindingSchema::compile(
             "/home/axel/dev/mainlining/linux/Documentation/devicetree/bindings/display/simple-framebuffer.yaml",
