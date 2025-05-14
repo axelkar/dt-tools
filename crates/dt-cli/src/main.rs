@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    error::Error,
+    path::{Path, PathBuf},
+};
 
 use clap::{
     builder::{
@@ -8,6 +11,13 @@ use clap::{
     Parser, Subcommand,
 };
 use tracing_subscriber::filter::LevelFilter;
+
+use dt_workspace::{
+    config::{
+        cli_config::CliConfig, env_config::EnvConfig, toml_config::TomlConfig, CombinedConfig,
+    },
+    Workspace, WorkspacePathFindResult,
+};
 
 fn styles() -> Styles {
     Styles::styled()
@@ -36,6 +46,8 @@ struct Cli {
     verbose: bool,
     #[command(subcommand)]
     command: Command,
+    #[clap(flatten)]
+    config: CliConfig,
 }
 
 #[derive(Subcommand, Debug)]
@@ -56,7 +68,7 @@ enum Command {
     Lint {},
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let cli = dbg!(Cli::parse());
     tracing_subscriber::fmt()
         .with_max_level(if cli.verbose {
@@ -69,4 +81,25 @@ fn main() {
         Command::Parse { file: _, output: _ } => {}
         Command::Lint {} => todo!(),
     }
+
+    let cwd = Path::new(".").canonicalize()?;
+    let (toml_config, workspace_dir) = match Workspace::find_workspace_dir(&cwd) {
+        WorkspacePathFindResult::TomlConfig {
+            toml_file_path,
+            workspace_dir,
+        } => (Some(TomlConfig::load(&toml_file_path)), workspace_dir),
+        WorkspacePathFindResult::LinuxMarker { workspace_dir }
+        | WorkspacePathFindResult::Fallback { workspace_dir } => (None, workspace_dir),
+    };
+
+    let _workspace = dbg!(Workspace {
+        config: CombinedConfig::merge(
+            Some(cli.config),
+            Some(EnvConfig::from_env()?),
+            toml_config.transpose()?,
+        ),
+        path: workspace_dir.to_path_buf()
+    });
+
+    Ok(())
 }
