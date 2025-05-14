@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
 
-/// Looks for `filename` in `start` directory's ancestors
+/// Searches for a file with the given `filename` in the given `start` directory
+/// and its ancestors, applying a `f` to each candidate path.
 ///
-/// Returns the `filename` path and matching ancestor if found
+/// Returns a reference to the directory where the match was found and a full path
+/// constructed by joining the ancestor with `filename`
 pub(crate) fn search<'a, F: FnMut(&PathBuf) -> bool>(
     start: &'a Path,
     filename: &str,
