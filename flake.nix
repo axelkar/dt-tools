@@ -1,13 +1,14 @@
 {
   description = "dt-tools devel and build";
 
-  # Unstable required until Rust 1.85 (2024 edition) is on stable
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
 
   # shell.nix compatibility
   inputs.flake-compat.url = "https://flakehub.com/f/edolstra/flake-compat/1.tar.gz";
 
-  outputs = { self, nixpkgs, ... }:
+  inputs.self.submodules = true;
+
+  outputs = { nixpkgs, ... }:
     let
       # System types to support.
       targetSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
@@ -20,17 +21,15 @@
           pkgs = nixpkgs.legacyPackages.${system};
         in
         {
-          default = pkgs.rustPlatform.buildRustPackage rec {
+          default = pkgs.rustPlatform.buildRustPackage {
             pname = "dt-tools";
             version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
 
-            src = assert nixpkgs.lib.assertMsg (self.submodules == true)
-              "Unable to build without submodules. Append '?submodules=1#' to the URL.";
-              ./.;
+            src = ./.;
 
             cargoLock.lockFile = ./Cargo.lock;
 
-            meta = with nixpkgs.lib; {
+            meta = {
               description = "Modern devicetree tools in Rust";
               homepage = "https://github.com/axelkar/dt-tools";
             };
@@ -60,7 +59,7 @@
 
               # It needs llvm-profdata and llvm-cov from bintools, but doesn't currently pick them up from PATH:
               # https://github.com/mozilla/grcov/issues/848
-              # Normally they get added to the shell by llvmPackages.bintools's setup hook
+              # Normally they get added to the shell's PATH by llvmPackages.bintools's setup hook
               (writeShellScriptBin "grcov" ''
                 exec ${grcov}/bin/grcov --llvm-path ${llvmPackages.llvm}/bin "$@"
               '')
