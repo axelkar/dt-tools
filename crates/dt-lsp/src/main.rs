@@ -14,19 +14,14 @@ use std::{
 };
 use tokio::{net::TcpListener, sync::Mutex};
 use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, Hover, HoverParams, HoverProviderCapability, InitializeParams,
-    InitializeResult, InitializedParams, Location, MessageType, OneOf, Position, Range,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
-    WorkspaceFolder, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location, MessageType, OneOf, Position, Range, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceFolder, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 use triomphe::Arc;
 
-mod hover;
+mod handlers;
 
 /// A fast map that can be sent between threads
 pub type FxDashMap<K, V> =
@@ -37,6 +32,7 @@ pub struct Document {
     pub text: Rope,
     pub file: Option<ast::SourceFile>,
     pub analyzed: Option<Vec<AnalyzedToplevel>>,
+    pub included_paths: Option<Vec<(PathBuf, TextRange)>>,
 }
 
 #[derive(Debug)]
@@ -46,7 +42,7 @@ struct SharedState {
     /// The file where evaluation will start from
     ///
     /// Files not (recursively) included in this file must not be analyzed
-    main_file: Mutex<Option<SourceId>>,
+    main_file: parking_lot::Mutex<Option<SourceId>>,
 }
 
 #[derive(Clone)]
@@ -97,6 +93,7 @@ impl LanguageServer for Backend {
                 //completion_provider: (),
                 //signature_help_provider: (),
                 // definition_provider: (), // TODO: refer to kernel Documentation/bindings ?!?
+                definition_provider: Some(OneOf::Left(true)),
                 // implementation_provider: (), // TODO: for labels
                 // references_provider: (), // TODO: for labels
                 //document_highlight_provider: (),
@@ -151,7 +148,7 @@ impl LanguageServer for Backend {
 
         {
             // Set the first opened file to be the main file
-            let mut main_file = self.state.main_file.lock().await;
+            let mut main_file = self.state.main_file.lock();
             if main_file.is_none() {
                 *main_file = Some(source_id);
             }
@@ -194,7 +191,11 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        Ok(hover::hover(self, params).await)
+        Ok(handlers::hover::hover(self, params).await)
+    }
+
+    async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
+        Ok(handlers::goto_definition::goto_definition(self, params).await)
     }
 }
 
@@ -216,12 +217,13 @@ impl Backend {
                 text: rope.clone(),
                 file: None,
                 analyzed: None,
+                included_paths: None,
             },
         );
         // TODO: Check if it exists already, with equal text
         // It may be an included file or a reopened file
 
-        let is_main_file = self.state.main_file.blocking_lock().as_deref() == Some(&source_id);
+        let is_main_file = self.state.main_file.lock().as_deref() == Some(&source_id);
 
         let Parse {
             green_node,
@@ -395,6 +397,8 @@ impl Backend {
             PathBuf::from("/home/axel/dev/mainlining/linux/scripts/dtc/include-prefixes"),
         ];
 
+        let mut included_paths = Vec::new();
+
         // TODO: only re-check when includes are updated or include config is changed
         for include in analyzed.iter().filter_map(AnalyzedToplevel::as_include) {
             let include_path = include.find_file(&parent_path, include_dirs);
@@ -407,6 +411,8 @@ impl Backend {
                 ));
                 continue;
             };
+
+            included_paths.push((include_path.clone(), include.text_range));
 
             let new_uri = Url::from_file_path(include_path.clone()).unwrap();
 
@@ -456,6 +462,7 @@ impl Backend {
                 text: rope,
                 file: Some(file),
                 analyzed: Some(analyzed),
+                included_paths: Some(included_paths)
             },
         );
 
@@ -481,7 +488,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         state: Arc::new(SharedState {
             document_map: FxDashMap::default(),
             workspace_folders: Mutex::new(Vec::new()),
-            main_file: Mutex::new(None),
+            main_file: parking_lot::Mutex::new(None),
         }),
     });
 
