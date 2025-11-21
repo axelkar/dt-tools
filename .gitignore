@@ -1,5 +1,9 @@
+# Rust
 /target
-.direnv
+
+# Nix
+/.direnv
+/result
 
 # Code coverage files
 *.profraw
