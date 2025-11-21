@@ -1,8 +1,18 @@
--- nvim -S lsp.lua a.dts
-vim.lsp.start({
-  name = 'DeviceTreeLSP',
+-- nvim --cmd 'luafile lsp.lua' a.dts
+vim.lsp.config('dt-tools', {
   --cmd = {'../../target/debug/dt-lsp'},
-  --cmd = {'cargo', 'run'},
-  cmd = vim.lsp.rpc.connect('127.0.0.1', 9257),
-  -- root_dir = vim.fs.dirname(vim.fs.find({'setup.py', 'pyproject.toml'}, { upward = true })[1]),
+  cmd = {'cargo', 'run', '-p', 'dt-lsp'},
+  --cmd = vim.lsp.rpc.connect('127.0.0.1', 9257),
+
+  filetypes = {
+    'dts',
+
+    -- For header (*.h) files
+    'c',
+    'cpp',
+  },
+
+  root_markers = { '.dt-tools.toml', '.git' },
 })
+
+vim.lsp.enable('dt-tools')

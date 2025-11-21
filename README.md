@@ -56,11 +56,11 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The VSCode extension's documentation can be found [here](vscode/README.md).
 
-The language server is also packaged for Neovim with the `./crates/dt-lsp/lsp.lua` script.
+The language server is also packaged for Neovim with the Lua script in `./crates/dt-lsp/lsp.lua`.
 
 ```sh
-cd ./crates/dt-lsp
-nvim -S lsp.lua ../../lint_showcase.dts
+cargo build -p dt-lsp
+nvim --cmd 'luafile ./crates/dt-lsp/lsp.lua' lint_showcase.dts
 ```
 
 Features:
