@@ -6,6 +6,7 @@ keywords = ["devicetree"]
 
 version.workspace = true
 authors.workspace = true
+rust-version.workspace = true
 readme.workspace = true
 repository.workspace = true
 license.workspace = true

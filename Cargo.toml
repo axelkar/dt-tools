@@ -5,6 +5,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 authors = ["Axel Karjalainen <axel@axka.fi>"]
+rust-version = "1.86" # Same as Nixpkgs 25.05, a sane default
 readme = "README.md"
 repository = "https://github.com/axelkar/dt-tools"
 license = "MIT OR Apache-2.0"
