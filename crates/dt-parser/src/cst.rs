@@ -356,7 +356,7 @@ impl RedNode {
     }
 
     /// Returns an iterator over all immediate children.
-    pub fn children<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = RedItem> + 'a {
+    pub fn children(self: &Arc<RedNode>) -> impl Iterator<Item = RedItem> + '_ {
         let mut current_text_offset = self.text_offset;
 
         self.green
@@ -387,12 +387,12 @@ impl RedNode {
     }
 
     /// Returns an iterator over immediate child nodes.
-    pub fn child_nodes<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = Arc<RedNode>> + 'a {
+    pub fn child_nodes(self: &Arc<RedNode>) -> impl Iterator<Item = Arc<RedNode>> + '_ {
         self.children().filter_map(RedItem::into_node)
     }
 
     /// Returns an iterator over immediate child tokens.
-    pub fn child_tokens<'a>(self: &'a Arc<RedNode>) -> impl Iterator<Item = Arc<RedToken>> + 'a {
+    pub fn child_tokens(self: &Arc<RedNode>) -> impl Iterator<Item = Arc<RedToken>> + '_ {
         self.children().filter_map(RedItem::into_token)
     }
 

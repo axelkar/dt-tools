@@ -1,2 +1,2 @@
-pub mod hover;
 pub mod goto_definition;
+pub mod hover;

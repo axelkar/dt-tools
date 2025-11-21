@@ -77,10 +77,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             LevelFilter::WARN
         })
         .init();
-    match cli.command {
-        Command::Parse { file: _, output: _ } => todo!(),
-        Command::Lint {} => todo!(),
-    }
 
     let cwd = Path::new(".").canonicalize()?;
     let (toml_config, workspace_dir) = match Workspace::find_workspace_dir(&cwd) {
@@ -101,5 +97,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         path: workspace_dir.to_path_buf()
     });
 
-    Ok(())
+    match cli.command {
+        Command::Parse { file: _, output: _ } => todo!(),
+        Command::Lint {} => todo!(),
+    }
 }

@@ -16,7 +16,8 @@ license.workspace = true
 dashmap.workspace = true
 ropey = "1.6.1"
 tokio = { version = "1.36.0", features = ["fs", "rt-multi-thread", "macros", "io-std", "net", "io-util"] }
-tower-lsp = "0.20.0"
+tower-lsp-server = "0.22.1"
+fluent-uri = "0.1.4" # lsp-types compat
 dt-parser.workspace = true
 dt-analyzer.workspace = true
 dt-lint.workspace = true

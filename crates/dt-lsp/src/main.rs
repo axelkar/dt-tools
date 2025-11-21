@@ -13,10 +13,19 @@ use std::{
     path::PathBuf,
 };
 use tokio::{net::TcpListener, sync::Mutex};
-use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location, MessageType, OneOf, Position, Range, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url, WorkspaceFolder, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities
+use tower_lsp_server::{
+    lsp_types::{
+        Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DidChangeTextDocumentParams,
+        DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+        DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+        HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+        InitializedParams, Location, MessageType, OneOf, Position, Range, ServerCapabilities,
+        ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkspaceFolder,
+        WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
+    },
+    UriExt,
 };
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 use triomphe::Arc;
@@ -51,9 +60,8 @@ struct Backend {
     state: Arc<SharedState>,
 }
 
-type Result<T, E = tower_lsp::jsonrpc::Error> = std::result::Result<T, E>;
+type Result<T, E = tower_lsp_server::jsonrpc::Error> = std::result::Result<T, E>;
 
-#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         if let Some(client_info) = params.client_info {
@@ -194,21 +202,24 @@ impl LanguageServer for Backend {
         Ok(handlers::hover::hover(self, params).await)
     }
 
-    async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
         Ok(handlers::goto_definition::goto_definition(self, params).await)
     }
 }
 
 impl Backend {
-    #[tracing::instrument(skip_all, fields(uri = %uri))]
+    #[tracing::instrument(skip_all, fields(uri = %*uri))]
     fn on_change(
         &self,
-        uri: Url,
+        uri: Uri,
         text: String,
         version: Option<i32>,
         tokio_handle: tokio::runtime::Handle,
     ) {
-        debug!(version, "File with URI `{uri}` was changed");
+        debug!(version, "File with URI `{}` was changed", *uri);
         let rope = ropey::Rope::from_str(&text);
         let source_id = SourceId::from(uri.as_str());
         self.state.document_map.insert(
@@ -381,9 +392,14 @@ impl Backend {
             write!(f, "analyzed1={analyzed:#?}").unwrap();
         }
 
+        assert!(
+            uri.scheme().is_some_and(|s| s.eq_lowercase("file")),
+            "LSP should only allow file: URIs"
+        );
+
         let parent_path = uri
             .to_file_path()
-            .expect("LSP should only allow file: URIs")
+            .expect("Invalid file path")
             .parent()
             .expect("a file always has a parent")
             .to_owned();
@@ -414,7 +430,7 @@ impl Backend {
 
             included_paths.push((include_path.clone(), include.text_range));
 
-            let new_uri = Url::from_file_path(include_path.clone()).unwrap();
+            let new_uri = Uri::from_file_path(include_path.clone()).unwrap();
 
             tracing::info!("dot {:?} -> {:?}", uri.to_string(), new_uri.to_string());
 
@@ -462,7 +478,7 @@ impl Backend {
                 text: rope,
                 file: Some(file),
                 analyzed: Some(analyzed),
-                included_paths: Some(included_paths)
+                included_paths: Some(included_paths),
             },
         );
 

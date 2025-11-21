@@ -6,7 +6,7 @@ use dt_parser::{
     match_ast, SourceId,
 };
 use itertools::Itertools;
-use tower_lsp::lsp_types::{
+use tower_lsp_server::lsp_types::{
     Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, MessageType, Range,
 };
 

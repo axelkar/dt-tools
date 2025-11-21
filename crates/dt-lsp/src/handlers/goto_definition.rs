@@ -5,8 +5,11 @@ use dt_parser::{
     lexer::TokenKind,
     match_ast, SourceId,
 };
-use tower_lsp::lsp_types::{
-    GotoDefinitionParams, GotoDefinitionResponse, Location, MessageType, Position, Range, Url,
+use tower_lsp_server::{
+    lsp_types::{
+        GotoDefinitionParams, GotoDefinitionResponse, Location, MessageType, Position, Range, Uri,
+    },
+    UriExt,
 };
 
 pub async fn goto_definition(
@@ -26,7 +29,7 @@ pub async fn goto_definition(
         v.iter()
             .find(|(_, text_range)| text_range.byte_range().contains(&offset))
     }) {
-        let uri = Url::from_file_path(include_path).expect("Included path should be absolute");
+        let uri = Uri::from_file_path(include_path).expect("Included path should be absolute");
         return Some(GotoDefinitionResponse::Scalar(Location::new(
             uri,
             Range {
@@ -58,8 +61,6 @@ pub async fn goto_definition(
             .await;
         return None;
     }
-
-    let rope = &document.text;
 
     {
         let parent = token.parent.clone();

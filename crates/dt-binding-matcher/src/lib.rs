@@ -27,7 +27,9 @@ impl BindingSchema {
     /// - Select JSON Schema compilation fails
     #[expect(clippy::missing_panics_doc, reason = "fixups should add select key")]
     pub fn compile(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let mut yaml: Value = serde_yaml::from_str(&fs_err::read_to_string(path).context("Failed to read schema from path")?)?;
+        let mut yaml: Value = serde_yaml::from_str(
+            &fs_err::read_to_string(path).context("Failed to read schema from path")?,
+        )?;
         let Some(yaml_map) = yaml.as_mapping_mut() else {
             todo!()
         };
@@ -157,7 +159,7 @@ mod tests {
         if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
             eprintln!("Invalid DTS!");
             std::process::exit(1);
-        };
+        }
 
         let file = parse.source_file();
 

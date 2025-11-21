@@ -1,16 +1,3 @@
-~, -, + arithmetic prefixes
-Pratt parsing
-
-#define, #if, etc.
-
-rename node to tree in RedNode, GreenNode, AstNode, etc.
-
-use less Arc's? Or at least don't clone them when only using from a single thread?
-
-use the lsp-server crate instead of tower_lsp
-
-use bstr more
-
 expose LSP JSON config in VSCode extension
 release VSCode extension
 

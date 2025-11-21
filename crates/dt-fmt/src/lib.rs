@@ -45,7 +45,7 @@ mod tests {
         if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
             eprintln!("Invalid DTS!");
             std::process::exit(1);
-        };
+        }
 
         // TODO: add tests
 

@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         eprintln!("{}", "CST tree:".fg::<Gray>());
         eprintln!("{}", parse.green_node.print_tree());
-    };
+    }
 
     let file = parse.source_file();
 

@@ -199,7 +199,6 @@ fn merge_root_node(
             match syntax {
                 ast::DtNode(child_ast) => if child_ast.is_extension() {
                     diag.emit(Diagnostic::new(child_ast.syntax().text_range(), Cow::Borrowed("Extension nodes may not be defined in other nodes"), Severity::Error));
-                    continue
                 } else {
                     let Some(name) = get_node_prop_name(child_ast.text_name("").as_deref(), &child_ast, diag, macro_db) else {
                         continue
@@ -219,7 +218,6 @@ fn merge_root_node(
                                 msg: Cow::Owned(format!("`{name}` is defined multiple times")),
                                 severity: Severity::Error,
                             });
-                            continue
                         }
                         Some(Stage2Tree::Node(other)) => {
                             // merge
@@ -281,7 +279,7 @@ fn merge_root_node(
                         stage2.children.insert(name.to_owned(), Stage2Tree::Prop(prop));
                     }
                 },
-                _ => continue
+                _ => {}
             }
         }
     }
