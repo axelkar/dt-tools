@@ -1,4 +1,3 @@
-use axka_rcu::{triomphe, Rcu};
 use dt_analyzer::new::stage1::AnalyzedToplevel;
 use dt_diagnostic::DiagnosticCollector;
 use dt_parser::{
@@ -8,7 +7,7 @@ use dt_parser::{
     SourceId, TextRange,
 };
 use ropey::Rope;
-use std::{borrow::Cow, sync::Arc};
+use std::borrow::Cow;
 use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -25,6 +24,7 @@ use tower_lsp::lsp_types::{
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
+use triomphe::Arc;
 
 mod hover;
 
@@ -46,7 +46,7 @@ struct SharedState {
     /// The file where evaluation will start from
     ///
     /// Files not (recursively) included in this file must not be analyzed
-    main_file: Rcu<Option<SourceId>>,
+    main_file: Mutex<Option<SourceId>>,
 }
 
 #[derive(Clone)]
@@ -149,10 +149,12 @@ impl LanguageServer for Backend {
 
         let source_id = SourceId::from(params.text_document.uri.as_str());
 
-        if self.state.main_file.read().is_none() {
-            self.state
-                .main_file
-                .write(triomphe::Arc::new(Some(source_id)));
+        {
+            // Set the first opened file to be the main file
+            let mut main_file = self.state.main_file.lock().await;
+            if main_file.is_none() {
+                *main_file = Some(source_id);
+            }
         }
 
         // TODO: warn files that aren't included by main_file
@@ -219,7 +221,7 @@ impl Backend {
         // TODO: Check if it exists already, with equal text
         // It may be an included file or a reopened file
 
-        let is_main_file = self.state.main_file.read().as_deref() == Some(&source_id);
+        let is_main_file = self.state.main_file.blocking_lock().as_deref() == Some(&source_id);
 
         let Parse {
             green_node,
@@ -286,7 +288,7 @@ impl Backend {
             }
         }
 
-        let cst = RedNode::new(Arc::new(green_node));
+        let cst = RedNode::new(std::sync::Arc::new(green_node));
 
         // TODO: use Parse::source_file
         let file = ast::SourceFile::cast(cst).expect("parser should always return SourceFile");
@@ -479,7 +481,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         state: Arc::new(SharedState {
             document_map: FxDashMap::default(),
             workspace_folders: Mutex::new(Vec::new()),
-            main_file: Rcu::new(triomphe::Arc::new(None)),
+            main_file: Mutex::new(None),
         }),
     });
 

@@ -24,7 +24,7 @@ itertools.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 rayon.workspace = true
-axka-rcu = { version = "1.0.0", features = ["triomphe"] } # FIXME: yanked
+triomphe = "0.1.15"
 rustc-hash.workspace = true
 dt-diagnostic = { workspace = true, features = ["parking_lot"] }
 
