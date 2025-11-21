@@ -20,14 +20,13 @@ impl boon::UrlLoader for DtJsonSchemaLoader {
                         .strip_prefix('/')
                         .ok_or_else(|| anyhow!("devicetree.org url has no path portion"))?;
 
-                    let mut path_a =
-                        PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/dt-schema/dtschema"));
+                    let mut path_a = PathBuf::from(std::env::var_os("DT_TOOLS_DT_SCHEMA_REPO")
+                        .expect("Pass a path to a clone of https://github.com/devicetree-org/dt-schema to DT_TOOLS_DT_SCHEMA_REPO"))
+                        .join("dtschema");
                     path_a.push(abs_path);
 
                     let path_b = if let Some(abs_path) = abs_path.strip_prefix("schemas/") {
-                        let mut path_b = PathBuf::from(
-                            "/home/axel/dev/mainlining/linux/Documentation/devicetree/bindings/",
-                        );
+                        let mut path_b = linux_bindings_path();
                         path_b.push(abs_path);
                         Some(path_b)
                     } else {
@@ -50,4 +49,11 @@ impl boon::UrlLoader for DtJsonSchemaLoader {
             _ => Err(anyhow!("scheme is not supported").into()),
         }
     }
+}
+
+pub(crate) fn linux_bindings_path() -> PathBuf {
+    PathBuf::from(
+        std::env::var_os("DT_TOOLS_LINUX_BINDINGS")
+            .expect("Pass a path to `Documentation/devicetree/bindings` in the Linux repo to DT_TOOLS_LINUX_BINDINGS")
+    )
 }

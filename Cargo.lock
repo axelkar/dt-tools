@@ -424,6 +424,7 @@ dependencies = [
  "dt-analyzer",
  "dt-parser",
  "fluent-uri",
+ "fs-err",
  "once_cell",
  "serde_json",
  "serde_yaml",

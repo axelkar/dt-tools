@@ -19,6 +19,7 @@ anyhow = { version = "1.0.71", features = ["backtrace"] }
 once_cell = "1.19.0"
 fluent-uri = "0.3.2"
 boon = "0.6.1"
+fs-err.workspace = true
 
 [dev-dependencies]
 dt-parser.workspace = true

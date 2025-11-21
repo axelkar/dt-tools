@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .init();
     match cli.command {
-        Command::Parse { file: _, output: _ } => {}
+        Command::Parse { file: _, output: _ } => todo!(),
         Command::Lint {} => todo!(),
     }
 

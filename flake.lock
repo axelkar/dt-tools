@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "dt-schema": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1763516530,
+        "narHash": "sha256-DBrd5VNvmMp9y51Nky+FF7pIxQwdeodTtOTBbKIF0yU=",
+        "owner": "devicetree-org",
+        "repo": "dt-schema",
+        "rev": "7033eb7cec1abe55f496309f0f6f271524f5d612",
+        "type": "github"
+      },
+      "original": {
+        "owner": "devicetree-org",
+        "repo": "dt-schema",
+        "type": "github"
+      }
+    },
     "flake-compat": {
       "locked": {
         "lastModified": 1733328505,
@@ -32,6 +48,7 @@
     },
     "root": {
       "inputs": {
+        "dt-schema": "dt-schema",
         "flake-compat": "flake-compat",
         "nixpkgs": "nixpkgs"
       }

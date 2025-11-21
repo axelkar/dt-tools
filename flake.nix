@@ -6,17 +6,43 @@
   # shell.nix compatibility
   inputs.flake-compat.url = "https://flakehub.com/f/edolstra/flake-compat/1.tar.gz";
 
-  inputs.self.submodules = true;
+  inputs.dt-schema = {
+    url = "github:devicetree-org/dt-schema";
+    flake = false;
+  };
 
-  outputs = { nixpkgs, ... }:
+  outputs =
+    { nixpkgs, dt-schema, ... }:
     let
       # System types to support.
-      targetSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      targetSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
 
       # Helper function to generate an attrset '{ x86_64-linux = f "x86_64-linux"; ... }'.
       forAllSystems = nixpkgs.lib.genAttrs targetSystems;
-    in {
-      packages = forAllSystems (system:
+
+      linuxBindings =
+        pkgs:
+        let
+          linuxVersion = "6.17.8";
+          linuxSrcRaw = pkgs.fetchurl {
+            url = "mirror://kernel/linux/kernel/v${nixpkgs.lib.versions.major linuxVersion}.x/linux-${linuxVersion}.tar.xz";
+            hash = "sha256-Wo3mSnX8pwbAHGwKd891p0YYQ52xleJfHwJor2svsdo=";
+          };
+          linuxSrc = pkgs.runCommand "linux-${linuxVersion}-src" { } ''
+            mkdir "$out"
+            tar -xf "${linuxSrcRaw}" --strip-components=1 -C "$out"
+          '';
+        in
+        "${linuxSrc}/Documentation/devicetree/bindings";
+    in
+    {
+      packages = forAllSystems (
+        system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
         in
@@ -29,6 +55,9 @@
 
             cargoLock.lockFile = ./Cargo.lock;
 
+            env.DT_TOOLS_LINUX_BINDINGS = linuxBindings pkgs;
+            env.DT_TOOLS_DT_SCHEMA_REPO = dt-schema.outPath;
+
             meta = {
               description = "Modern devicetree tools in Rust";
               homepage = "https://github.com/axelkar/dt-tools";
@@ -36,7 +65,8 @@
           };
         }
       );
-      devShells = forAllSystems (system:
+      devShells = forAllSystems (
+        system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
         in
@@ -45,6 +75,7 @@
             strictDeps = true;
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
             RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
+
             nativeBuildInputs = with pkgs; [
               cargo
               rustc
@@ -65,6 +96,9 @@
               '')
               fd
             ];
+
+            env.DT_TOOLS_LINUX_BINDINGS = linuxBindings pkgs;
+            env.DT_TOOLS_DT_SCHEMA_REPO = dt-schema.outPath;
           };
           vscode = pkgs.mkShellNoCC {
             strictDeps = true;

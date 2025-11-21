@@ -1,3 +1,0 @@
-[submodule "crates/dt-binding-matcher/dt-schema"]
-	path = crates/dt-binding-matcher/dt-schema
-	url = https://github.com/devicetree-org/dt-schema

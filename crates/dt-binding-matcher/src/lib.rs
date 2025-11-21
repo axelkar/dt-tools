@@ -1,5 +1,6 @@
 use std::{collections::HashSet, path::Path};
 
+use anyhow::Context;
 use dt_analyzer::DefinitionTreeNode;
 use serde_yaml::{Mapping, Value};
 
@@ -26,7 +27,7 @@ impl BindingSchema {
     /// - Select JSON Schema compilation fails
     #[expect(clippy::missing_panics_doc, reason = "fixups should add select key")]
     pub fn compile(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let mut yaml: Value = serde_yaml::from_str(&std::fs::read_to_string(path)?)?;
+        let mut yaml: Value = serde_yaml::from_str(&fs_err::read_to_string(path).context("Failed to read schema from path")?)?;
         let Some(yaml_map) = yaml.as_mapping_mut() else {
             todo!()
         };
@@ -49,28 +50,34 @@ impl BindingSchema {
         // in 2020, items->prefixItems and additionalItems->unevaluatedItems
         compiler.set_default_draft(boon::Draft::V2019_09);
 
+        // NOTE: boon::Error must be printed before converting to anyhow::Error because
+        // it's !Send+!Sync
         compiler.use_loader(Box::new(loader::DtJsonSchemaLoader));
         compiler
             .add_resource("dt-tools:main", main_json)
-            .map_err(|err| anyhow::anyhow!("{:#}", err))?;
+            .map_err(|err| anyhow::anyhow!("{:#} {}", err, err))
+            .context("Failed to add JSON schema resource dt-tools:main")?;
         compiler
             .add_resource("dt-tools:select", select_json)
-            .map_err(|err| anyhow::anyhow!("{:#}", err))?;
+            .map_err(|err| anyhow::anyhow!("{:#} {}", err, err))
+            .context("Failed to add JSON schema resource dt-tools:main")?;
 
         let mut schemas = boon::Schemas::new();
 
-        let schema_index = compiler
+        let main_schema_index = compiler
             .compile("dt-tools:main", &mut schemas)
-            .map_err(|err| anyhow::anyhow!("{:#}", err))?;
+            .map_err(|err| anyhow::anyhow!("{:#} {}", err, err))
+            .context("Failed to compile JSON schema location dt-tools:main")?;
 
         let select_schema_index = compiler
             .compile("dt-tools:select", &mut schemas)
-            .map_err(|err| anyhow::anyhow!("{:#}", err))?;
+            .map_err(|err| anyhow::anyhow!("{:#} {}", err, err))
+            .context("Failed to compile JSON schema location dt-tools:main")?;
 
         Ok(Self {
             raw_schema,
             schemas,
-            main_schema_index: schema_index,
+            main_schema_index,
             select_schema_index,
             maintainers,
         })
@@ -97,7 +104,10 @@ pub fn get_compatible_items(map: &Mapping) -> HashSet<String> {
 }
 
 #[must_use]
-#[expect(clippy::missing_panics_doc, reason = "to_string_pretty shoudln't error")]
+#[expect(
+    clippy::missing_panics_doc,
+    reason = "to_string_pretty shoudln't error"
+)]
 pub fn find_select(
     tree: DefinitionTreeNode,
     binding_schema: &BindingSchema,
@@ -117,10 +127,7 @@ pub fn find_select(
                 let binding = node.clone().into_json();
                 let res = binding_schema
                     .schemas
-                    .validate(
-                        &binding,
-                        binding_schema.select_schema_index,
-                    );
+                    .validate(&binding, binding_schema.select_schema_index);
                 if let Err(ref errors) = res {
                     eprintln!("{errors:#}");
                 }
@@ -188,17 +195,16 @@ mod tests {
 
     #[test]
     fn test_leds() {
-        let schema = BindingSchema::compile(
-            "/home/axel/dev/mainlining/linux/Documentation/devicetree/bindings/leds/leds-bcm6328.yaml",
-        )
-        .unwrap();
+        let schema =
+            BindingSchema::compile(loader::linux_bindings_path().join("leds/leds-bcm6328.yaml"))
+                .unwrap();
         compile_example(schema.raw_schema["examples"][0].as_str().unwrap(), &schema);
     }
 
     #[test]
     fn test_simplefb() {
         let schema = BindingSchema::compile(
-            "/home/axel/dev/mainlining/linux/Documentation/devicetree/bindings/display/simple-framebuffer.yaml",
+            loader::linux_bindings_path().join("display/simple-framebuffer.yaml"),
         )
         .unwrap();
         compile_example(schema.raw_schema["examples"][0].as_str().unwrap(), &schema);
