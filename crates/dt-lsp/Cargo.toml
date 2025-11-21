@@ -29,6 +29,8 @@ rayon.workspace = true
 triomphe = "0.1.15"
 rustc-hash.workspace = true
 dt-diagnostic = { workspace = true, features = ["parking_lot"] }
+salsa.workspace = true
+camino.workspace = true
 
 [lints]
 workspace = true

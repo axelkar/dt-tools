@@ -1,6 +1,6 @@
 //! # Devicetree analyzer
 //!
-//! A crate for analyzing [CST nodes](RedNode) produced by [`dt_parser`] to property values.
+//! A crate for analyzing [CST nodes](dt_parser::cst::RedNode) produced by [`dt_parser`] to property values.
 //!
 //! # Example
 //!
@@ -46,7 +46,7 @@ pub use prop::{
 };
 pub use string::StringParseError;
 
-mod macros;
+pub mod macros;
 pub mod new;
 mod prop;
 pub mod resolved_prop;

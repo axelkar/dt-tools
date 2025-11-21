@@ -1,11 +1,6 @@
 use dt_analyzer::new::stage1::AnalyzedToplevel;
 use dt_diagnostic::DiagnosticCollector;
-use dt_parser::{
-    ast::{self, AstNode},
-    cst::RedNode,
-    parser::{parse, Parse},
-    SourceId, TextRange,
-};
+use dt_parser::{ast, parser::parse, SourceId, TextRange};
 use ropey::Rope;
 use std::borrow::Cow;
 use std::{
@@ -30,7 +25,10 @@ use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 use triomphe::Arc;
 
+use crate::salsa::db::{BaseDatabase, BaseDb, DbSnapshot};
+
 mod handlers;
+pub mod salsa;
 
 /// A fast map that can be sent between threads
 pub type FxDashMap<K, V> =
@@ -44,20 +42,35 @@ pub struct Document {
     pub included_paths: Option<Vec<(PathBuf, TextRange)>>,
 }
 
-#[derive(Debug)]
-struct SharedState {
+struct State {
     document_map: FxDashMap<SourceId, Document>,
     workspace_folders: Mutex<Vec<WorkspaceFolder>>,
     /// The file where evaluation will start from
     ///
     /// Files not (recursively) included in this file must not be analyzed
     main_file: parking_lot::Mutex<Option<SourceId>>,
+
+    /// Salsa database
+    // TODO: no mutex...
+    db: parking_lot::Mutex<BaseDatabase>,
+}
+
+impl State {
+    pub(crate) fn snapshot(&self) -> DbSnapshot {
+        DbSnapshot {
+            // FIXME: I don't think this makes a real snapshot, because salsa::Storage
+            // contains an Arc???
+            db: self.db.lock().clone(),
+        }
+    }
 }
 
 #[derive(Clone)]
 struct Backend {
+    /// Handle for communication with the LSP client.
     client: Client,
-    state: Arc<SharedState>,
+    // An `Arc` so it can be used on a background thread.
+    state: Arc<State>,
 }
 
 type Result<T, E = tower_lsp_server::jsonrpc::Error> = std::result::Result<T, E>;
@@ -125,16 +138,6 @@ impl LanguageServer for Backend {
         })
     }
 
-    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
-        // TODO: recompute includes etc.
-        let mut folders = self.state.workspace_folders.lock().await;
-        for removed in params.event.removed {
-            let pos = folders.iter().position(|x| *x == removed).unwrap();
-            folders.swap_remove(pos);
-        }
-        folders.extend_from_slice(&params.event.added);
-    }
-
     async fn initialized(&self, _: InitializedParams) {
         info!("Server initialized");
         self.client
@@ -171,6 +174,7 @@ impl LanguageServer for Backend {
             tokio::runtime::Handle::current(),
         );
     }
+
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
         assert_eq!(
             params.content_changes[0].range, None,
@@ -197,16 +201,25 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "file closed!")
             .await;
     }
-
-    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        Ok(handlers::hover::hover(self, params).await)
-    }
-
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
         Ok(handlers::goto_definition::goto_definition(self, params).await)
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        Ok(handlers::hover::hover(self, params).await)
+    }
+
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        // TODO: recompute includes etc.
+        let mut folders = self.state.workspace_folders.lock().await;
+        for removed in params.event.removed {
+            let pos = folders.iter().position(|x| *x == removed).unwrap();
+            folders.swap_remove(pos);
+        }
+        folders.extend_from_slice(&params.event.added);
     }
 }
 
@@ -222,6 +235,15 @@ impl Backend {
         debug!(version, "File with URI `{}` was changed", *uri);
         let rope = ropey::Rope::from_str(&text);
         let source_id = SourceId::from(uri.as_str());
+
+        assert!(
+            uri.scheme().is_some_and(|s| s.eq_lowercase("file")),
+            "LSP should only allow file: URIs"
+        );
+        let path = uri.to_file_path().expect("Invalid file path");
+        let path = camino::Utf8Path::from_path(&path)
+            .expect("to_file_path's implementation always guarantees valid UTF-8");
+
         self.state.document_map.insert(
             source_id.clone(),
             Document {
@@ -236,23 +258,19 @@ impl Backend {
 
         let is_main_file = self.state.main_file.lock().as_deref() == Some(&source_id);
 
-        let Parse {
-            green_node,
-            lex_errors,
-            errors,
-        } = parse(&text);
+        let parse = parse(&text);
 
         let mut diagnostics = Vec::new();
 
-        let earliest_lex_error_range = lex_errors.first().map(|e| e.text_range);
-        for lex_error in lex_errors {
+        let earliest_lex_error_range = parse.lex_errors.first().map(|e| e.text_range);
+        for lex_error in &parse.lex_errors {
             diagnostics.push(Diagnostic::new_simple(
                 range_to_lsp(lex_error.text_range, &rope).expect("range should be in the rope"),
                 format!("{} [lex error]", lex_error.inner),
             ));
         }
 
-        for error in errors {
+        for error in &parse.errors {
             if let Some(earliest_lex_error_range) = earliest_lex_error_range {
                 if error.primary_span.start >= earliest_lex_error_range.start {
                     break;
@@ -264,7 +282,7 @@ impl Backend {
                     .expect("range should be in the rope"),
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("dt-tools(syntax-error)".to_owned()),
-                message: error.message.into_owned(),
+                message: error.message.as_ref().to_owned(),
                 related_information: Some(
                     error
                         .span_labels
@@ -281,13 +299,13 @@ impl Backend {
                 ),
                 ..Default::default()
             });
-            for span_label in error.span_labels {
+            for span_label in &error.span_labels {
                 diagnostics.push(Diagnostic {
                     range: range_to_lsp(span_label.span, &rope)
                         .expect("range should be in the rope"),
                     severity: Some(DiagnosticSeverity::HINT),
                     source: Some("dt-tools(syntax-error)".to_owned()),
-                    message: span_label.msg.into_owned(),
+                    message: span_label.msg.as_ref().to_owned(),
                     related_information: Some(vec![DiagnosticRelatedInformation {
                         location: Location {
                             uri: uri.clone(),
@@ -301,13 +319,10 @@ impl Backend {
             }
         }
 
-        let cst = RedNode::new(std::sync::Arc::new(green_node));
-
-        // TODO: use Parse::source_file
-        let file = ast::SourceFile::cast(cst).expect("parser should always return SourceFile");
+        let file_ast = parse.source_file();
 
         diagnostics.extend(
-            dt_lint::default_lint(&file, &text, is_main_file)
+            dt_lint::default_lint(&file_ast, &text, is_main_file)
                 .iter()
                 .flat_map(|lint| {
                     lint.span
@@ -380,9 +395,18 @@ impl Backend {
         let mut new_diagnostics = Vec::new();
         let diag = parking_lot::Mutex::new(&mut new_diagnostics);
 
-        let analyzed = dt_analyzer::new::stage1::analyze_file(&file, &text, &diag);
+        let db = &*self.state.db.lock();
+        let file = db.get_files().get_file(db, path.to_owned());
+
+        let outline = crate::salsa::outline(db, file).expect("File should exist");
+        diag.lock().extend_from_slice(outline.diagnostics(db));
+        let analyzed = outline.toplevels(db);
+
+        let also_deps = crate::salsa::also_deps(db, file, outline).expect("a file always has a parent");
+        diag.lock().extend_from_slice(also_deps.diagnostics(db));
+
         let includes = &[]; // TODO
-        let analyzed2 = dt_analyzer::new::stage2::compute(&analyzed, includes, &diag);
+        let analyzed2 = dt_analyzer::new::stage2::compute(analyzed, includes, &diag);
         //if is_main_file {
         if false {
             use std::io::Write;
@@ -392,14 +416,7 @@ impl Backend {
             write!(f, "analyzed1={analyzed:#?}").unwrap();
         }
 
-        assert!(
-            uri.scheme().is_some_and(|s| s.eq_lowercase("file")),
-            "LSP should only allow file: URIs"
-        );
-
-        let parent_path = uri
-            .to_file_path()
-            .expect("Invalid file path")
+        let parent_path = path
             .parent()
             .expect("a file always has a parent")
             .to_owned();
@@ -417,7 +434,7 @@ impl Backend {
 
         // TODO: only re-check when includes are updated or include config is changed
         for include in analyzed.iter().filter_map(AnalyzedToplevel::as_include) {
-            let include_path = include.find_file(&parent_path, include_dirs);
+            let include_path = include.find_file(parent_path.as_ref(), include_dirs);
 
             let Some(include_path) = include_path else {
                 diag.emit(dt_diagnostic::Diagnostic::new(
@@ -476,8 +493,8 @@ impl Backend {
             source_id.clone(),
             Document {
                 text: rope,
-                file: Some(file),
-                analyzed: Some(analyzed),
+                file: Some(file_ast),
+                analyzed: Some(analyzed.clone()),
                 included_paths: Some(included_paths),
             },
         );
@@ -501,10 +518,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (service, socket) = LspService::new(|client| Backend {
         client,
-        state: Arc::new(SharedState {
+        state: Arc::new(State {
             document_map: FxDashMap::default(),
             workspace_folders: Mutex::new(Vec::new()),
             main_file: parking_lot::Mutex::new(None),
+            db: parking_lot::Mutex::new(BaseDatabase::default()),
         }),
     });
 

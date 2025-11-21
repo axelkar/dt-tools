@@ -1,6 +1,6 @@
 //! The [`Sink`] turns the parser's output to a concrete syntax tree.
 
-use std::{mem, sync::Arc};
+use std::{borrow::Cow, mem, sync::Arc};
 
 // TODO: && and || as joined https://nnethercote.github.io/2022/10/05/quirks-of-rusts-token-representation.html
 
@@ -170,7 +170,7 @@ impl<'t, 'input> Sink<'t, 'input> {
                 self.lex_errors.push(WrappedLexError {
                     inner: *error,
                     text_range: *text_range,
-                    text,
+                    text: Cow::Borrowed(text),
                 });
 
                 TokenKind::Unrecognized

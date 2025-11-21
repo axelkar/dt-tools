@@ -63,7 +63,7 @@ const PREPROCESSOR_DIRECTIVE_SET: [TokenKind; 9] = [
 /// The result from the parser.
 ///
 /// To traverse the syntax tree up and down, wrap `green_node` with [`RedNode`](crate::cst::RedNode).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Parse<'input> {
     pub green_node: GreenNode,
     pub lex_errors: Vec<WrappedLexError<'input>>,
@@ -77,6 +77,15 @@ impl Parse<'_> {
     pub fn source_file(&self) -> ast::SourceFile {
         use ast::AstNode as _;
         ast::SourceFile::cast(crate::cst::RedNode::new(Arc::new(self.green_node.clone()))).unwrap()
+    }
+
+    /// Removes any references to the input.
+    pub fn into_static(self) -> Parse<'static> {
+        Parse {
+            green_node: self.green_node,
+            lex_errors: self.lex_errors.into_iter().map(WrappedLexError::into_static).collect(),
+            errors: self.errors,
+        }
     }
 }
 
@@ -523,7 +532,7 @@ mod tests {
                 lex_errors: vec![WrappedLexError {
                     inner: LexError::UnexpectedEofString,
                     text_range: (0..4).into(),
-                    text: "\"abc",
+                    text: Cow::Borrowed("\"abc"),
                 }],
                 errors: Vec::new()
             }

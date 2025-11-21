@@ -32,6 +32,8 @@ serde_json = "1.0"
 either = "1.15"
 serde = "1"
 fs-err = "3.1.0"
+salsa = "0.24.0"
+camino = "1.2.1"
 
 [workspace.lints.rust]
 # https://github.com/rust-lang/rust/issues/95513

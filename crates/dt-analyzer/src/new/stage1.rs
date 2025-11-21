@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use camino::{Utf8Path, Utf8PathBuf};
 use dt_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
 use dt_parser::{
     ast::{self, AstNode, AstNodeOrToken, AstToken, HasLabel, HasName, SourceFile},
@@ -148,6 +149,32 @@ impl AnalyzedInclude {
         })
     }
 
+    /// Lists possible file paths under `parent_path` or `include_dirs`, depending on [`relative`](Self::relative).
+    pub fn possible_paths<'a, P: AsRef<Path>>(
+        &self,
+        parent_path: &'a Path,
+        include_dirs: &'a [P],
+    ) -> impl Iterator<Item = PathBuf> + use<'a, '_, P> {
+        self.relative
+            .then_some(parent_path)
+            .into_iter()
+            .chain(include_dirs.iter().map(AsRef::as_ref))
+            .map(|base_path| base_path.join(&self.path))
+    }
+
+    /// Lists possible file paths under `parent_path` or `include_dirs`, depending on [`relative`](Self::relative).
+    pub fn possible_paths_utf8<'a, P: AsRef<Utf8Path>>(
+        &self,
+        parent_path: &'a Utf8Path,
+        include_dirs: &'a [P],
+    ) -> impl Iterator<Item = Utf8PathBuf> + use<'a, '_, P> {
+        self.relative
+            .then_some(parent_path)
+            .into_iter()
+            .chain(include_dirs.iter().map(AsRef::as_ref))
+            .map(|base_path| base_path.join(&self.path))
+    }
+
     /// Finds the file in `parent_path` or `include_dirs`, depending on [`relative`](Self::relative).
     pub fn find_file<P: AsRef<Path>>(
         &self,
@@ -160,14 +187,8 @@ impl AnalyzedInclude {
         // Alternatively, don't canonicalize the path here, just make include_dirs and parent_path
         // absolute.
 
-        self.relative
-            .then_some(parent_path)
-            .into_iter()
-            .chain(include_dirs.iter().map(AsRef::as_ref))
-            .find_map(|base_path| {
-                let new_path = base_path.join(&self.path).canonicalize().ok()?;
-                new_path.exists().then_some(new_path)
-            })
+        self.possible_paths(parent_path, include_dirs)
+            .find_map(|new_path| new_path.exists().then_some(new_path))
     }
 }
 

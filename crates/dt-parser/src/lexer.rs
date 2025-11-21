@@ -65,7 +65,7 @@ pub struct Token<'input> {
 }
 
 /// An error returned from the lexer.
-#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Default, displaydoc::Display)]
+#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Default, displaydoc::Display, Hash)]
 pub enum LexError {
     /// Unexpected EOF (hint: unterminated incbin directive)
     UnexpectedEofIncbin,

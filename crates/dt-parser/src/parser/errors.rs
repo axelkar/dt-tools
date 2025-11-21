@@ -75,7 +75,7 @@ fn fmt_expected_message(p: &mut Parser) -> String {
 // TODO: From rust-analyzer: If possible, errors are not reported during parsing and are postponed
 // for a separate validation step. For example, parser accepts visibility modifiers on trait
 // methods, but then a separate tree traversal flags all such visibilities as erroneous.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParseError {
     /// The error message
     pub message: Cow<'static, str>,
@@ -86,11 +86,21 @@ pub struct ParseError {
 }
 
 /// [`LexError`] wrapped with a text range and the source text.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WrappedLexError<'input> {
     pub inner: LexError,
     pub text_range: TextRange,
-    pub text: &'input str,
+    pub text: Cow<'input, str>,
+}
+impl WrappedLexError<'_> {
+    /// Removes any references to the input.
+    pub fn into_static(self) -> WrappedLexError<'static> {
+        WrappedLexError {
+            inner: self.inner,
+            text_range: self.text_range,
+            text: Cow::Owned(self.text.into_owned()),
+        }
+    }
 }
 
 #[doc(hidden)]
