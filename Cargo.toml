@@ -25,15 +25,19 @@ pretty_assertions = "1.4.0"
 owo-colors = "4.0.0"
 parking_lot = "0.12.3"
 rayon = "1.10.0"
-logos = "0.15.0"
+logos = "0.16.0"
 thiserror = "2.0"
 displaydoc = "0.2.5"
 serde_json = "1.0"
+serde_yaml = "0.9.33"
 either = "1.15"
 serde = "1"
 fs-err = "3.1.0"
 salsa = "0.24.0"
 camino = "1.2.1"
+tower-lsp-server = "0.23.0"
+fluent-uri = "0.3.2" # Old version for ls-types and tower-lsp-server
+codespan-reporting = "0.13.1"
 
 [workspace.lints.rust]
 # https://github.com/rust-lang/rust/issues/95513

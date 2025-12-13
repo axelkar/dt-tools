@@ -14,7 +14,7 @@ envy = "0.4.2"
 fs-err = { workspace = true, features = ["expose_original_error"] }
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
-toml = "0.8.20"
+toml = "0.9.8"
 
 [features]
 cli = []

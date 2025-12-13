@@ -6,10 +6,9 @@ use dt_parser::{
     match_ast, SourceId,
 };
 use tower_lsp_server::{
-    lsp_types::{
+    ls_types::{
         GotoDefinitionParams, GotoDefinitionResponse, Location, MessageType, Position, Range, Uri,
     },
-    UriExt,
 };
 
 pub async fn goto_definition(

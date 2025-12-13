@@ -83,7 +83,11 @@ impl Parse<'_> {
     pub fn into_static(self) -> Parse<'static> {
         Parse {
             green_node: self.green_node,
-            lex_errors: self.lex_errors.into_iter().map(WrappedLexError::into_static).collect(),
+            lex_errors: self
+                .lex_errors
+                .into_iter()
+                .map(WrappedLexError::into_static)
+                .collect(),
             errors: self.errors,
         }
     }

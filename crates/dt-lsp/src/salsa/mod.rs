@@ -62,7 +62,11 @@ pub struct AlsoDeps<'db> {
 
 // TODO: per-AnalyzedInclude??
 #[salsa::tracked]
-pub fn also_deps<'db>(db: &'db dyn db::BaseDb, file: file::File, outline: Outline<'db>) -> Result<AlsoDeps<'db>, ()> {
+pub fn also_deps<'db>(
+    db: &'db dyn db::BaseDb,
+    file: file::File,
+    outline: Outline<'db>,
+) -> Result<AlsoDeps<'db>, ()> {
     let mut included_files = Vec::new();
     let mut diagnostics = Vec::new();
 
@@ -71,13 +75,21 @@ pub fn also_deps<'db>(db: &'db dyn db::BaseDb, file: file::File, outline: Outlin
     let include_dirs: &[&camino::Utf8Path] = &[];
 
     let files = db.get_files();
-    for include in outline.toplevels(db).iter().filter_map(AnalyzedToplevel::as_include) {
+    for include in outline
+        .toplevels(db)
+        .iter()
+        .filter_map(AnalyzedToplevel::as_include)
+    {
         for path in include.possible_paths_utf8(parent_path, include_dirs) {
             let file = files.get_file(db, path);
             included_files.push(file);
 
             if !file.is_readable_file(db) {
-                diagnostics.push(Diagnostic::new(include.text_range, Cow::Borrowed("Couldn't find file to include"), Severity::Error));
+                diagnostics.push(Diagnostic::new(
+                    include.text_range,
+                    Cow::Borrowed("Couldn't find file to include"),
+                    Severity::Error,
+                ));
             }
         }
     }
@@ -109,7 +121,8 @@ mod tests {
     #[test]
     fn test_outline() {
         let db = crate::salsa::db::BaseDatabase::default();
-        let file_path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
+        let file_path =
+            Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
         let file = db.get_files().get_file(&db, file_path);
 
         let outline = outline(&db, file).expect("Should be a readable file");
@@ -117,7 +130,10 @@ mod tests {
         assert_eq!(outline.diagnostics(&db), &[]);
         let toplevels = outline.toplevels(&db);
         assert!(
-            matches!(toplevels.as_slice(), &[AnalyzedToplevel::Include(_), AnalyzedToplevel::Include(_)]),
+            matches!(
+                toplevels.as_slice(),
+                &[AnalyzedToplevel::Include(_), AnalyzedToplevel::Include(_)]
+            ),
             "toplevels are not as expected: {toplevels:#?}"
         );
     }
@@ -125,7 +141,8 @@ mod tests {
     #[test]
     fn test_also_deps() {
         let db = crate::salsa::db::BaseDatabase::default();
-        let file_path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
+        let file_path =
+            Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
         let file = db.get_files().get_file(&db, file_path);
 
         let outline = outline(&db, file).expect("Should be a readable file");
@@ -134,6 +151,10 @@ mod tests {
         assert_eq!(also_deps.included_files(&db).len(), 2);
 
         let diagnostics = also_deps.diagnostics(&db);
-        assert_eq!(diagnostics.len(), 1, "diagnostics are not as expected: {diagnostics:#?}");
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "diagnostics are not as expected: {diagnostics:#?}"
+        );
     }
 }

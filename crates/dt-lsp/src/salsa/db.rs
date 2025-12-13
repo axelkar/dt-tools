@@ -1,4 +1,3 @@
-
 use crate::salsa::file::Files;
 
 #[salsa::db]

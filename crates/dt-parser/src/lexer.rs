@@ -65,7 +65,9 @@ pub struct Token<'input> {
 }
 
 /// An error returned from the lexer.
-#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Default, displaydoc::Display, Hash)]
+#[derive(
+    thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Default, displaydoc::Display, Hash,
+)]
 pub enum LexError {
     /// Unexpected EOF (hint: unterminated incbin directive)
     UnexpectedEofIncbin,
@@ -105,7 +107,6 @@ pub enum LexError {
 /// The kind of a token
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[logos(error = LexError)]
-// TODO: #[logos(source = [u8])] ?
 pub enum TokenKind {
     #[regex("[ \t\r\n]+")]
     Whitespace,
@@ -117,26 +118,26 @@ pub enum TokenKind {
     #[token(",")]
     Comma,
 
-    #[regex(r"//[^\n\r]+")]
+    #[regex(r"//[^\n\r]+?")]
     LineComment,
 
-    #[regex(r"#( |\t)*undef[^\n]*")]
+    #[regex(r"#( |\t)*undef[^\n]*?")]
     UndefDirective,
-    #[regex(r"#( |\t)*pragma[^\n]*")]
+    #[regex(r"#( |\t)*pragma[^\n]*?")]
     PragmaDirective,
-    #[regex(r"#( |\t)*else[^\n]*")]
+    #[regex(r"#( |\t)*else[^\n]*?")]
     ElseDirective,
-    #[regex(r"#( |\t)*endif[^\n]*")]
+    #[regex(r"#( |\t)*endif[^\n]*?")]
     EndifDirective,
-    #[regex(r"#( |\t)*ifndef[^\n]*")]
+    #[regex(r"#( |\t)*ifndef[^\n]*?")]
     IfndefDirective,
-    #[regex(r"#( |\t)*ifdef[^\n]*")]
+    #[regex(r"#( |\t)*ifdef[^\n]*?")]
     IfdefDirective,
-    #[regex(r"#( |\t)*if[^\n]*")]
+    #[regex(r"#( |\t)*if[^\n]*?")]
     IfDirective,
     #[regex(r#"#( |\t)*define[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
     DefineDirective,
-    #[regex(r"#( |\t)*include[^\n]*")]
+    #[regex(r"#( |\t)*include[^\n]*?")]
     IncludeDirective,
 
     // TODO: bits directive

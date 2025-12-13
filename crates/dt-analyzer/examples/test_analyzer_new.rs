@@ -90,7 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .collect(),
                 );
 
-            codespan_reporting::term::emit(&mut writer.lock(), &config, &files, &diagnostic)?;
+            codespan_reporting::term::emit_to_write_style(&mut writer.lock(), &config, &files, &diagnostic)?;
         }
 
         std::process::exit(1);

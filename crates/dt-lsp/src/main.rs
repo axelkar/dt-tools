@@ -1,6 +1,7 @@
 use dt_analyzer::new::stage1::AnalyzedToplevel;
 use dt_diagnostic::DiagnosticCollector;
 use dt_parser::{ast, parser::parse, SourceId, TextRange};
+use fluent_uri::component::Scheme;
 use ropey::Rope;
 use std::borrow::Cow;
 use std::{
@@ -9,7 +10,7 @@ use std::{
 };
 use tokio::{net::TcpListener, sync::Mutex};
 use tower_lsp_server::{
-    lsp_types::{
+    ls_types::{
         Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DidChangeTextDocumentParams,
         DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
         DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
@@ -18,7 +19,6 @@ use tower_lsp_server::{
         ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkspaceFolder,
         WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
     },
-    UriExt,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, info, level_filters::LevelFilter};
@@ -232,12 +232,15 @@ impl Backend {
         version: Option<i32>,
         tokio_handle: tokio::runtime::Handle,
     ) {
+        const SCHEME_FILE: &Scheme = Scheme::new_or_panic("file");
+
         debug!(version, "File with URI `{}` was changed", *uri);
         let rope = ropey::Rope::from_str(&text);
         let source_id = SourceId::from(uri.as_str());
 
-        assert!(
-            uri.scheme().is_some_and(|s| s.eq_lowercase("file")),
+        assert_eq!(
+            uri.scheme(),
+            SCHEME_FILE,
             "LSP should only allow file: URIs"
         );
         let path = uri.to_file_path().expect("Invalid file path");
@@ -402,7 +405,8 @@ impl Backend {
         diag.lock().extend_from_slice(outline.diagnostics(db));
         let analyzed = outline.toplevels(db);
 
-        let also_deps = crate::salsa::also_deps(db, file, outline).expect("a file always has a parent");
+        let also_deps =
+            crate::salsa::also_deps(db, file, outline).expect("a file always has a parent");
         diag.lock().extend_from_slice(also_deps.diagnostics(db));
 
         let includes = &[]; // TODO
