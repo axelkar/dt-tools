@@ -1,7 +1,7 @@
 //! Parses the file at argv 1 and prints the analyzed data
 
 use codespan_reporting::{diagnostic::Label, files::SimpleFiles};
-use dt_analyzer::new::stage1::AnalyzedToplevel;
+use dt_analyzer::new::outline::AnalyzedToplevel;
 use dt_diagnostic::Severity;
 use owo_colors::{colors::xterm::Gray, OwoColorize as _};
 
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut new_diagnostics = Vec::new();
     let diag = std::sync::Mutex::new(&mut new_diagnostics);
 
-    let outline = dt_analyzer::new::stage1::analyze_file(&file, &text, &diag);
+    let outline = dt_analyzer::new::outline::analyze_file(&file, &text, &diag);
     let includes = &[]; // TODO
     let analyzed2 = dt_analyzer::new::stage2::compute(&outline, includes, &diag);
     println!(
@@ -90,7 +90,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .collect(),
                 );
 
-            codespan_reporting::term::emit_to_write_style(&mut writer.lock(), &config, &files, &diagnostic)?;
+            codespan_reporting::term::emit_to_write_style(
+                &mut writer.lock(),
+                &config,
+                &files,
+                &diagnostic,
+            )?;
         }
 
         std::process::exit(1);

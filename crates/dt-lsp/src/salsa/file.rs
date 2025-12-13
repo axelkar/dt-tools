@@ -11,6 +11,7 @@ pub struct File {
     #[returns(ref)]
     pub path: Utf8PathBuf,
 
+    /// **Note:** The file may not exist. Check [`File::is_readable_file`] before reading contents.
     #[returns(ref)]
     pub contents: String,
 
@@ -29,7 +30,7 @@ impl Files {
     ///
     /// # Missing files
     ///
-    /// **Note:** The file may not exist yet. Check [`File::is_readable_file`] before reading contents.
+    /// **Note:** The file may not exist. Check [`File::is_readable_file`] before reading contents.
     ///
     /// # Panics
     ///
@@ -48,7 +49,7 @@ impl Files {
             };
 
             File::builder(path, contents, is_readable_file)
-                .path_durability(Durability::HIGH)
+                .path_durability(Durability::HIGH) // the path is immutable
                 .new(db)
         })
     }

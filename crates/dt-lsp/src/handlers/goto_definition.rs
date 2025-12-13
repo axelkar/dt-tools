@@ -3,12 +3,10 @@ use dt_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
     lexer::TokenKind,
-    match_ast, SourceId,
+    match_ast,
 };
-use tower_lsp_server::{
-    ls_types::{
-        GotoDefinitionParams, GotoDefinitionResponse, Location, MessageType, Position, Range, Uri,
-    },
+use tower_lsp_server::ls_types::{
+    GotoDefinitionParams, GotoDefinitionResponse, Location, MessageType, Position, Range, Uri,
 };
 
 pub async fn goto_definition(
@@ -16,13 +14,12 @@ pub async fn goto_definition(
     params: GotoDefinitionParams,
 ) -> Option<GotoDefinitionResponse> {
     let params = params.text_document_position_params;
-    let uri = params.text_document.uri.to_string();
+    let uri = params.text_document.uri;
     tracing::info!(?uri);
-    let source_id = SourceId::from(uri.clone());
-    let document = state.state.document_map.get(&source_id)?;
+    let document = state.state.index_documents.get(&uri)?;
 
     let cst = document.file.as_ref()?.syntax();
-    let offset = position_to_offset(params.position, &document.text)?;
+    let offset = position_to_offset(params.position, &document.rope)?;
 
     if let Some((include_path, _)) = document.included_paths.as_ref().and_then(|v| {
         v.iter()

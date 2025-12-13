@@ -1,10 +1,11 @@
 use std::borrow::Cow;
 
-use dt_analyzer::new::stage1::AnalyzedToplevel;
+use dt_analyzer::new::outline::AnalyzedToplevel;
 use dt_diagnostic::{Diagnostic, Severity};
 
 pub mod db;
 pub mod file;
+mod macros;
 
 #[salsa::tracked]
 pub struct Parse<'db> {
@@ -13,8 +14,9 @@ pub struct Parse<'db> {
 }
 
 // `no_eq`: Probably faster to compare the inputs than the whole AST
+/// Returns `None` if the file doesn't exist.
 #[salsa::tracked(no_eq)]
-pub fn parse_file<'db>(db: &'db dyn db::BaseDb, file: file::File) -> Option<Parse<'db>> {
+pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
     if !file.is_readable_file(db) {
         return None;
     }
@@ -36,21 +38,40 @@ pub struct Outline<'db> {
 }
 
 // `no_eq`: Probably faster to compare the inputs than the whole AST
+/// Computes an outline composed of [`dt_analyzer::new::outline::AnalyzedToplevel`]s.
+///
+/// Returns `None` if the file doesn't exist.
 #[salsa::tracked(no_eq)]
-pub fn outline<'db>(db: &'db dyn db::BaseDb, file: file::File) -> Option<Outline<'db>> {
+pub fn outline(db: &dyn db::BaseDb, file: file::File) -> Option<Outline<'_>> {
+    // Parse always changes when file contents change, so I think (axka, 2026-03-23) it's okay to
+    // call the parser in here.
     let parse = parse_file(db, file)?;
     let file_ast = parse.parse(db).source_file();
 
     let mut diagnostics = Vec::new();
     let diag = std::sync::Mutex::new(&mut diagnostics);
 
-    let toplevels = dt_analyzer::new::stage1::analyze_file(&file_ast, file.contents(db), &diag);
+    let toplevels = dt_analyzer::new::outline::analyze_file(&file_ast, file.contents(db), &diag);
+
+    tag_diagnostics(&mut diagnostics, concat!(module_path!(), "::outline"));
 
     Some(Outline::new(db, toplevels, diagnostics))
 }
 
+pub fn tag_diagnostics(diagnostics: &mut Vec<Diagnostic>, tag: &str) {
+    use std::fmt::Write;
+
+    for diagnostic in diagnostics {
+        write!(diagnostic.msg.to_mut(), " ({tag})").ok();
+        for span_label in &mut diagnostic.span.span_labels {
+            write!(span_label.msg.to_mut(), " ({tag})").ok();
+        }
+    }
+}
+
+/// Dependencies of a document.
 #[salsa::tracked]
-pub struct AlsoDeps<'db> {
+pub struct DocumentDeps<'db> {
     #[tracked]
     #[returns(ref)]
     pub included_files: Vec<file::File>,
@@ -61,12 +82,13 @@ pub struct AlsoDeps<'db> {
 }
 
 // TODO: per-AnalyzedInclude??
+/// Dependencies of a document.
 #[salsa::tracked]
-pub fn also_deps<'db>(
+pub fn document_deps<'db>(
     db: &'db dyn db::BaseDb,
     file: file::File,
     outline: Outline<'db>,
-) -> Result<AlsoDeps<'db>, ()> {
+) -> Result<DocumentDeps<'db>, ()> {
     let mut included_files = Vec::new();
     let mut diagnostics = Vec::new();
 
@@ -94,7 +116,9 @@ pub fn also_deps<'db>(
         }
     }
 
-    Ok(AlsoDeps::new(db, included_files, diagnostics))
+    tag_diagnostics(&mut diagnostics, concat!(module_path!(), "::document_deps"));
+
+    Ok(DocumentDeps::new(db, included_files, diagnostics))
 }
 
 #[cfg(test)]
@@ -139,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn test_also_deps() {
+    fn test_document_deps() {
         let db = crate::salsa::db::BaseDatabase::default();
         let file_path =
             Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
@@ -147,10 +171,10 @@ mod tests {
 
         let outline = outline(&db, file).expect("Should be a readable file");
 
-        let also_deps = also_deps(&db, file, outline).expect("File should have a parent");
-        assert_eq!(also_deps.included_files(&db).len(), 2);
+        let document_deps = document_deps(&db, file, outline).expect("File should have a parent");
+        assert_eq!(document_deps.included_files(&db).len(), 2);
 
-        let diagnostics = also_deps.diagnostics(&db);
+        let diagnostics = document_deps.diagnostics(&db);
         assert_eq!(
             diagnostics.len(),
             1,

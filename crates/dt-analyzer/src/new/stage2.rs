@@ -21,7 +21,7 @@ use crate::{
     resolved_prop::Value,
 };
 
-use super::stage1::{AnalyzedToplevel, LabelDef};
+use super::outline::{AnalyzedToplevel, LabelDef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedInclude<'a> {
@@ -129,11 +129,11 @@ pub fn compute(
         .map(|(tr, macro_def)| (macro_def.name.clone(), (*tr, macro_def)))
         .collect();
 
-    for stage1_node in outline.iter().filter_map(AnalyzedToplevel::as_node) {
-        if stage1_node.is_extension {
+    for toplevel_node in outline.iter().filter_map(AnalyzedToplevel::as_node) {
+        if toplevel_node.is_extension {
             // TODO: cache path in LabelDef
         } else {
-            merge_root_node(&stage1_node.ast, diag, &mut root_node, &macro_db);
+            merge_root_node(&toplevel_node.ast, diag, &mut root_node, &macro_db);
         }
     }
     Stage2File { root_node }

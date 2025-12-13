@@ -17,7 +17,7 @@ fn dts_to_json(filename: &str) -> serde_json::Value {
 
     let file = &parse.source_file();
 
-    let analyzed = crate::new::stage1::analyze_file(file, src, diag);
+    let analyzed = crate::new::outline::analyze_file(file, src, diag);
 
     let includes = analyzed
         .iter()

@@ -534,7 +534,6 @@ impl AstNode for DtNode {
         &self.syntax
     }
 }
-// TODO: enum for DtProperty and DtNode + they could also share some functions via a trait
 impl DtNode {
     /// Returns an iterator over direct [`DtProperty`] children.
     ///

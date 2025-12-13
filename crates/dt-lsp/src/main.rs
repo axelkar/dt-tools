@@ -1,6 +1,7 @@
-use dt_analyzer::new::stage1::AnalyzedToplevel;
+use ::salsa::Setter;
+use dt_analyzer::new::outline::AnalyzedToplevel;
 use dt_diagnostic::DiagnosticCollector;
-use dt_parser::{ast, parser::parse, SourceId, TextRange};
+use dt_parser::{ast, parser::parse, TextRange};
 use fluent_uri::component::Scheme;
 use ropey::Rope;
 use std::borrow::Cow;
@@ -9,24 +10,24 @@ use std::{
     path::PathBuf,
 };
 use tokio::{net::TcpListener, sync::Mutex};
-use tower_lsp_server::{
-    ls_types::{
-        Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DidChangeTextDocumentParams,
-        DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-        DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-        HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-        InitializedParams, Location, MessageType, OneOf, Position, Range, ServerCapabilities,
-        ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkspaceFolder,
-        WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
-    },
+use tower_lsp_server::ls_types::{
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DidChangeTextDocumentParams,
+    DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
+    MessageType, OneOf, Position, Range, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkspaceFolder,
+    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 use triomphe::Arc;
 
-use crate::salsa::db::{BaseDatabase, BaseDb, DbSnapshot};
+use crate::capabilities::ResolvedClientCapabilities;
+use crate::salsa::db::{BaseDatabase, BaseDb};
 
+mod capabilities;
 mod handlers;
 pub mod salsa;
 
@@ -36,33 +37,33 @@ pub type FxDashMap<K, V> =
 
 #[derive(Debug)]
 pub struct Document {
-    pub text: Rope,
+    pub rope: Rope,
+
+    /// The latest version of the document, set by the LSP client. The server will panic in
+    /// debug mode if we attempt to update the document with an 'older' version.
+    pub version: i32,
+
+    // FIXME: only lsp stuff here!
     pub file: Option<ast::SourceFile>,
     pub analyzed: Option<Vec<AnalyzedToplevel>>,
     pub included_paths: Option<Vec<(PathBuf, TextRange)>>,
 }
 
-struct State {
-    document_map: FxDashMap<SourceId, Document>,
+/// The global state for the LSP
+pub struct Session {
+    index_documents: FxDashMap<Uri, Document>,
+
+    resolved_client_capabilities: parking_lot::Mutex<Arc<ResolvedClientCapabilities>>,
+
     workspace_folders: Mutex<Vec<WorkspaceFolder>>,
     /// The file where evaluation will start from
     ///
     /// Files not (recursively) included in this file must not be analyzed
-    main_file: parking_lot::Mutex<Option<SourceId>>,
+    main_file: parking_lot::Mutex<Option<Uri>>,
 
     /// Salsa database
     // TODO: no mutex...
     db: parking_lot::Mutex<BaseDatabase>,
-}
-
-impl State {
-    pub(crate) fn snapshot(&self) -> DbSnapshot {
-        DbSnapshot {
-            // FIXME: I don't think this makes a real snapshot, because salsa::Storage
-            // contains an Arc???
-            db: self.db.lock().clone(),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -70,7 +71,7 @@ struct Backend {
     /// Handle for communication with the LSP client.
     client: Client,
     // An `Arc` so it can be used on a background thread.
-    state: Arc<State>,
+    state: Arc<Session>,
 }
 
 type Result<T, E = tower_lsp_server::jsonrpc::Error> = std::result::Result<T, E>;
@@ -84,6 +85,9 @@ impl LanguageServer for Backend {
                 tracing::info!("{} connected!", client_info.name);
             }
         }
+
+        *self.state.resolved_client_capabilities.lock() =
+            Arc::new(ResolvedClientCapabilities::new(&params.capabilities));
 
         // TODO: support legacy clients using root_uri
         if let Some(workspace_folders) = params.workspace_folders {
@@ -155,13 +159,11 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "file opened!")
             .await;
 
-        let source_id = SourceId::from(params.text_document.uri.as_str());
-
         {
             // Set the first opened file to be the main file
             let mut main_file = self.state.main_file.lock();
             if main_file.is_none() {
-                *main_file = Some(source_id);
+                *main_file = Some(params.text_document.uri.clone());
             }
         }
 
@@ -170,7 +172,7 @@ impl LanguageServer for Backend {
         self.on_change(
             params.text_document.uri,
             params.text_document.text,
-            Some(params.text_document.version),
+            params.text_document.version,
             tokio::runtime::Handle::current(),
         );
     }
@@ -183,7 +185,7 @@ impl LanguageServer for Backend {
         self.on_change(
             params.text_document.uri,
             std::mem::take(&mut params.content_changes[0].text),
-            Some(params.text_document.version),
+            params.text_document.version,
             tokio::runtime::Handle::current(),
         );
     }
@@ -229,14 +231,13 @@ impl Backend {
         &self,
         uri: Uri,
         text: String,
-        version: Option<i32>,
+        version: i32,
         tokio_handle: tokio::runtime::Handle,
     ) {
         const SCHEME_FILE: &Scheme = Scheme::new_or_panic("file");
 
         debug!(version, "File with URI `{}` was changed", *uri);
         let rope = ropey::Rope::from_str(&text);
-        let source_id = SourceId::from(uri.as_str());
 
         assert_eq!(
             uri.scheme(),
@@ -247,10 +248,11 @@ impl Backend {
         let path = camino::Utf8Path::from_path(&path)
             .expect("to_file_path's implementation always guarantees valid UTF-8");
 
-        self.state.document_map.insert(
-            source_id.clone(),
+        self.state.index_documents.insert(
+            uri.clone(),
             Document {
-                text: rope.clone(),
+                rope: rope.clone(),
+                version,
                 file: None,
                 analyzed: None,
                 included_paths: None,
@@ -259,7 +261,13 @@ impl Backend {
         // TODO: Check if it exists already, with equal text
         // It may be an included file or a reopened file
 
-        let is_main_file = self.state.main_file.lock().as_deref() == Some(&source_id);
+        let is_main_file = self
+            .state
+            .main_file
+            .lock()
+            .as_deref()
+            .map(fluent_uri::Uri::as_str)
+            == Some(uri.as_str());
 
         let parse = parse(&text);
 
@@ -398,26 +406,35 @@ impl Backend {
         let mut new_diagnostics = Vec::new();
         let diag = parking_lot::Mutex::new(&mut new_diagnostics);
 
-        let db = &*self.state.db.lock();
+        let db = &mut *self.state.db.lock();
         let file = db.get_files().get_file(db, path.to_owned());
 
-        let outline = crate::salsa::outline(db, file).expect("File should exist");
-        diag.lock().extend_from_slice(outline.diagnostics(db));
-        let analyzed = outline.toplevels(db);
+        // Because we got a change notification from LSP...
+        // FIXME: rename `is_readable_file` to something more fitting
+        file.set_contents(db).to(text.clone());
+        file.set_is_readable_file(db).to(true);
 
-        let also_deps =
-            crate::salsa::also_deps(db, file, outline).expect("a file always has a parent");
-        diag.lock().extend_from_slice(also_deps.diagnostics(db));
+        let Some(outline) = crate::salsa::outline(db, file) else {
+            tracing::error!("File should maybe exist?!");
+            return;
+        };
+
+        diag.lock().extend_from_slice(outline.diagnostics(db));
+        let toplevels = outline.toplevels(db);
+
+        let document_deps =
+            crate::salsa::document_deps(db, file, outline).expect("a file always has a parent");
+        diag.lock().extend_from_slice(document_deps.diagnostics(db));
 
         let includes = &[]; // TODO
-        let analyzed2 = dt_analyzer::new::stage2::compute(analyzed, includes, &diag);
+        let analyzed2 = dt_analyzer::new::stage2::compute(toplevels, includes, &diag);
         //if is_main_file {
         if false {
             use std::io::Write;
             let mut f = std::fs::File::create("analyzed2.dbg").unwrap();
             write!(f, "analyzed2={analyzed2:#?}").unwrap();
             let mut f = std::fs::File::create("analyzed1.dbg").unwrap();
-            write!(f, "analyzed1={analyzed:#?}").unwrap();
+            write!(f, "analyzed1={toplevels:#?}").unwrap();
         }
 
         let parent_path = path
@@ -437,7 +454,7 @@ impl Backend {
         let mut included_paths = Vec::new();
 
         // TODO: only re-check when includes are updated or include config is changed
-        for include in analyzed.iter().filter_map(AnalyzedToplevel::as_include) {
+        for include in toplevels.iter().filter_map(AnalyzedToplevel::as_include) {
             let include_path = include.find_file(parent_path.as_ref(), include_dirs);
 
             let Some(include_path) = include_path else {
@@ -455,17 +472,16 @@ impl Backend {
 
             tracing::info!("dot {:?} -> {:?}", uri.to_string(), new_uri.to_string());
 
-            if !self
-                .state
-                .document_map
-                .contains_key(&SourceId::from(new_uri.to_string()))
-            {
+            // FIXME: not opened in LSP, should we really fake an URI?
+            if !self.state.index_documents.contains_key(&new_uri) {
                 let this = self.clone();
                 let tokio_handle = tokio_handle.clone();
                 rayon::spawn(move || {
                     // AnalyzedInclude::find_file made sure it exists
                     if let Ok(text) = std::fs::read_to_string(include_path) {
-                        this.on_change(new_uri, text, None, tokio_handle);
+                        // HACK: faked LSP version
+                        let version = 0;
+                        this.on_change(new_uri, text, version, tokio_handle);
                     }
                 });
             }
@@ -493,12 +509,13 @@ impl Backend {
             }
         }
 
-        self.state.document_map.insert(
-            source_id.clone(),
+        self.state.index_documents.insert(
+            uri.clone(),
             Document {
-                text: rope,
+                rope,
+                version,
                 file: Some(file_ast),
-                analyzed: Some(analyzed.clone()),
+                analyzed: Some(toplevels.clone()),
                 included_paths: Some(included_paths),
             },
         );
@@ -510,7 +527,7 @@ impl Backend {
         let client = self.client.clone();
         tokio_handle.spawn(async move {
             client
-                .publish_diagnostics(uri.clone(), diagnostics, version)
+                .publish_diagnostics(uri.clone(), diagnostics, Some(version))
                 .await;
         });
     }
@@ -522,8 +539,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (service, socket) = LspService::new(|client| Backend {
         client,
-        state: Arc::new(State {
-            document_map: FxDashMap::default(),
+        state: Arc::new(Session {
+            index_documents: FxDashMap::default(),
+            resolved_client_capabilities: parking_lot::Mutex::default(),
             workspace_folders: Mutex::new(Vec::new()),
             main_file: parking_lot::Mutex::new(None),
             db: parking_lot::Mutex::new(BaseDatabase::default()),
@@ -546,7 +564,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         info!("Using tcp");
         let listener =
-            TcpListener::bind(SocketAddr::new(Ipv4Addr::new(127, 0, 0, 1).into(), 9257)).await?;
+            TcpListener::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9257)).await?;
         let (stream, _) = listener.accept().await.unwrap();
         let (read, write) = tokio::io::split(stream);
         Server::new(read, write, socket).serve(service).await;

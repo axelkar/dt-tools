@@ -7,7 +7,7 @@ use std::{iter::Peekable, str::Chars};
 
 use dt_parser::{ast, parser::Entrypoint, TextRange};
 
-use crate::new::stage1::subslice_offset;
+use crate::new::outline::subslice_offset;
 
 // TODO: use this enum
 #[expect(dead_code, reason = "not yet implemented")]
@@ -456,12 +456,17 @@ impl MacroDefinition {
             params,
         })
     }
+
     #[expect(clippy::too_many_lines, reason = "Hard to make this shorter")]
     fn substitute(&self, arguments: &[String]) -> (Vec<TextRangeMap>, String) {
         let mut s = String::new();
         let mut iter = self.body_tokens.iter().peekable();
         let mut push_ws = false;
         let mut trmaps = Vec::new();
+
+        if self.params.len() != arguments.len() {
+            // TODO: return error
+        }
 
         while let Some(token) = iter.next() {
             match &token.kind {
@@ -609,6 +614,7 @@ pub(crate) enum TextRangeMapTo {
         argument_idx: usize,
     },
 }
+
 impl TextRangeMapTo {
     #[cfg(test)]
     fn test_fmt(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
@@ -640,6 +646,7 @@ impl TextRangeMapTo {
 //
 // https://gcc.gnu.org/onlinedocs/gcc-3.4.3/cpp/Argument-Prescan.html
 
+/// Evaluates a macro, directly from its AST.
 pub(crate) fn evaluate_macro(
     ast: Option<&ast::MacroInvocation>,
     def: &MacroDefinition,
@@ -654,6 +661,7 @@ pub(crate) fn evaluate_macro(
             })
             .collect::<Vec<String>>()
     });
+
     if def.params.len() != arguments.as_ref().map_or(0, std::vec::Vec::len) {
         return Err("ERROR: invalid argument length".to_owned());
     }
@@ -814,7 +822,6 @@ mod tests {
             "#]],
         );
     }
-
     /// Like above. Example from Linux `include/dt-bindings/input/input.h`
     // TODO: combine applicable macro trmaps; the trmaps expect below could be a lot smaller
     #[test]

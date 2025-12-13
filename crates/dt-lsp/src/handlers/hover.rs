@@ -3,7 +3,7 @@ use dt_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
     lexer::TokenKind,
-    match_ast, SourceId,
+    match_ast,
 };
 use itertools::Itertools;
 use tower_lsp_server::ls_types::{
@@ -37,13 +37,12 @@ fn _node_definition(node: &ast::DtNode, src: &str) -> String {
 
 pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
     let params = params.text_document_position_params;
-    let uri = params.text_document.uri.to_string();
+    let uri = params.text_document.uri;
     tracing::info!(?uri);
-    let source_id = SourceId::from(uri.clone());
-    let document = state.state.document_map.get(&source_id)?;
+    let document = state.state.index_documents.get(&uri)?;
 
     let cst = document.file.as_ref()?.syntax();
-    let offset = position_to_offset(params.position, &document.text)?;
+    let offset = position_to_offset(params.position, &document.rope)?;
 
     // TODO: try prev offset?
     // TODO: Check for nodes above e.g. quit the search directly on an error node
@@ -68,7 +67,7 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
         return None;
     }
 
-    let rope = &document.text;
+    let rope = &document.rope;
 
     // definition
     {
