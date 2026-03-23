@@ -22,7 +22,7 @@ use crate::TextRange;
 /// assert!(tokens.get(4).is_none());
 /// ```
 #[must_use]
-pub fn lex(input: &str) -> Vec<Token> {
+pub fn lex(input: &str) -> Vec<Token<'_>> {
     Lexer::new(input).collect()
 }
 

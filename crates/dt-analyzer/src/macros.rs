@@ -165,6 +165,7 @@ impl MacroDefinitionParseError {
     /// Returns the range of the error, if it exists.
     ///
     /// Note that it's relative to the token's textual contents.
+    #[must_use]
     pub fn text_range(&self) -> Option<TextRange> {
         match self {
             Self::StringifyNotAParam { text_range }

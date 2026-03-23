@@ -563,8 +563,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .init();
 
         info!("Using tcp");
-        let listener =
-            TcpListener::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9257)).await?;
+        let listener = TcpListener::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9257)).await?;
         let (stream, _) = listener.accept().await.unwrap();
         let (read, write) = tokio::io::split(stream);
         Server::new(read, write, socket).serve(service).await;

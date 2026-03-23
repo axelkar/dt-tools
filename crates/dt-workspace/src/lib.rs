@@ -24,7 +24,7 @@ impl Workspace {
     ///
     /// For documentation on the heuristics, see [`WorkspacePathFindResult`].
     #[must_use]
-    pub fn find_workspace_dir(start: &Path) -> WorkspacePathFindResult {
+    pub fn find_workspace_dir(start: &Path) -> WorkspacePathFindResult<'_> {
         search(start, toml_config::CONFIG_FILENAME, |f| f.is_file())
             .map(
                 |(workspace_dir, toml_file_path)| WorkspacePathFindResult::TomlConfig {

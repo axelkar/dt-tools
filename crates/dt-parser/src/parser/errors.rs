@@ -35,10 +35,11 @@ impl core::fmt::Display for Expected {
 
 /// Generates an error message using [`Parser::expected`] and [`Parser::peek`].
 fn fmt_expected_message(p: &mut Parser) -> String {
-    #[cfg(feature = "grammar-tracing")]
-    error!("emit_expect_error");
-
     use std::fmt::Write;
+
+    #[cfg(feature = "grammar-tracing")]
+    tracing::error!("emit_expect_error");
+
     let mut message = "Expected ".to_owned();
 
     p.expected = std::mem::take(&mut p.expected)
@@ -94,6 +95,7 @@ pub struct WrappedLexError<'input> {
 }
 impl WrappedLexError<'_> {
     /// Removes any references to the input.
+    #[must_use]
     pub fn into_static(self) -> WrappedLexError<'static> {
         WrappedLexError {
             inner: self.inner,

@@ -222,7 +222,7 @@ impl<'t, 'input> Source<'t, 'input> {
     /// Doesn't skip trivia.
     ///
     /// Returns None on EOF.
-    fn peek_token_immediate(&self) -> Option<&Token> {
+    fn peek_token_immediate(&self) -> Option<&Token<'_>> {
         self.tokens.get(self.cursor)
     }
 }

@@ -112,7 +112,7 @@ pub trait AstNodeOrToken: Sized {
     fn cast_token(syntax: Arc<RedToken>) -> Option<Self>;
 
     /// Returns a reference to the syntax node or token.
-    fn syntax(&self) -> RedItemRef;
+    fn syntax(&self) -> RedItemRef<'_>;
 }
 
 // TODO: Better to just make if-let chains? I think this breaks rust-analyzer
@@ -225,7 +225,7 @@ impl SourceFile {
     // TODO: don't make parser public
     // TODO: return a RedNode or SourceFile
     #[must_use]
-    pub fn parse(text: &str) -> Parse {
+    pub fn parse(text: &str) -> Parse<'_> {
         let parse = crate::parser::parse(text);
         // TODO:
         //errors.extend(validation::validate(&root));
@@ -366,7 +366,7 @@ impl AstNodeOrToken for PropValue {
             _ => None,
         }
     }
-    fn syntax(&self) -> RedItemRef {
+    fn syntax(&self) -> RedItemRef<'_> {
         match self {
             Self::CellList(it) => TreeItem::Node(&it.syntax),
             Self::String(it) | Self::Bytestring(it) => TreeItem::Token(it),
@@ -399,7 +399,7 @@ impl AstNodeOrToken for Cell {
             _ => None,
         }
     }
-    fn syntax(&self) -> RedItemRef {
+    fn syntax(&self) -> RedItemRef<'_> {
         match self {
             Self::Number(it) => TreeItem::Token(it),
             Self::Phandle(it) => TreeItem::Node(&it.syntax),
@@ -880,7 +880,7 @@ impl AstNodeOrToken for ToplevelItem {
             syntax,
         )?))
     }
-    fn syntax(&self) -> RedItemRef {
+    fn syntax(&self) -> RedItemRef<'_> {
         match self {
             Self::Node(it) => TreeItem::Node(&it.syntax),
             Self::Directive(it) => TreeItem::Node(&it.syntax),

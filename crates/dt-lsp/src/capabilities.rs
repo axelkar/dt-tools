@@ -2,7 +2,10 @@ use tower_lsp_server::ls_types::ClientCapabilities;
 
 /// Selection of the client capabilities.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[expect(clippy::struct_excessive_bools, reason = "eh bools are just fine for this")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "eh bools are just fine for this"
+)]
 pub(crate) struct ResolvedClientCapabilities {
     pub(crate) code_action_deferred_edit_resolution: bool,
     pub(crate) apply_edit: bool,

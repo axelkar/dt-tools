@@ -113,7 +113,7 @@ pub enum Entrypoint {
 impl Entrypoint {
     /// Parses the input according to the entrypoint.
     #[must_use]
-    pub fn parse(self, input: &str) -> Parse {
+    pub fn parse(self, input: &str) -> Parse<'_> {
         // TODO: typesafe Entrypoint -> correct AST struct
         use super::lexer::Lexer;
         let tokens: Vec<_> = Lexer::new(input).collect();
@@ -171,7 +171,7 @@ impl Entrypoint {
 
 /// Parses the `input` as an [`Entrypoint::SourceFile`].
 #[must_use]
-pub fn parse(input: &str) -> Parse {
+pub fn parse(input: &str) -> Parse<'_> {
     Entrypoint::SourceFile.parse(input)
 }
 
