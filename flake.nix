@@ -1,7 +1,7 @@
 {
   description = "dt-tools devel and build";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
 
   # shell.nix compatibility
   inputs.flake-compat.url = "https://flakehub.com/f/edolstra/flake-compat/1.tar.gz";
@@ -28,10 +28,10 @@
       linuxBindings =
         pkgs:
         let
-          linuxVersion = "6.17.8";
+          linuxVersion = "6.18.19";
           linuxSrcRaw = pkgs.fetchurl {
             url = "mirror://kernel/linux/kernel/v${nixpkgs.lib.versions.major linuxVersion}.x/linux-${linuxVersion}.tar.xz";
-            hash = "sha256-Wo3mSnX8pwbAHGwKd891p0YYQ52xleJfHwJor2svsdo=";
+            hash = "sha256-6q94JxzQfGitnEyacMcnGLM6u9cWI52CuslrF1HrCQw=";
           };
           linuxSrc = pkgs.runCommand "linux-${linuxVersion}-src" { } ''
             mkdir "$out"
