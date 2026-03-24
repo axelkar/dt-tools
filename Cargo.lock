@@ -416,6 +416,7 @@ dependencies = [
  "clap",
  "codespan-reporting",
  "dt-analyzer",
+ "dt-diagnostic",
  "dt-lint",
  "dt-parser",
  "dt-workspace",
@@ -426,6 +427,7 @@ dependencies = [
 name = "dt-diagnostic"
 version = "0.1.0"
 dependencies = [
+ "codespan-reporting",
  "parking_lot",
 ]
 

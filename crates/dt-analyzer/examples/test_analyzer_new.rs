@@ -1,8 +1,6 @@
 //! Parses the file at argv 1 and prints the analyzed data
 
-use codespan_reporting::{diagnostic::Label, files::SimpleFiles};
 use dt_analyzer::new::outline::AnalyzedToplevel;
-use dt_diagnostic::Severity;
 use owo_colors::{colors::xterm::Gray, OwoColorize as _};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -32,8 +30,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let diag = std::sync::Mutex::new(&mut new_diagnostics);
 
     let outline = dt_analyzer::new::outline::analyze_file(&file, &text, &diag);
-    let includes = &[]; // TODO
-    let analyzed2 = dt_analyzer::new::stage2::compute(&outline, includes, &diag);
     println!(
         "{}={:#?}",
         "macro defs".cyan(),
@@ -42,61 +38,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .filter_map(AnalyzedToplevel::as_macro_definition)
             .collect::<Vec<_>>()
     );
+
+    let includes = &[]; // TODO
+    let analyzed2 = dt_analyzer::new::stage2::compute(&outline, includes, &diag);
     println!("{}={:#?}", "analyzed2".cyan(), analyzed2);
 
     if !new_diagnostics.is_empty() {
-        let mut files = SimpleFiles::new();
-        let file_id = files.add(&path, &text);
-
-        let writer = codespan_reporting::term::termcolor::StandardStream::stderr(
-            codespan_reporting::term::termcolor::ColorChoice::Always,
-        );
-        let config = codespan_reporting::term::Config::default();
-
-        for new_diagnostic in new_diagnostics {
-            /*for primary_span in new_diagnostic.span.primary_spans {
-                eprint!("{}", format_args!("{primary_span}: ").fg::<Gray>());
-            }
-            let color = match new_diagnostic.severity {
-                Severity::Warn => AnsiColors::Yellow,
-                Severity::Error => AnsiColors::Red,
-            };
-            eprintln!(
-                "{}",
-                format_args!("{:?}: {}", new_diagnostic.severity, new_diagnostic.msg).color(color)
-            );
-
-            for span_label in new_diagnostic.span.span_labels {
-                eprintln!(
-                    "  {}",
-                    format_args!("hint = {}", span_label.msg).fg::<Gray>()
-                );
-            }*/
-            let diagnostic =
-                codespan_reporting::diagnostic::Diagnostic::new(match new_diagnostic.severity {
-                    Severity::Error => codespan_reporting::diagnostic::Severity::Error,
-                    Severity::Warn => codespan_reporting::diagnostic::Severity::Warning,
-                })
-                .with_message(new_diagnostic.msg)
-                .with_labels(
-                    new_diagnostic
-                        .span
-                        .primary_spans
-                        .iter()
-                        .map(|span| Label::primary(file_id, *span))
-                        .chain(new_diagnostic.span.span_labels.iter().map(|span| {
-                            Label::secondary(file_id, span.span).with_message(span.msg.as_ref())
-                        }))
-                        .collect(),
-                );
-
-            codespan_reporting::term::emit_to_write_style(
-                &mut writer.lock(),
-                &config,
-                &files,
-                &diagnostic,
-            )?;
-        }
+        dt_diagnostic::codespan_reporting::print_diagnostics_single_file(
+            &path,
+            &text,
+            new_diagnostics,
+        )?;
 
         std::process::exit(1);
     }

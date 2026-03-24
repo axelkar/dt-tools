@@ -32,6 +32,7 @@ serde_yaml.workspace = true
 codespan-reporting.workspace = true
 owo-colors.workspace = true
 pretty_assertions.workspace = true
+dt-diagnostic = { workspace = true, features = ["codespan-reporting"] }
 
 [lints]
 workspace = true

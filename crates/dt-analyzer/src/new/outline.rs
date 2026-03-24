@@ -27,6 +27,17 @@ pub enum AnalyzedToplevel {
         text_range: TextRange,
         parsed: MacroDefinition,
     },
+    PreprocessorConditional {
+        text_range: TextRange,
+        branches: Vec<PreprocessorBranch>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreprocessorBranch {
+    // TODO: parse the directive right here?
+    pub directive_text: String,
+    pub toplevels: Vec<AnalyzedToplevel>,
 }
 
 impl AnalyzedToplevel {
@@ -36,10 +47,8 @@ impl AnalyzedToplevel {
         match self {
             Self::Node(node) => node.text_range,
             Self::Include(inc) => inc.text_range,
-            Self::MacroDefinition {
-                text_range,
-                parsed: _,
-            } => *text_range,
+            Self::MacroDefinition { text_range, .. }
+            | Self::PreprocessorConditional { text_range, .. } => *text_range,
         }
     }
 }
@@ -256,94 +265,7 @@ pub fn analyze_file(
         .filter_map(ast::ToplevelItem::cast)
         .filter_map(|item| {
             let _span = span.clone().entered();
-            match item {
-                ast::ToplevelItem::Node(node) => {
-                    let mut labels = FxHashMap::default();
-                    gather_labels(&node, src, &mut |name, def| {
-                        labels.insert(name.to_owned(), def);
-                    });
-                    Some(AnalyzedToplevel::Node(AnalyzedToplevelNode {
-                        is_extension: node.is_extension(),
-                        name: node
-                            .text_name(src)
-                            .map(std::borrow::Cow::into_owned)
-                            .unwrap_or_default(),
-                        text_range: node.syntax().text_range(),
-                        ast: node,
-                        labels,
-                    }))
-                }
-                ast::ToplevelItem::Directive(dir) => {
-                    let mut iter = dir.syntax().child_tokens();
-
-                    // Skip until DtIncludeDirective is found, return None if it isn't found
-                    iter.find(|tok| tok.green.kind == TokenKind::DtIncludeDirective)?;
-
-                    let string_tok = iter.find(|tok| tok.green.kind == TokenKind::String)?;
-                    let path = match crate::string::interpret_escaped_string(string_tok.text()) {
-                        Ok(path) => path,
-                        Err(err) => {
-                            diag.emit(Diagnostic::new(
-                                string_tok.text_range(),
-                                Cow::Owned(err.to_string()),
-                                Severity::Error,
-                            ));
-                            return None;
-                        }
-                    };
-
-                    Some(AnalyzedToplevel::Include(AnalyzedInclude {
-                        text_range: dir.syntax().text_range(),
-                        is_preprocessor: false,
-                        path,
-                        relative: true,
-                    }))
-                }
-                ast::ToplevelItem::PreprocessorDirective(dir)
-                    if dir.kind() == TokenKind::IncludeDirective =>
-                {
-                    Some(AnalyzedToplevel::Include(
-                        match AnalyzedInclude::pp_parse(
-                            dir.syntax().text_range(),
-                            dir.syntax().text(),
-                            diag,
-                        ) {
-                            Ok(inc) => inc,
-                            Err(err) => {
-                                diag.emit(Diagnostic::new(
-                                    dir.syntax().text_range(),
-                                    Cow::Owned(err.to_string()),
-                                    Severity::Error,
-                                ));
-                                return None;
-                            }
-                        },
-                    ))
-                }
-                ast::ToplevelItem::PreprocessorDirective(dir)
-                    if dir.kind() == TokenKind::DefineDirective =>
-                {
-                    Some(AnalyzedToplevel::MacroDefinition {
-                        text_range: dir.syntax().text_range(),
-                        parsed: match MacroDefinition::parse(dir.syntax().text()) {
-                            Ok(inc) => inc,
-                            Err(err) => {
-                                diag.emit(Diagnostic::new(
-                                    if let Some(local_range) = err.text_range() {
-                                        local_range.offset(dir.syntax().text_offset)
-                                    } else {
-                                        dir.syntax().text_range()
-                                    },
-                                    Cow::Owned(err.to_string()),
-                                    Severity::Error,
-                                ));
-                                return None;
-                            }
-                        },
-                    })
-                }
-                _ => None,
-            }
+            maybe_analyze_toplevel(item, src, diag)
         })
         .collect();
 
@@ -351,4 +273,126 @@ pub fn analyze_file(
     analyzed.sort_unstable_by_key(AnalyzedToplevel::text_range);
 
     analyzed
+}
+
+fn maybe_analyze_toplevel(
+    item: ast::ToplevelItem,
+    src: &str,
+    diag: &(impl DiagnosticCollector + Sync),
+) -> Option<AnalyzedToplevel> {
+    match item {
+        ast::ToplevelItem::Node(node) => {
+            let mut labels = FxHashMap::default();
+            gather_labels(&node, src, &mut |name, def| {
+                labels.insert(name.to_owned(), def);
+            });
+            Some(AnalyzedToplevel::Node(AnalyzedToplevelNode {
+                is_extension: node.is_extension(),
+                name: node
+                    .text_name(src)
+                    .map(std::borrow::Cow::into_owned)
+                    .unwrap_or_default(),
+                text_range: node.syntax().text_range(),
+                ast: node,
+                labels,
+            }))
+        }
+        ast::ToplevelItem::Directive(dir) => {
+            let mut iter = dir.syntax().child_tokens();
+
+            // Skip until DtIncludeDirective is found, return None if it isn't found
+            iter.find(|tok| tok.green.kind == TokenKind::DtIncludeDirective)?;
+
+            let string_tok = iter.find(|tok| tok.green.kind == TokenKind::String)?;
+            let path = match crate::string::interpret_escaped_string(string_tok.text()) {
+                Ok(path) => path,
+                Err(err) => {
+                    diag.emit(Diagnostic::new(
+                        string_tok.text_range(),
+                        Cow::Owned(err.to_string()),
+                        Severity::Error,
+                    ));
+                    return None;
+                }
+            };
+
+            Some(AnalyzedToplevel::Include(AnalyzedInclude {
+                text_range: dir.syntax().text_range(),
+                is_preprocessor: false,
+                path,
+                relative: true,
+            }))
+        }
+        ast::ToplevelItem::PreprocessorDirective(dir)
+            if dir.kind() == TokenKind::IncludeDirective =>
+        {
+            Some(AnalyzedToplevel::Include(
+                match AnalyzedInclude::pp_parse(
+                    dir.syntax().text_range(),
+                    dir.syntax().text(),
+                    diag,
+                ) {
+                    Ok(inc) => inc,
+                    Err(err) => {
+                        diag.emit(Diagnostic::new(
+                            dir.syntax().text_range(),
+                            Cow::Owned(err.to_string()),
+                            Severity::Error,
+                        ));
+                        return None;
+                    }
+                },
+            ))
+        }
+        ast::ToplevelItem::PreprocessorDirective(dir)
+            if dir.kind() == TokenKind::DefineDirective =>
+        {
+            Some(AnalyzedToplevel::MacroDefinition {
+                text_range: dir.syntax().text_range(),
+                parsed: match MacroDefinition::parse(dir.syntax().text()) {
+                    Ok(inc) => inc,
+                    Err(err) => {
+                        diag.emit(Diagnostic::new(
+                            if let Some(local_range) = err.text_range() {
+                                local_range.offset(dir.syntax().text_offset)
+                            } else {
+                                dir.syntax().text_range()
+                            },
+                            Cow::Owned(err.to_string()),
+                            Severity::Error,
+                        ));
+                        return None;
+                    }
+                },
+            })
+        }
+
+        ast::ToplevelItem::PreprocessorConditional(cond) => {
+            Some(AnalyzedToplevel::PreprocessorConditional {
+                text_range: cond.syntax().text_range(),
+                branches: cond
+                    .branches()
+                    .map(|(dir, branch)| PreprocessorBranch {
+                        directive_text: dir.syntax().text().to_owned(),
+                        toplevels: {
+                            // Passthrough the span to the Rayon worker threads
+                            let span = tracing::Span::current();
+
+                            branch
+                                .syntax()
+                                .children()
+                                .par_bridge()
+                                .filter_map(ast::ToplevelItem::cast)
+                                .filter_map(|item| {
+                                    let _span = span.clone().entered();
+                                    maybe_analyze_toplevel(item, src, diag)
+                                })
+                                .collect()
+                        },
+                    })
+                    .collect(),
+            })
+        }
+        _ => None,
+    }
 }

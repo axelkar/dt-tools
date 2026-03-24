@@ -10,6 +10,7 @@ pub struct MacroName {
     pub text: String,
 }
 
+/// Map of defined macros.
 #[salsa::tracked]
 struct MacroEnv<'db> {
     // TODO: multiple parents?

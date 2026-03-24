@@ -14,12 +14,13 @@ license.workspace = true
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive", "cargo"] }
-codespan-reporting.workspace = true
 tracing-subscriber.workspace = true
 dt-parser.workspace = true
 dt-lint.workspace = true
 dt-analyzer.workspace = true
 dt-workspace = { workspace = true, features = ["cli"] }
+codespan-reporting.workspace = true
+dt-diagnostic = { workspace = true, features = ["codespan-reporting"] }
 
 [lints]
 workspace = true

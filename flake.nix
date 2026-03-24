@@ -95,6 +95,9 @@
                 exec ${grcov}/bin/grcov --llvm-path ${llvmPackages.llvm}/bin "$@"
               '')
               fd
+
+              # For testing
+              dtc
             ];
 
             env.DT_TOOLS_LINUX_BINDINGS = linuxBindings pkgs;

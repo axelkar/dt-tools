@@ -2,6 +2,8 @@ use std::borrow::Cow;
 
 use text_range::TextRange;
 
+#[cfg(feature = "codespan-reporting")]
+pub mod codespan_reporting;
 pub mod text_range;
 
 // TODO: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_error_messages/enum.DiagMessage.html
