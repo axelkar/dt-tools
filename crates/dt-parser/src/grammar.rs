@@ -660,435 +660,60 @@ pub(super) fn entry_name(p: &mut Parser) {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::needless_raw_string_hashes,
+    reason = "expect-test auto update adds r#"
+)]
 pub(super) mod tests {
-    use std::sync::Arc;
+    use crate::parser::{parse, Entrypoint};
 
-    use crate::{
-        cst::{GreenItem, GreenNode, GreenToken, TokenText, TreeItem},
-        lexer::TokenKind,
-        parser::{parse, Entrypoint, ParseError},
-    };
-
-    use super::*;
-    use expect_test::{expect_file, ExpectFile};
-    use pretty_assertions::assert_eq;
-
-    pub fn node(kind: NodeKind, children: Vec<GreenItem>) -> GreenItem {
-        GreenItem::Node(Arc::new(GreenNode {
-            kind,
-            width: children.iter().map(TreeItem::length).sum(),
-            children,
-        }))
-    }
-    pub fn dynamic_token(kind: TokenKind, text: &'static str) -> GreenItem {
-        GreenItem::Token(Arc::new(GreenToken {
-            kind,
-            text: TokenText::Dynamic(text.to_owned()),
-        }))
-    }
-    pub fn static_token(kind: TokenKind) -> GreenItem {
-        GreenItem::Token(Arc::new(GreenToken {
-            kind,
-            text: TokenText::Static(kind.static_text().unwrap()),
-        }))
-    }
-    pub fn ws(text: &'static str) -> GreenItem {
-        dynamic_token(TokenKind::Whitespace, text)
-    }
+    use expect_test::{expect, expect_file, Expect, ExpectFile};
 
     #[track_caller]
-    fn check(input: &str, expected_children: &[GreenItem], expected_errors: &[ParseError]) {
-        let parse_output = parse(input);
-        assert_eq!(parse_output.errors, expected_errors);
-        assert_eq!(parse_output.green_node.children, expected_children);
-    }
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn check_file(src: &str, expect: ExpectFile) {
+        let parse_output = parse(src);
+        expect.assert_eq(&format!(
+            "Errors: {:#?}
 
-    #[track_caller]
-    fn check_ep(
-        ep: Entrypoint,
-        input: &str,
-        expected_children: &[GreenItem],
-        expected_errors: &[ParseError],
-    ) {
-        let parse_output = ep.parse(input);
-        assert_eq!(parse_output.errors, expected_errors);
-        assert_eq!(parse_output.green_node.children, expected_children);
-    }
-
-    #[test]
-    fn try_entrypoint() {
-        check_ep(
-            Entrypoint::Name,
-            "foo",
-            &[dynamic_token(TokenKind::Name, "foo")],
-            &[],
-        );
-        check_ep(
-            Entrypoint::ReferenceNoamp,
-            "foo",
-            &[dynamic_token(TokenKind::Name, "foo")],
-            &[],
-        );
-
-        check_ep(
-            Entrypoint::PropValues,
-            "\"foo\", \"bar\"",
-            &[
-                dynamic_token(TokenKind::String, "\"foo\""),
-                static_token(TokenKind::Comma),
-                ws(" "),
-                dynamic_token(TokenKind::String, "\"bar\""),
-            ],
-            &[],
-        );
-        check_ep(
-            Entrypoint::PropValues,
-            "\"foo\";",
-            &[
-                dynamic_token(TokenKind::String, "\"foo\""),
-                node(
-                    NodeKind::ParseError,
-                    vec![static_token(TokenKind::Semicolon)],
-                ),
-            ],
-            &[ParseError {
-                message: Cow::Borrowed("Expected ‘,’ or end-of-file, but found ‘;’"),
-                primary_span: (5..6).into(),
-                span_labels: Vec::new(),
-            }],
-        );
-
-        check_ep(
-            Entrypoint::Cells,
-            "1 2",
-            &[
-                dynamic_token(TokenKind::Number, "1"),
-                ws(" "),
-                dynamic_token(TokenKind::Number, "2"),
-            ],
-            &[],
-        );
-
-        check_ep(
-            Entrypoint::Cells,
-            "1 2>",
-            &[
-                dynamic_token(TokenKind::Number, "1"),
-                ws(" "),
-                dynamic_token(TokenKind::Number, "2"),
-                node(NodeKind::ParseError, vec![static_token(TokenKind::RAngle)]),
-            ],
-            &[ParseError {
-                message: Cow::Borrowed("Expected cell or end-of-file, but found ‘>’"),
-                primary_span: (3..4).into(),
-                span_labels: Vec::new(),
-            }],
-        );
-    }
-
-    #[test]
-    fn references() {
-        // According to the DT spec v0.4, labels can only match [0-9a-zA-Z_]
-        // Note how commas are ignored:
-        check_ep(
-            Entrypoint::PropValues,
-            "&foo, &123_foo",
-            &[
-                node(
-                    NodeKind::DtPhandle,
-                    vec![
-                        static_token(TokenKind::Ampersand),
-                        dynamic_token(TokenKind::Name, "foo"),
-                    ],
-                ),
-                static_token(TokenKind::Comma),
-                ws(" "),
-                node(
-                    NodeKind::DtPhandle,
-                    vec![
-                        static_token(TokenKind::Ampersand),
-                        dynamic_token(TokenKind::Name, "123_foo"),
-                    ],
-                ),
-            ],
-            &[],
-        );
-    }
-
-    #[test]
-    fn macro_positions() {
-        let macro_invoc_bar = node(
-            NodeKind::MacroInvocation,
-            vec![
-                dynamic_token(TokenKind::Ident, "FOO"),
-                static_token(TokenKind::LParen),
-                node(
-                    NodeKind::MacroArgument,
-                    vec![dynamic_token(TokenKind::Ident, "bar")],
-                ),
-                static_token(TokenKind::RParen),
-            ],
-        );
-        let macro_invoc = node(
-            NodeKind::MacroInvocation,
-            vec![dynamic_token(TokenKind::Ident, "FOO")],
-        );
-
-        macro_positions_as_item_name_extension(&macro_invoc_bar);
-        macro_positions_as_label_def(&macro_invoc_bar);
-        macro_positions_as_value_cell(&macro_invoc, &macro_invoc_bar);
-        macro_positions_as_reference(&macro_invoc_bar);
-    }
-
-    /// Item name, extension
-    fn macro_positions_as_item_name_extension(macro_invoc_bar: &GreenItem) {
-        check(
-            "FOO {}; FOO(bar) {}; &FOO {}; &FOO(bar) {};",
-            &[
-                node(
-                    NodeKind::DtNode,
-                    vec![
-                        dynamic_token(TokenKind::Name, "FOO"),
-                        ws(" "),
-                        static_token(TokenKind::LCurly),
-                        static_token(TokenKind::RCurly),
-                        static_token(TokenKind::Semicolon),
-                    ],
-                ),
-                ws(" "),
-                node(
-                    NodeKind::DtNode,
-                    vec![
-                        macro_invoc_bar.clone(),
-                        ws(" "),
-                        static_token(TokenKind::LCurly),
-                        static_token(TokenKind::RCurly),
-                        static_token(TokenKind::Semicolon),
-                    ],
-                ),
-                ws(" "),
-                node(
-                    NodeKind::DtNode,
-                    vec![
-                        node(
-                            NodeKind::DtPhandle,
-                            vec![
-                                static_token(TokenKind::Ampersand),
-                                dynamic_token(TokenKind::Name, "FOO"),
-                            ],
-                        ),
-                        ws(" "),
-                        static_token(TokenKind::LCurly),
-                        static_token(TokenKind::RCurly),
-                        static_token(TokenKind::Semicolon),
-                    ],
-                ),
-                ws(" "),
-                node(
-                    NodeKind::DtNode,
-                    vec![
-                        node(
-                            NodeKind::DtPhandle,
-                            vec![static_token(TokenKind::Ampersand), macro_invoc_bar.clone()],
-                        ),
-                        ws(" "),
-                        static_token(TokenKind::LCurly),
-                        static_token(TokenKind::RCurly),
-                        static_token(TokenKind::Semicolon),
-                    ],
-                ),
-            ],
-            &[],
-        );
-    }
-
-    /// Label definition
-    fn macro_positions_as_label_def(macro_invoc_bar: &GreenItem) {
-        check(
-            "FOO: bar {}; FOO(bar): bar {};",
-            &[
-                node(
-                    NodeKind::DtNode,
-                    vec![
-                        node(
-                            NodeKind::DtLabel,
-                            vec![
-                                dynamic_token(TokenKind::Name, "FOO"),
-                                static_token(TokenKind::Colon),
-                            ],
-                        ),
-                        ws(" "),
-                        dynamic_token(TokenKind::Name, "bar"),
-                        ws(" "),
-                        static_token(TokenKind::LCurly),
-                        static_token(TokenKind::RCurly),
-                        static_token(TokenKind::Semicolon),
-                    ],
-                ),
-                ws(" "),
-                node(
-                    NodeKind::DtNode,
-                    vec![
-                        node(
-                            NodeKind::DtLabel,
-                            vec![macro_invoc_bar.clone(), static_token(TokenKind::Colon)],
-                        ),
-                        ws(" "),
-                        dynamic_token(TokenKind::Name, "bar"),
-                        ws(" "),
-                        static_token(TokenKind::LCurly),
-                        static_token(TokenKind::RCurly),
-                        static_token(TokenKind::Semicolon),
-                    ],
-                ),
-            ],
-            &[],
-        );
-    }
-
-    /// As value/cell
-    fn macro_positions_as_value_cell(macro_invoc: &GreenItem, macro_invoc_bar: &GreenItem) {
-        check_ep(
-            Entrypoint::PropValues,
-            "<FOO FOO(bar)>, FOO, FOO(bar)",
-            &[
-                node(
-                    NodeKind::DtCellList,
-                    vec![
-                        static_token(TokenKind::LAngle),
-                        macro_invoc.clone(),
-                        ws(" "),
-                        macro_invoc_bar.clone(),
-                        static_token(TokenKind::RAngle),
-                    ],
-                ),
-                static_token(TokenKind::Comma),
-                ws(" "),
-                macro_invoc.clone(),
-                static_token(TokenKind::Comma),
-                ws(" "),
-                macro_invoc_bar.clone(),
-            ],
-            &[],
-        );
-    }
-
-    /// As reference
-    fn macro_positions_as_reference(macro_invoc_bar: &GreenItem) {
-        check_ep(
-            Entrypoint::PropValues,
-            "<&FOO &FOO(bar)>, &FOO, &FOO(bar)",
-            &[
-                node(
-                    NodeKind::DtCellList,
-                    vec![
-                        static_token(TokenKind::LAngle),
-                        node(
-                            NodeKind::DtPhandle,
-                            vec![
-                                static_token(TokenKind::Ampersand),
-                                dynamic_token(TokenKind::Name, "FOO"),
-                            ],
-                        ),
-                        ws(" "),
-                        node(
-                            NodeKind::DtPhandle,
-                            vec![static_token(TokenKind::Ampersand), macro_invoc_bar.clone()],
-                        ),
-                        static_token(TokenKind::RAngle),
-                    ],
-                ),
-                static_token(TokenKind::Comma),
-                ws(" "),
-                node(
-                    NodeKind::DtPhandle,
-                    vec![
-                        static_token(TokenKind::Ampersand),
-                        dynamic_token(TokenKind::Name, "FOO"),
-                    ],
-                ),
-                static_token(TokenKind::Comma),
-                ws(" "),
-                node(
-                    NodeKind::DtPhandle,
-                    vec![static_token(TokenKind::Ampersand), macro_invoc_bar.clone()],
-                ),
-            ],
-            &[],
-        );
-    }
-
-    #[test]
-    fn parse_directive() {
-        #[track_caller]
-        fn check_directive(input: &str, kind: TokenKind, args: Option<Vec<GreenItem>>) {
-            check(
-                input,
-                &[node(
-                    NodeKind::Directive,
-                    if let Some(args) = args {
-                        vec![
-                            static_token(kind),
-                            ws(" "),
-                            node(NodeKind::DirectiveArguments, args),
-                            static_token(TokenKind::Semicolon),
-                        ]
-                    } else {
-                        vec![static_token(kind), static_token(TokenKind::Semicolon)]
-                    },
-                )],
-                &[],
-            );
-        }
-
-        check_directive("/dts-v1/;", TokenKind::V1Directive, None);
-
-        check_directive("/plugin/;", TokenKind::PluginDirective, None);
-
-        check_directive(
-            "/delete-node/ node-name;",
-            TokenKind::DeleteNodeDirective,
-            Some(vec![dynamic_token(TokenKind::Name, "node-name")]),
-        );
-
-        check_directive(
-            "/delete-node/ &label;",
-            TokenKind::DeleteNodeDirective,
-            Some(vec![node(
-                NodeKind::DtPhandle,
-                vec![
-                    static_token(TokenKind::Ampersand),
-                    dynamic_token(TokenKind::Name, "label"),
-                ],
-            )]),
-        );
-
-        check_directive(
-            "/memreserve/ 0x10000000 0x4000;",
-            TokenKind::MemreserveDirective,
-            Some(vec![
-                dynamic_token(TokenKind::Number, "0x10000000"),
-                ws(" "),
-                dynamic_token(TokenKind::Number, "0x4000"),
-            ]),
-        );
+Tree:
+{}",
+            parse_output.errors,
+            parse_output.green_node.print_tree()
+        ));
     }
 
     #[track_caller]
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
-    fn test_expected(src: &str, expect: ExpectFile) {
-        let parse_output = parse(src);
-        assert_eq!(parse_output.lex_errors, &[]);
-        assert_eq!(parse_output.errors, &[]);
+    fn check(input: &str, expect: Expect) {
+        let parse_output = parse(input);
+        expect.assert_eq(&format!(
+            "Errors: {:#?}
 
-        let output = parse_output.green_node.print_tree();
+Tree:
+{}",
+            parse_output.errors,
+            parse_output.green_node.print_tree()
+        ));
+    }
 
-        expect.assert_eq(&output);
+    #[track_caller]
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn check_ep(ep: Entrypoint, input: &str, expect: Expect) {
+        let parse_output = ep.parse(input);
+        expect.assert_eq(&format!(
+            "Errors: {:#?}
+
+Tree:
+{}",
+            parse_output.errors,
+            parse_output.green_node.print_tree()
+        ));
     }
 
     #[test]
     fn parse_from_test_data_1() {
-        test_expected(
+        check_file(
             include_str!("../test_data/1.dts"),
             expect_file!["../test_data/1.dts.expect"],
         );
@@ -1096,7 +721,7 @@ pub(super) mod tests {
 
     #[test]
     fn parse_from_test_data_2_macros() {
-        test_expected(
+        check_file(
             include_str!("../test_data/2-macro-def.dts"),
             expect_file!["../test_data/2-macro-def.dts.expect"],
         );
@@ -1104,65 +729,414 @@ pub(super) mod tests {
 
     #[test]
     fn parse_from_test_data_3_preproc() {
-        test_expected(
+        check_file(
             include_str!("../test_data/3-preproc-dir.dts"),
             expect_file!["../test_data/3-preproc-dir.dts.expect"],
         );
     }
 
-    // TODO: use expect-test and print_tree
+    #[test]
+    fn try_entrypoint() {
+        check_ep(
+            Entrypoint::Name,
+            "foo",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                EntryName@0..3
+                  Name@0..3 "foo"
+            "#]],
+        );
+        check_ep(
+            Entrypoint::ReferenceNoamp,
+            "foo",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                DtPhandle@0..3
+                  Name@0..3 "foo"
+            "#]],
+        );
+
+        check_ep(
+            Entrypoint::PropValues,
+            "\"foo\", \"bar\"",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                EntryPropValues@0..12
+                  String@0..5 "\"foo\""
+                  Comma@5..6 ","
+                  Whitespace@6..7 " "
+                  String@7..12 "\"bar\""
+            "#]],
+        );
+        check_ep(
+            Entrypoint::PropValues,
+            "\"foo\";",
+            expect![[r#"
+                Errors: [
+                    ParseError {
+                        message: "Expected ‘,’ or end-of-file, but found ‘;’",
+                        primary_span: TextRange {
+                            start: 5,
+                            end: 6,
+                        },
+                        span_labels: [],
+                    },
+                ]
+
+                Tree:
+                EntryPropValues@0..6
+                  String@0..5 "\"foo\""
+                  ParseError@5..6
+                    Semicolon@5..6 ";"
+            "#]],
+        );
+
+        check_ep(
+            Entrypoint::Cells,
+            "1 2",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                EntryCells@0..3
+                  Number@0..1 "1"
+                  Whitespace@1..2 " "
+                  Number@2..3 "2"
+            "#]],
+        );
+
+        check_ep(
+            Entrypoint::Cells,
+            "1 2>",
+            expect![[r#"
+                Errors: [
+                    ParseError {
+                        message: "Expected cell or end-of-file, but found ‘>’",
+                        primary_span: TextRange {
+                            start: 3,
+                            end: 4,
+                        },
+                        span_labels: [],
+                    },
+                ]
+
+                Tree:
+                EntryCells@0..4
+                  Number@0..1 "1"
+                  Whitespace@1..2 " "
+                  Number@2..3 "2"
+                  ParseError@3..4
+                    RAngle@3..4 ">"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn references() {
+        // According to the DT spec v0.4, labels can only match [0-9a-zA-Z_]
+        // Note how the comma is not included in the label:
+        check_ep(
+            Entrypoint::PropValues,
+            "&foo, &123_foo",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                EntryPropValues@0..14
+                  DtPhandle@0..4
+                    Ampersand@0..1 "&"
+                    Name@1..4 "foo"
+                  Comma@4..5 ","
+                  Whitespace@5..6 " "
+                  DtPhandle@6..14
+                    Ampersand@6..7 "&"
+                    Name@7..14 "123_foo"
+            "#]],
+        );
+    }
+
+    /// Item name, extension
+    #[test]
+    fn macro_positions_as_item_name_extension() {
+        check(
+            "FOO {}; FOO(bar) {}; &FOO {}; &FOO(bar) {};",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..43
+                  DtNode@0..7
+                    Name@0..3 "FOO"
+                    Whitespace@3..4 " "
+                    LCurly@4..5 "{"
+                    RCurly@5..6 "}"
+                    Semicolon@6..7 ";"
+                  Whitespace@7..8 " "
+                  DtNode@8..20
+                    MacroInvocation@8..16
+                      Ident@8..11 "FOO"
+                      LParen@11..12 "("
+                      MacroArgument@12..15
+                        Ident@12..15 "bar"
+                      RParen@15..16 ")"
+                    Whitespace@16..17 " "
+                    LCurly@17..18 "{"
+                    RCurly@18..19 "}"
+                    Semicolon@19..20 ";"
+                  Whitespace@20..21 " "
+                  DtNode@21..29
+                    DtPhandle@21..25
+                      Ampersand@21..22 "&"
+                      Name@22..25 "FOO"
+                    Whitespace@25..26 " "
+                    LCurly@26..27 "{"
+                    RCurly@27..28 "}"
+                    Semicolon@28..29 ";"
+                  Whitespace@29..30 " "
+                  DtNode@30..43
+                    DtPhandle@30..39
+                      Ampersand@30..31 "&"
+                      MacroInvocation@31..39
+                        Ident@31..34 "FOO"
+                        LParen@34..35 "("
+                        MacroArgument@35..38
+                          Ident@35..38 "bar"
+                        RParen@38..39 ")"
+                    Whitespace@39..40 " "
+                    LCurly@40..41 "{"
+                    RCurly@41..42 "}"
+                    Semicolon@42..43 ";"
+            "#]],
+        );
+    }
+
+    /// Label definition
+    #[test]
+    fn macro_positions_as_label_def() {
+        check(
+            "FOO: bar {}; FOO(bar): bar {};",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..30
+                  DtNode@0..12
+                    DtLabel@0..4
+                      Name@0..3 "FOO"
+                      Colon@3..4 ":"
+                    Whitespace@4..5 " "
+                    Name@5..8 "bar"
+                    Whitespace@8..9 " "
+                    LCurly@9..10 "{"
+                    RCurly@10..11 "}"
+                    Semicolon@11..12 ";"
+                  Whitespace@12..13 " "
+                  DtNode@13..30
+                    DtLabel@13..22
+                      MacroInvocation@13..21
+                        Ident@13..16 "FOO"
+                        LParen@16..17 "("
+                        MacroArgument@17..20
+                          Ident@17..20 "bar"
+                        RParen@20..21 ")"
+                      Colon@21..22 ":"
+                    Whitespace@22..23 " "
+                    Name@23..26 "bar"
+                    Whitespace@26..27 " "
+                    LCurly@27..28 "{"
+                    RCurly@28..29 "}"
+                    Semicolon@29..30 ";"
+            "#]],
+        );
+    }
+
+    /// As value/cell
+    #[test]
+    fn macro_positions_as_value_cell() {
+        check_ep(
+            Entrypoint::PropValues,
+            "<FOO FOO(bar)>, FOO, FOO(bar)",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                EntryPropValues@0..29
+                  DtCellList@0..14
+                    LAngle@0..1 "<"
+                    MacroInvocation@1..4
+                      Ident@1..4 "FOO"
+                    Whitespace@4..5 " "
+                    MacroInvocation@5..13
+                      Ident@5..8 "FOO"
+                      LParen@8..9 "("
+                      MacroArgument@9..12
+                        Ident@9..12 "bar"
+                      RParen@12..13 ")"
+                    RAngle@13..14 ">"
+                  Comma@14..15 ","
+                  Whitespace@15..16 " "
+                  MacroInvocation@16..19
+                    Ident@16..19 "FOO"
+                  Comma@19..20 ","
+                  Whitespace@20..21 " "
+                  MacroInvocation@21..29
+                    Ident@21..24 "FOO"
+                    LParen@24..25 "("
+                    MacroArgument@25..28
+                      Ident@25..28 "bar"
+                    RParen@28..29 ")"
+            "#]],
+        );
+    }
+
+    /// As reference
+    #[test]
+    fn macro_positions_as_reference() {
+        check_ep(
+            Entrypoint::PropValues,
+            "<&FOO &FOO(bar)>, &FOO, &FOO(bar)",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                EntryPropValues@0..33
+                  DtCellList@0..16
+                    LAngle@0..1 "<"
+                    DtPhandle@1..5
+                      Ampersand@1..2 "&"
+                      Name@2..5 "FOO"
+                    Whitespace@5..6 " "
+                    DtPhandle@6..15
+                      Ampersand@6..7 "&"
+                      MacroInvocation@7..15
+                        Ident@7..10 "FOO"
+                        LParen@10..11 "("
+                        MacroArgument@11..14
+                          Ident@11..14 "bar"
+                        RParen@14..15 ")"
+                    RAngle@15..16 ">"
+                  Comma@16..17 ","
+                  Whitespace@17..18 " "
+                  DtPhandle@18..22
+                    Ampersand@18..19 "&"
+                    Name@19..22 "FOO"
+                  Comma@22..23 ","
+                  Whitespace@23..24 " "
+                  DtPhandle@24..33
+                    Ampersand@24..25 "&"
+                    MacroInvocation@25..33
+                      Ident@25..28 "FOO"
+                      LParen@28..29 "("
+                      MacroArgument@29..32
+                        Ident@29..32 "bar"
+                      RParen@32..33 ")"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_directive() {
+        check(
+            "
+/dts-v1/;
+/plugin/;
+/delete-node/ node-name;
+/delete-node/ &label;
+/memreserve/ 0x10000000 0x4000;
+",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..100
+                  Whitespace@0..1 "\n"
+                  Directive@1..10
+                    V1Directive@1..9 "/dts-v1/"
+                    Semicolon@9..10 ";"
+                  Whitespace@10..11 "\n"
+                  Directive@11..20
+                    PluginDirective@11..19 "/plugin/"
+                    Semicolon@19..20 ";"
+                  Whitespace@20..21 "\n"
+                  Directive@21..45
+                    DeleteNodeDirective@21..34 "/delete-node/"
+                    Whitespace@34..35 " "
+                    DirectiveArguments@35..44
+                      Name@35..44 "node-name"
+                    Semicolon@44..45 ";"
+                  Whitespace@45..46 "\n"
+                  Directive@46..67
+                    DeleteNodeDirective@46..59 "/delete-node/"
+                    Whitespace@59..60 " "
+                    DirectiveArguments@60..66
+                      DtPhandle@60..66
+                        Ampersand@60..61 "&"
+                        Name@61..66 "label"
+                    Semicolon@66..67 ";"
+                  Whitespace@67..68 "\n"
+                  Directive@68..99
+                    MemreserveDirective@68..80 "/memreserve/"
+                    Whitespace@80..81 " "
+                    DirectiveArguments@81..98
+                      Number@81..91 "0x10000000"
+                      Whitespace@91..92 " "
+                      Number@92..98 "0x4000"
+                    Semicolon@98..99 ";"
+                  Whitespace@99..100 "\n"
+            "#]],
+        );
+    }
+
     #[test]
     fn parse_node() {
         check(
             "/ {};",
-            &[node(
-                NodeKind::DtNode,
-                vec![
-                    static_token(TokenKind::Slash),
-                    ws(" "),
-                    static_token(TokenKind::LCurly),
-                    static_token(TokenKind::RCurly),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            &[],
+            expect![[r#"
+            Errors: []
+
+            Tree:
+            SourceFile@0..5
+              DtNode@0..5
+                Slash@0..1 "/"
+                Whitespace@1..2 " "
+                LCurly@2..3 "{"
+                RCurly@3..4 "}"
+                Semicolon@4..5 ";"
+        "#]],
         );
 
         check(
             "/ { a = <>; };",
-            &[node(
-                NodeKind::DtNode,
-                vec![
-                    static_token(TokenKind::Slash),
-                    ws(" "),
-                    static_token(TokenKind::LCurly),
-                    ws(" "),
-                    node(
-                        NodeKind::DtProperty,
-                        vec![
-                            dynamic_token(TokenKind::Name, "a"),
-                            ws(" "),
-                            static_token(TokenKind::Equals),
-                            ws(" "),
-                            node(
-                                NodeKind::PropValueList,
-                                vec![node(
-                                    NodeKind::DtCellList,
-                                    vec![
-                                        static_token(TokenKind::LAngle),
-                                        static_token(TokenKind::RAngle),
-                                    ],
-                                )],
-                            ),
-                            static_token(TokenKind::Semicolon),
-                        ],
-                    ),
-                    ws(" "),
-                    static_token(TokenKind::RCurly),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            &[],
+            expect![[r#"
+            Errors: []
+
+            Tree:
+            SourceFile@0..14
+              DtNode@0..14
+                Slash@0..1 "/"
+                Whitespace@1..2 " "
+                LCurly@2..3 "{"
+                Whitespace@3..4 " "
+                DtProperty@4..11
+                  Name@4..5 "a"
+                  Whitespace@5..6 " "
+                  Equals@6..7 "="
+                  Whitespace@7..8 " "
+                  PropValueList@8..10
+                    DtCellList@8..10
+                      LAngle@8..9 "<"
+                      RAngle@9..10 ">"
+                  Semicolon@10..11 ";"
+                Whitespace@11..12 " "
+                RCurly@12..13 "}"
+                Semicolon@13..14 ";"
+        "#]],
         );
     }
 
@@ -1171,73 +1145,82 @@ pub(super) mod tests {
         // Odd syntax supported by dtc:
         check(
             "123 = \"foo\";",
-            &[node(
-                NodeKind::DtProperty,
-                vec![
-                    dynamic_token(TokenKind::Name, "123"),
-                    ws(" "),
-                    static_token(TokenKind::Equals),
-                    ws(" "),
-                    node(
-                        NodeKind::PropValueList,
-                        vec![dynamic_token(TokenKind::String, "\"foo\"")],
-                    ),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            &[],
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..12
+                  DtProperty@0..12
+                    Name@0..3 "123"
+                    Whitespace@3..4 " "
+                    Equals@4..5 "="
+                    Whitespace@5..6 " "
+                    PropValueList@6..11
+                      String@6..11 "\"foo\""
+                    Semicolon@11..12 ";"
+            "#]],
         );
 
         check(
             "123, = \"foo\";",
-            &[node(
-                NodeKind::DtProperty,
-                vec![
-                    dynamic_token(TokenKind::Name, "123,"),
-                    ws(" "),
-                    static_token(TokenKind::Equals),
-                    ws(" "),
-                    node(
-                        NodeKind::PropValueList,
-                        vec![dynamic_token(TokenKind::String, "\"foo\"")],
-                    ),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            &[],
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..13
+                  DtProperty@0..13
+                    Name@0..4 "123,"
+                    Whitespace@4..5 " "
+                    Equals@5..6 "="
+                    Whitespace@6..7 " "
+                    PropValueList@7..12
+                      String@7..12 "\"foo\""
+                    Semicolon@12..13 ";"
+            "#]],
         );
 
         check(
             ",,, = \"foo\";",
-            &[node(
-                NodeKind::DtProperty,
-                vec![
-                    dynamic_token(TokenKind::Name, ",,,"),
-                    ws(" "),
-                    static_token(TokenKind::Equals),
-                    ws(" "),
-                    node(
-                        NodeKind::PropValueList,
-                        vec![dynamic_token(TokenKind::String, "\"foo\"")],
-                    ),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            &[],
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..12
+                  DtProperty@0..12
+                    Name@0..3 ",,,"
+                    Whitespace@3..4 " "
+                    Equals@4..5 "="
+                    Whitespace@5..6 " "
+                    PropValueList@6..11
+                      String@6..11 "\"foo\""
+                    Semicolon@11..12 ";"
+            "#]],
         );
     }
 
     #[test]
     fn parse_trivia() {
-        check("  ", &[ws("  ")], &[]);
+        check(
+            "  ",
+            expect![[r#"
+            Errors: []
+
+            Tree:
+            SourceFile@0..2
+              Whitespace@0..2 "  "
+        "#]],
+        );
         check(
             "/* test */ // test",
-            &[
-                dynamic_token(TokenKind::BlockComment, "/* test */"),
-                ws(" "),
-                dynamic_token(TokenKind::LineComment, "// test"),
-            ],
-            &[],
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..18
+                  BlockComment@0..10 "/* test */"
+                  Whitespace@10..11 " "
+                  LineComment@11..18 "// test"
+            "#]],
         );
     }
 
@@ -1245,91 +1228,58 @@ pub(super) mod tests {
     fn parse_macro_invocation() {
         check(
             "a = <FOO(bar, 1234)>, FOO((()), ()), FOO(), FOO;",
-            &[node(
-                NodeKind::DtProperty,
-                vec![
-                    dynamic_token(TokenKind::Name, "a"),
-                    ws(" "),
-                    static_token(TokenKind::Equals),
-                    ws(" "),
-                    node(
-                        NodeKind::PropValueList,
-                        vec![
-                            node(
-                                NodeKind::DtCellList,
-                                vec![
-                                    static_token(TokenKind::LAngle),
-                                    node(
-                                        NodeKind::MacroInvocation,
-                                        vec![
-                                            dynamic_token(TokenKind::Ident, "FOO"),
-                                            static_token(TokenKind::LParen),
-                                            node(
-                                                NodeKind::MacroArgument,
-                                                vec![dynamic_token(TokenKind::Ident, "bar")],
-                                            ),
-                                            static_token(TokenKind::Comma),
-                                            ws(" "),
-                                            node(
-                                                NodeKind::MacroArgument,
-                                                vec![dynamic_token(TokenKind::Number, "1234")],
-                                            ),
-                                            static_token(TokenKind::RParen),
-                                        ],
-                                    ),
-                                    static_token(TokenKind::RAngle),
-                                ],
-                            ),
-                            static_token(TokenKind::Comma),
-                            ws(" "),
-                            node(
-                                NodeKind::MacroInvocation,
-                                vec![
-                                    dynamic_token(TokenKind::Ident, "FOO"),
-                                    static_token(TokenKind::LParen),
-                                    node(
-                                        NodeKind::MacroArgument,
-                                        vec![
-                                            static_token(TokenKind::LParen),
-                                            static_token(TokenKind::LParen),
-                                            static_token(TokenKind::RParen),
-                                            static_token(TokenKind::RParen),
-                                        ],
-                                    ),
-                                    static_token(TokenKind::Comma),
-                                    ws(" "),
-                                    node(
-                                        NodeKind::MacroArgument,
-                                        vec![
-                                            static_token(TokenKind::LParen),
-                                            static_token(TokenKind::RParen),
-                                        ],
-                                    ),
-                                    static_token(TokenKind::RParen),
-                                ],
-                            ),
-                            static_token(TokenKind::Comma),
-                            ws(" "),
-                            node(
-                                NodeKind::MacroInvocation,
-                                vec![
-                                    dynamic_token(TokenKind::Ident, "FOO"),
-                                    static_token(TokenKind::LParen),
-                                    static_token(TokenKind::RParen),
-                                ],
-                            ),
-                            static_token(TokenKind::Comma),
-                            ws(" "),
-                            node(
-                                NodeKind::MacroInvocation,
-                                vec![dynamic_token(TokenKind::Ident, "FOO")],
-                            ),
-                        ],
-                    ),
-                    static_token(TokenKind::Semicolon),
-                ],
-            )],
-            &[],
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..48
+                  DtProperty@0..48
+                    Name@0..1 "a"
+                    Whitespace@1..2 " "
+                    Equals@2..3 "="
+                    Whitespace@3..4 " "
+                    PropValueList@4..47
+                      DtCellList@4..20
+                        LAngle@4..5 "<"
+                        MacroInvocation@5..19
+                          Ident@5..8 "FOO"
+                          LParen@8..9 "("
+                          MacroArgument@9..12
+                            Ident@9..12 "bar"
+                          Comma@12..13 ","
+                          Whitespace@13..14 " "
+                          MacroArgument@14..18
+                            Number@14..18 "1234"
+                          RParen@18..19 ")"
+                        RAngle@19..20 ">"
+                      Comma@20..21 ","
+                      Whitespace@21..22 " "
+                      MacroInvocation@22..35
+                        Ident@22..25 "FOO"
+                        LParen@25..26 "("
+                        MacroArgument@26..30
+                          LParen@26..27 "("
+                          LParen@27..28 "("
+                          RParen@28..29 ")"
+                          RParen@29..30 ")"
+                        Comma@30..31 ","
+                        Whitespace@31..32 " "
+                        MacroArgument@32..34
+                          LParen@32..33 "("
+                          RParen@33..34 ")"
+                        RParen@34..35 ")"
+                      Comma@35..36 ","
+                      Whitespace@36..37 " "
+                      MacroInvocation@37..42
+                        Ident@37..40 "FOO"
+                        LParen@40..41 "("
+                        RParen@41..42 ")"
+                      Comma@42..43 ","
+                      Whitespace@43..44 " "
+                      MacroInvocation@44..47
+                        Ident@44..47 "FOO"
+                    Semicolon@47..48 ";"
+            "#]],
         );
     }
 }

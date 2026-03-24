@@ -1,3 +1,6 @@
+Errors: []
+
+Tree:
 SourceFile@0..228
   Directive@0..9
     V1Directive@0..8 "/dts-v1/"

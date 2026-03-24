@@ -599,11 +599,11 @@ fn lex_char(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use expect_test::{expect_file, ExpectFile};
+    use expect_test::{expect, expect_file, Expect, ExpectFile};
     use pretty_assertions::assert_eq;
 
     #[track_caller]
-    fn check(input: &str, kind: TokenKind) {
+    fn check_single(input: &str, kind: TokenKind) {
         let lexer = Lexer::new(input);
         assert_eq!(
             lexer.collect::<Vec<_>>(),
@@ -618,83 +618,27 @@ mod tests {
         );
     }
 
-    #[test]
-    fn lex_spaces() {
-        check("     ", TokenKind::Whitespace);
-    }
+    #[track_caller]
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn check(src: &str, expect: Expect) {
+        use std::fmt::Write as _;
 
-    #[test]
-    fn lex_comments() {
-        check("/* content */", TokenKind::BlockComment);
-        check("/*\n * content\n **/", TokenKind::BlockComment);
-        check("/******/", TokenKind::BlockComment);
-        check("// hello", TokenKind::LineComment);
-    }
+        let mut output = String::new();
 
-    #[test]
-    fn lex_semicolon() {
-        check(";", TokenKind::Semicolon);
-    }
-
-    #[test]
-    fn lex_preprocessor_directive() {
-        check("#define FOO BAR", TokenKind::DefineDirective);
-        check("#define FOO 123", TokenKind::DefineDirective);
-        check("#define FOO \"bar\"", TokenKind::DefineDirective);
-        check("#define FOO <123>", TokenKind::DefineDirective);
-        check("#include \"a.dtsi\"", TokenKind::IncludeDirective);
-        check("#        define CONFIG_FOO", TokenKind::DefineDirective);
-        check("#ifdef FOO", TokenKind::IfdefDirective);
-        check("#else", TokenKind::ElseDirective);
-    }
-
-    #[test]
-    fn lex_number_literals() {
-        check("123", TokenKind::Number);
-        check("1_000_000", TokenKind::Number);
-        check("0xdeadbeef", TokenKind::Number);
-        check("0x07", TokenKind::Number);
-        check("0o777", TokenKind::Number);
-        check("0b00101010", TokenKind::Number);
-
-        // TODO: is this syntax in DTC? used out in the wild? in the spec?
-        //check("123U", TokenKind::Number);
-        //check("123L", TokenKind::Number);
-        //check("123UL", TokenKind::Number);
-        //check("123LL", TokenKind::Number);
-        //check("123ULL", TokenKind::Number);
-    }
-
-    #[test]
-    fn lex_string_literals() {
-        check(r#""abc""#, TokenKind::String);
-        check(r#""abc\a\b\e\f\n\r\t\v\\\'\x01""#, TokenKind::String); // escapes
-        check(r#""abc\"""#, TokenKind::String); // \" escape
-        check(r#""åäö""#, TokenKind::String); // 2-byte letters
-        check("\"\n\"", TokenKind::String); // newline
-        check(r#""📦""#, TokenKind::String); // 4-byte emoji
-        check(r#""你好""#, TokenKind::String); // 3-byte characters
-
-        // Unterminated string
-        let mut lexer = TokenKind::lexer(r#""abc\";"#);
-        assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEofString)));
-        assert_eq!(lexer.slice(), r#""abc\";"#);
-    }
-
-    #[test]
-    fn lex_bytestring_literals() {
-        check("[0123456789abcdef]", TokenKind::DtBytestring);
-        check("[  01 23 45 6789 a b ]", TokenKind::DtBytestring);
-
-        // Unterminated string
-        let mut lexer = TokenKind::lexer("[1234");
-        assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEofBytestring)));
-        assert_eq!(lexer.slice(), "[1234");
+        let mut lexer = TokenKind::lexer(src);
+        while let Some(token) = lexer.next() {
+            let slice = lexer.slice();
+            match token {
+                Ok(token) => writeln!(&mut output, "{token:?} {slice:?}").unwrap(),
+                Err(err) => writeln!(&mut output, "ERROR: {err:?} {slice:?}").unwrap(),
+            }
+        }
+        expect.assert_eq(&output);
     }
 
     #[track_caller]
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
-    fn test_expected(src: &str, expect: ExpectFile) {
+    fn check_file(src: &str, expect: ExpectFile) {
         use std::fmt::Write as _;
 
         let mut output = String::new();
@@ -712,7 +656,7 @@ mod tests {
 
     #[test]
     fn lex_from_test_data_1() {
-        test_expected(
+        check_file(
             include_str!("../test_data/1.dts"),
             expect_file!["../test_data/1.lex.expected"],
         );
@@ -720,7 +664,7 @@ mod tests {
 
     #[test]
     fn lex_from_test_data_2_macros() {
-        test_expected(
+        check_file(
             include_str!("../test_data/2-macro-def.dts"),
             expect_file!["../test_data/2-macro-def.lex.expected"],
         );
@@ -728,65 +672,149 @@ mod tests {
 
     #[test]
     fn lex_from_test_data_3_preproc() {
-        test_expected(
+        check_file(
             include_str!("../test_data/3-preproc-dir.dts"),
             expect_file!["../test_data/3-preproc-dir.lex.expected"],
         );
     }
 
     #[test]
-    fn lex_identifiers() {
-        check("/", TokenKind::Slash);
-        check("#a", TokenKind::Ident); // hashtags
-        check("DEFINE_MACRO", TokenKind::Ident);
-        check("åäö", TokenKind::Ident); // 2-byte letters
+    fn lex_spaces() {
+        check_single("     ", TokenKind::Whitespace);
     }
 
     #[test]
+    fn lex_comments() {
+        check_single("/* content */", TokenKind::BlockComment);
+        check_single("/*\n * content\n **/", TokenKind::BlockComment);
+        check_single("/******/", TokenKind::BlockComment);
+        check_single("// hello", TokenKind::LineComment);
+    }
+
+    #[test]
+    fn lex_semicolon() {
+        check_single(";", TokenKind::Semicolon);
+    }
+
+    #[test]
+    fn lex_preprocessor_directive() {
+        check_single("#define FOO BAR", TokenKind::DefineDirective);
+        check_single("#define FOO 123", TokenKind::DefineDirective);
+        check_single("#define FOO \"bar\"", TokenKind::DefineDirective);
+        check_single("#define FOO <123>", TokenKind::DefineDirective);
+        check_single("#include \"a.dtsi\"", TokenKind::IncludeDirective);
+        check_single("#        define CONFIG_FOO", TokenKind::DefineDirective);
+        check_single("#ifdef FOO", TokenKind::IfdefDirective);
+        check_single("#else", TokenKind::ElseDirective);
+    }
+
+    #[test]
+    fn lex_number_literals() {
+        check_single("123", TokenKind::Number);
+        check_single("1_000_000", TokenKind::Number);
+        check_single("0xdeadbeef", TokenKind::Number);
+        check_single("0x07", TokenKind::Number);
+        check_single("0o777", TokenKind::Number);
+        check_single("0b00101010", TokenKind::Number);
+
+        // TODO: is this syntax in DTC? used out in the wild? in the spec?
+        //check("123U", TokenKind::Number);
+        //check("123L", TokenKind::Number);
+        //check("123UL", TokenKind::Number);
+        //check("123LL", TokenKind::Number);
+        //check("123ULL", TokenKind::Number);
+    }
+
+    #[test]
+    fn lex_string_literals() {
+        check_single(r#""abc""#, TokenKind::String);
+        check_single(r#""abc\a\b\e\f\n\r\t\v\\\'\x01""#, TokenKind::String); // escapes
+        check_single(r#""abc\"""#, TokenKind::String); // \" escape
+        check_single(r#""åäö""#, TokenKind::String); // 2-byte letters
+        check_single("\"\n\"", TokenKind::String); // newline
+        check_single(r#""📦""#, TokenKind::String); // 4-byte emoji
+        check_single(r#""你好""#, TokenKind::String); // 3-byte characters
+
+        // Unterminated string
+        let mut lexer = TokenKind::lexer(r#""abc\";"#);
+        assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEofString)));
+        assert_eq!(lexer.slice(), r#""abc\";"#);
+    }
+
+    #[test]
+    fn lex_bytestring_literals() {
+        check_single("[0123456789abcdef]", TokenKind::DtBytestring);
+        check_single("[  01 23 45 6789 a b ]", TokenKind::DtBytestring);
+
+        // Unterminated string
+        let mut lexer = TokenKind::lexer("[1234");
+        assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEofBytestring)));
+        assert_eq!(lexer.slice(), "[1234");
+    }
+
+    #[test]
+    fn lex_identifiers() {
+        check_single("/", TokenKind::Slash); // Usage of slash is context-dependent.
+        check_single("#a", TokenKind::Ident); // hashtags
+        check_single("DEFINE_MACRO", TokenKind::Ident);
+        check_single("åäö", TokenKind::Ident); // 2-byte letters
+    }
+
+    /// Don't lex minuses into identifiers, their usage is context-dependent.
+    #[test]
     fn lex_minus_identifiers() {
-        let mut lexer = TokenKind::lexer("#a-cells");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
-        assert_eq!(lexer.slice(), "#a");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Minus)));
-        assert_eq!(lexer.slice(), "-");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
-        assert_eq!(lexer.slice(), "cells");
-
-        let mut lexer = TokenKind::lexer("-a");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Minus)));
-        assert_eq!(lexer.slice(), "-");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
-        assert_eq!(lexer.slice(), "a");
-
-        let mut lexer = TokenKind::lexer("a-");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
-        assert_eq!(lexer.slice(), "a");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Minus)));
-        assert_eq!(lexer.slice(), "-");
+        check(
+            "#a-cells",
+            expect![[r##"
+                Ident "#a"
+                Minus "-"
+                Ident "cells"
+            "##]],
+        );
+        check(
+            "-a",
+            expect![[r#"
+                Minus "-"
+                Ident "a"
+            "#]],
+        );
+        check(
+            "a-",
+            expect![[r#"
+                Ident "a"
+                Minus "-"
+            "#]],
+        );
     }
 
     #[test]
     fn lex_number_identifiers() {
-        let mut lexer = TokenKind::lexer("123abc");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Number)));
-        assert_eq!(lexer.slice(), "123");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
-        assert_eq!(lexer.slice(), "abc");
+        check(
+            "123abc",
+            expect![[r#"
+                Number "123"
+                Ident "abc"
+            "#]],
+        );
 
         // Macro names (which should be only one Ident) are allowed to have numbers
-        let mut lexer = TokenKind::lexer("abc123");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
-        assert_eq!(lexer.slice(), "abc123");
+        check(
+            "abc123",
+            expect![[r#"
+                Ident "abc123"
+            "#]],
+        );
     }
 
     #[test]
     fn lex_ident_and_whitespace() {
-        let mut lexer = TokenKind::lexer("hello world");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
-        assert_eq!(lexer.slice(), "hello");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Whitespace)));
-        assert_eq!(lexer.slice(), " ");
-        assert_eq!(lexer.next(), Some(Ok(TokenKind::Ident)));
-        assert_eq!(lexer.slice(), "world");
+        check(
+            "hello world",
+            expect![[r#"
+                Ident "hello"
+                Whitespace " "
+                Ident "world"
+            "#]],
+        );
     }
 }

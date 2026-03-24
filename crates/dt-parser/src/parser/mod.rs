@@ -482,17 +482,28 @@ pub mod visualizer {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
+    use expect_test::{Expect, expect};
 
     use super::sink::Sink;
     use crate::{
-        cst::{GreenNode, NodeKind},
-        lexer::{LexError, Lexer},
+        cst::NodeKind,
+        lexer::Lexer,
     };
 
     use super::*;
-    use grammar::tests::{dynamic_token, node, static_token};
-    use pretty_assertions::assert_eq;
+
+    #[track_caller]
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn check_parse_output(parse_output: Parse, expect: Expect) {
+        expect.assert_eq(&format!(
+            "Errors: {:#?}
+
+Tree:
+{}",
+            parse_output.errors,
+            parse_output.green_node.print_tree()
+        ));
+    }
 
     #[test]
     fn builder_api_lex_error() {
@@ -507,22 +518,13 @@ mod tests {
 
         let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
 
-        assert_eq!(
-            output,
-            Parse {
-                green_node: GreenNode {
-                    kind: NodeKind::SourceFile,
-                    width: "\"abc".len(),
-                    children: vec![dynamic_token(TokenKind::Unrecognized, "\"abc")]
-                },
-                lex_errors: vec![WrappedLexError {
-                    inner: LexError::UnexpectedEofString,
-                    text_range: (0..4).into(),
-                    text: Cow::Borrowed("\"abc"),
-                }],
-                errors: Vec::new()
-            }
-        );
+        check_parse_output(output, expect![[r#"
+            Errors: []
+
+            Tree:
+            SourceFile@0..4
+              Unrecognized@0..4 "\"abc"
+        "#]]);
     }
 
     #[test]
@@ -544,23 +546,16 @@ mod tests {
 
         // FIXME: with Sink code
         let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
-        assert_eq!(
-            output.green_node,
-            GreenNode {
-                kind: NodeKind::SourceFile,
-                width: "ident".len(),
-                children: vec![node(
-                    NodeKind::DtNode,
-                    vec![node(
-                        NodeKind::DtProperty,
-                        vec![node(
-                            NodeKind::DtCellList,
-                            vec![dynamic_token(TokenKind::Ident, "ident")]
-                        )]
-                    )]
-                )]
-            }
-        );
+        check_parse_output(output, expect![[r#"
+            Errors: []
+
+            Tree:
+            SourceFile@0..5
+              DtNode@0..5
+                DtProperty@0..5
+                  DtCellList@0..5
+                    Ident@0..5 "ident"
+        "#]]);
     }
 
     #[test]
@@ -588,27 +583,18 @@ mod tests {
 
         // FIXME: with Sink code
         let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
-        assert_eq!(
-            output.green_node,
-            GreenNode {
-                kind: NodeKind::SourceFile,
-                width: "hello world".len(),
-                children: vec![node(
-                    NodeKind::DtNode,
-                    vec![node(
-                        NodeKind::DtProperty,
-                        vec![
-                            node(
-                                NodeKind::DtCellList,
-                                vec![dynamic_token(TokenKind::Ident, "hello"),]
-                            ),
-                            dynamic_token(TokenKind::Whitespace, " "),
-                            dynamic_token(TokenKind::Ident, "world")
-                        ]
-                    )]
-                )]
-            }
-        );
+        check_parse_output(output, expect![[r#"
+            Errors: []
+
+            Tree:
+            SourceFile@0..11
+              DtNode@0..11
+                DtProperty@0..11
+                  DtCellList@0..5
+                    Ident@0..5 "hello"
+                  Whitespace@5..6 " "
+                  Ident@6..11 "world"
+        "#]]);
     }
 
     #[test]
@@ -636,25 +622,23 @@ mod tests {
 
         // FIXME: this is NOT an example for prev_next currently. expect comma, semicolon or both!!
         // oh and the code that does it will be defined in the grammar instead of the parser later
-        assert_eq!(
-            output,
-            Parse {
-                green_node: GreenNode {
-                    kind: NodeKind::SourceFile,
-                    width: "{\n  // foo".len(),
-                    children: vec![
-                        static_token(TokenKind::LCurly),
-                        dynamic_token(TokenKind::Whitespace, "\n  "),
-                        dynamic_token(TokenKind::LineComment, "// foo"),
-                    ]
+        check_parse_output(output, expect![[r#"
+            Errors: [
+                ParseError {
+                    message: "Expected ‘}’, but found end-of-file",
+                    primary_span: TextRange {
+                        start: 9,
+                        end: 10,
+                    },
+                    span_labels: [],
                 },
-                lex_errors: Vec::new(),
-                errors: vec![ParseError {
-                    message: Cow::Borrowed("Expected ‘}’, but found end-of-file"),
-                    primary_span: TextRange::new(9, 10),
-                    span_labels: Vec::new(),
-                }]
-            }
-        );
+            ]
+
+            Tree:
+            SourceFile@0..10
+              LCurly@0..1 "{"
+              Whitespace@1..4 "\n  "
+              LineComment@4..10 "// foo"
+        "#]]);
     }
 }
