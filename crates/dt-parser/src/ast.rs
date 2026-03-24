@@ -832,6 +832,70 @@ impl AstNode for DtLabel {
 impl HasName for DtLabel {}
 impl HasMacroInvocation for DtLabel {}
 
+/// A preprocessor conditional.
+///
+/// Kind: [`NodeKind::PreprocessorConditional`]
+///
+/// # Example
+///
+/// ```dts
+/// #if 1
+/// #else
+/// #endif
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PreprocessorConditional {
+    syntax: Arc<RedNode>,
+}
+impl AstNode for PreprocessorConditional {
+    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
+        match syntax.green.kind {
+            NodeKind::PreprocessorConditional => Some(Self { syntax }),
+            _ => None,
+        }
+    }
+    fn syntax(&self) -> &Arc<RedNode> {
+        &self.syntax
+    }
+}
+impl PreprocessorConditional {
+    /// Returns an iterator over the branches in the preprocessor conditional.
+    pub fn branches(
+        &self,
+    ) -> impl Iterator<Item = (PreprocessorDirective, PreprocessorBranch)> + '_ {
+        let mut iter = self.syntax.children();
+        std::iter::from_fn(move || {
+            let directive = (&mut iter)
+                .filter_map(RedItem::into_token)
+                .find_map(PreprocessorDirective::cast)?;
+            let branch = (&mut iter)
+                .filter_map(RedItem::into_node)
+                .find_map(PreprocessorBranch::cast)?;
+
+            Some((directive, branch))
+        })
+    }
+}
+
+/// Branch of a preprocessor conditional.
+///
+/// Kind: [`NodeKind::PreprocessorBranch`]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PreprocessorBranch {
+    syntax: Arc<RedNode>,
+}
+impl AstNode for PreprocessorBranch {
+    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
+        match syntax.green.kind {
+            NodeKind::PreprocessorBranch => Some(Self { syntax }),
+            _ => None,
+        }
+    }
+    fn syntax(&self) -> &Arc<RedNode> {
+        &self.syntax
+    }
+}
+
 /// A preprocessor directive
 ///
 /// e.g. `#include file.dts`
@@ -853,7 +917,7 @@ impl AstToken for PreprocessorDirective {
 
 /// Top-level item in a [`SourceFile`]
 ///
-/// Kind: [`NodeKind::DtNode`], [`NodeKind::Directive`] or a preprocessor directive token
+/// Kind: [`NodeKind::DtNode`], [`NodeKind::Directive`], a preprocessor conditional or a preprocessor directive token
 #[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum ToplevelItem {
     /// A Devicetree node
@@ -862,6 +926,8 @@ pub enum ToplevelItem {
     ///
     /// e.g. `/include/ file.dts;`
     Directive(Directive),
+    /// A preprocessor conditional.
+    PreprocessorConditional(PreprocessorConditional),
     /// A preprocessor directive
     ///
     /// e.g. `#include file.dts`
@@ -872,6 +938,7 @@ impl AstNodeOrToken for ToplevelItem {
         match syntax.green.kind {
             NodeKind::DtNode => Some(Self::Node(DtNode { syntax })),
             NodeKind::Directive => Some(Self::Directive(Directive { syntax })),
+            NodeKind::PreprocessorConditional => Some(Self::PreprocessorConditional(PreprocessorConditional { syntax })),
             _ => None,
         }
     }
@@ -884,6 +951,7 @@ impl AstNodeOrToken for ToplevelItem {
         match self {
             Self::Node(it) => TreeItem::Node(&it.syntax),
             Self::Directive(it) => TreeItem::Node(&it.syntax),
+            Self::PreprocessorConditional(it) => TreeItem::Node(&it.syntax),
             Self::PreprocessorDirective(it) => TreeItem::Token(&it.syntax),
         }
     }

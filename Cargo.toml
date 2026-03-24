@@ -33,11 +33,12 @@ serde_yaml = "0.9.33"
 either = "1.15"
 serde = "1"
 fs-err = "3.1.0"
-salsa = "0.24.0"
+salsa = "0.26.0"
 camino = "1.2.1"
 tower-lsp-server = "0.23.0"
 fluent-uri = "0.3.2" # Old version for ls-types and tower-lsp-server
 codespan-reporting = "0.13.1"
+expect-test = "1.5.1"
 
 [workspace.lints.rust]
 # https://github.com/rust-lang/rust/issues/95513

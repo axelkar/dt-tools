@@ -121,24 +121,33 @@ pub enum TokenKind {
     #[regex(r"//[^\n\r]+?")]
     LineComment,
 
-    #[regex(r"#( |\t)*undef[^\n]*?")]
-    UndefDirective,
-    #[regex(r"#( |\t)*pragma[^\n]*?")]
-    PragmaDirective,
-    #[regex(r"#( |\t)*else[^\n]*?")]
-    ElseDirective,
-    #[regex(r"#( |\t)*endif[^\n]*?")]
-    EndifDirective,
-    #[regex(r"#( |\t)*ifndef[^\n]*?")]
-    IfndefDirective,
-    #[regex(r"#( |\t)*ifdef[^\n]*?")]
-    IfdefDirective,
-    #[regex(r"#( |\t)*if[^\n]*?")]
+    #[regex(r#"#( |\t)*if[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
     IfDirective,
+    #[regex(r#"#( |\t)*ifdef[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    IfdefDirective,
+    #[regex(r#"#( |\t)*ifndef[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    IfndefDirective,
+    #[regex(r#"#( |\t)*elif[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    ElifDirective,
+    #[regex(r#"#( |\t)*elifdef[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    ElifdefDirective,
+    #[regex(r#"#( |\t)*elifndef[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    ElifndefDirective,
+    #[regex(r#"#( |\t)*else[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    ElseDirective,
+    #[regex(r#"#( |\t)*endif[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    EndifDirective,
+
+    #[regex(r#"#( |\t)*pragma[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    PragmaDirective,
     #[regex(r#"#( |\t)*define[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
     DefineDirective,
-    #[regex(r"#( |\t)*include[^\n]*?")]
+    #[regex(r#"#( |\t)*undef[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    UndefDirective,
+    #[regex(r#"#( |\t)*include[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
     IncludeDirective,
+    #[regex(r#"#( |\t)*error[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
+    ErrorDirective,
 
     // TODO: bits directive
     // TODO: plugin directive
@@ -294,15 +303,19 @@ impl TokenKind {
     pub fn is_preprocessor_directive(self) -> bool {
         matches!(
             self,
-            TokenKind::UndefDirective
-                | TokenKind::PragmaDirective
+            TokenKind::IfDirective
+                | TokenKind::IfdefDirective
+                | TokenKind::IfndefDirective
+                | TokenKind::ElifDirective
+                | TokenKind::ElifdefDirective
+                | TokenKind::ElifndefDirective
                 | TokenKind::ElseDirective
                 | TokenKind::EndifDirective
-                | TokenKind::IfndefDirective
-                | TokenKind::IfdefDirective
-                | TokenKind::IfDirective
+                | TokenKind::PragmaDirective
                 | TokenKind::DefineDirective
+                | TokenKind::UndefDirective
                 | TokenKind::IncludeDirective
+                | TokenKind::ErrorDirective
         )
     }
 }
@@ -314,15 +327,19 @@ impl core::fmt::Display for TokenKind {
             TokenKind::BlockComment => "block comment",
             TokenKind::LineComment => "line comment",
             TokenKind::Comma => "‘,’",
-            TokenKind::UndefDirective => "‘#undef‘ preprocessor directive",
-            TokenKind::PragmaDirective => "‘#pragma‘ preprocessor directive",
+            TokenKind::IfDirective => "‘#if‘ preprocessor directive",
+            TokenKind::IfdefDirective => "‘#ifdef‘ preprocessor directive",
+            TokenKind::IfndefDirective => "‘#ifndef‘ preprocessor directive",
+            TokenKind::ElifDirective => "‘#elif‘ preprocessor directive",
+            TokenKind::ElifdefDirective => "‘#elifdef‘ preprocessor directive",
+            TokenKind::ElifndefDirective => "‘#elifndef‘ preprocessor directive",
             TokenKind::ElseDirective => "‘#else‘ preprocessor directive",
             TokenKind::EndifDirective => "‘#endif‘ preprocessor directive",
-            TokenKind::IfndefDirective => "‘#ifndef‘ preprocessor directive",
-            TokenKind::IfdefDirective => "‘#ifdef‘ preprocessor directive",
-            TokenKind::IfDirective => "‘#if‘ preprocessor directive",
+            TokenKind::PragmaDirective => "‘#pragma‘ preprocessor directive",
             TokenKind::DefineDirective => "‘#define‘ preprocessor directive",
+            TokenKind::UndefDirective => "‘#undef‘ preprocessor directive",
             TokenKind::IncludeDirective => "‘#include‘ preprocessor directive",
+            TokenKind::ErrorDirective => "‘#error‘ preprocessor directive",
             TokenKind::BitsDirective => "‘/bits/‘",
             TokenKind::DtIncludeDirective => "‘/include/‘",
             TokenKind::MemreserveDirective => "‘/memreserve/‘",
@@ -582,6 +599,7 @@ fn lex_char(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use expect_test::{expect_file, ExpectFile};
     use pretty_assertions::assert_eq;
 
     #[track_caller]
@@ -675,37 +693,45 @@ mod tests {
     }
 
     #[track_caller]
-    fn test_expected(src: &str, expected: &str) {
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn test_expected(src: &str, expect: ExpectFile) {
         use std::fmt::Write as _;
 
         let mut output = String::new();
 
         let mut lexer = TokenKind::lexer(src);
         while let Some(token) = lexer.next() {
-            let span = lexer.span();
             let slice = lexer.slice();
             match token {
-                Ok(token) => writeln!(&mut output, "{token:?}@{span:?} {slice:?}").unwrap(),
-                Err(err) => writeln!(&mut output, "ERROR: {err:?}@{span:?} {slice:?}").unwrap(),
+                Ok(token) => writeln!(&mut output, "{token:?} {slice:?}").unwrap(),
+                Err(err) => writeln!(&mut output, "ERROR: {err:?} {slice:?}").unwrap(),
             }
         }
-        pretty_assertions::assert_eq!(expected, output);
+        expect.assert_eq(&output);
     }
 
     #[test]
     fn lex_from_test_data_1() {
-        let src = include_str!("../test_data/1.dts");
-        let expected = include_str!("../test_data/1.lex.expected");
-
-        test_expected(src, expected);
+        test_expected(
+            include_str!("../test_data/1.dts"),
+            expect_file!["../test_data/1.lex.expected"],
+        );
     }
 
     #[test]
     fn lex_from_test_data_2_macros() {
-        let src = include_str!("../test_data/2-macro-def.dts");
-        let expected = include_str!("../test_data/2-macro-def.lex.expected");
+        test_expected(
+            include_str!("../test_data/2-macro-def.dts"),
+            expect_file!["../test_data/2-macro-def.lex.expected"],
+        );
+    }
 
-        test_expected(src, expected);
+    #[test]
+    fn lex_from_test_data_3_preproc() {
+        test_expected(
+            include_str!("../test_data/3-preproc-dir.dts"),
+            expect_file!["../test_data/3-preproc-dir.lex.expected"],
+        );
     }
 
     #[test]

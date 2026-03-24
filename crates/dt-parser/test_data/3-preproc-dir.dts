@@ -1,0 +1,19 @@
+/dts-v1/;
+
+// Try line comment
+#if 1 // This macro squares a number
+/ {};
+#elif FOO
+#else BAR
+&do_something {};
+#endif
+
+// Try block comment
+#if /* Multiplies
+two numbers */ \
+  ((a) * (b))
+/ {};
+#endif
+
+#include \
+  "filename"

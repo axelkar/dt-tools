@@ -21,10 +21,10 @@ thiserror.workspace = true
 vec1 = "1.10.1"
 rustc-hash.workspace = true
 rayon.workspace = true
-enum-as-inner = "0.6.0"
+enum-as-inner = "0.7.0"
 derive_more = { version = "2.0", features = ["debug"] }
 displaydoc.workspace = true
-expect-test = "1.5.1"
+expect-test.workspace = true
 camino.workspace = true
 
 [dev-dependencies]

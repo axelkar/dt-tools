@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use constcat::concat_slices;
 #[cfg(feature = "grammar-tracing")]
 use tracing::debug;
 
@@ -107,8 +108,7 @@ fn dt_expr(p: &mut Parser) {
             continue;
         }
 
-        if p.at(TokenKind::Number) {
-            p.bump();
+        if p.eat(TokenKind::Number) {
         } else if p.at(TokenKind::Ident) {
             macro_invocation(p.start(), p);
         } else if p.at(TokenKind::LParen) {
@@ -137,9 +137,12 @@ fn dt_expr(p: &mut Parser) {
 
 /// Parses a reference without the leading ampersand and a node.
 pub(super) fn reference_noamp(p: &mut Parser) {
-    if p.at(TokenKind::LCurly) {
-        p.bump();
-        while !p.at(TokenKind::RCurly) && !p.at_end() {
+    if p.eat(TokenKind::LCurly) {
+        while !p.at(TokenKind::RCurly)
+            && !p.at_end()
+            && !p.silent_at_set(CONTINUE_COND_SET)
+            && !p.silent_at(TokenKind::EndifDirective)
+        {
             // TODO: better recovery
             p.expect(TokenKind::Slash);
             if !p.eat_name() {
@@ -202,6 +205,8 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
             break;
         } else if p.silent_at_set(&[TokenKind::Semicolon, TokenKind::LCurly, TokenKind::RCurly])
             || p.at_end()
+            || p.silent_at_set(CONTINUE_COND_SET)
+            || p.silent_at(TokenKind::EndifDirective)
         {
             p.error().msg_expected().emit();
             return Err(());
@@ -233,27 +238,34 @@ fn dt_cell_list(p: &mut Parser) -> Result<(), ()> {
     Ok(())
 }
 
-const ITEM_RECOVERY_SET: &[TokenKind] = &[
-    TokenKind::Slash,
-    // Name {
-    TokenKind::Ident,
-    TokenKind::Number,
-    TokenKind::Comma,
-    TokenKind::Minus,
-    // }
-    TokenKind::Ampersand,
-    TokenKind::Equals,
-    TokenKind::LCurly,
-    TokenKind::Semicolon,
-    TokenKind::V1Directive,
-    TokenKind::PluginDirective,
-    TokenKind::DtIncludeDirective,
-    TokenKind::MemreserveDirective,
-    TokenKind::DeleteNodeDirective,
-    TokenKind::DeletePropertyDirective,
-    // RCurly should be conditionally here?
-    TokenKind::RCurly,
-];
+const ITEM_RECOVERY_SET: &[TokenKind] = concat_slices!(
+[TokenKind]:
+    &[
+        TokenKind::Slash,
+        // Name {
+        TokenKind::Ident,
+        TokenKind::Number,
+        TokenKind::Comma,
+        TokenKind::Minus,
+        // }
+        TokenKind::Ampersand,
+        TokenKind::Equals,
+        TokenKind::LCurly,
+        TokenKind::Semicolon,
+        TokenKind::V1Directive,
+        TokenKind::PluginDirective,
+        TokenKind::DtIncludeDirective,
+        TokenKind::MemreserveDirective,
+        TokenKind::DeleteNodeDirective,
+        TokenKind::DeletePropertyDirective,
+        // RCurly should be conditionally here?
+        TokenKind::RCurly,
+
+        TokenKind::EndifDirective,
+    ],
+    &BEGIN_COND_SET,
+    &CONTINUE_COND_SET
+);
 
 pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(), ()> {
     const PROPERTY_VALUE_RECOVERY_SET: &[TokenKind] = &[
@@ -280,8 +292,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
             break;
         }
 
-        if p.at(TokenKind::Comma) {
-            p.bump();
+        if p.eat(TokenKind::Comma) {
         } else if p.at_set(ending_kinds) {
             // This is here and not in the while loop's head to add them to the `expected` list,
             // for the proper error message.
@@ -301,8 +312,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
 /// - Form: `= "foo", <1>;` | `;`.
 fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
     vis!(begin);
-    if p.at(TokenKind::Semicolon) {
-        p.bump();
+    if p.eat(TokenKind::Semicolon) {
         return m.complete(p, NodeKind::DtProperty);
     }
 
@@ -375,8 +385,7 @@ fn item(p: &mut Parser) {
     debug!("item start");
 
     let m = p.start();
-    if p.at(TokenKind::Slash) {
-        p.bump();
+    if p.eat(TokenKind::Slash) {
         if p.at(TokenKind::LCurly) {
             dt_node_body(p, m);
             // node
@@ -393,11 +402,10 @@ fn item(p: &mut Parser) {
             p.bump_name();
         }
 
-        if p.at(TokenKind::Colon) {
+        if p.eat(TokenKind::Colon) {
             // label
             // TODO: include this in the DtNode or DtProperty
             // Actually I think this _is_ included because of the precede
-            p.bump();
             m = m.complete(p, NodeKind::DtLabel).precede(p);
 
             while p.at_name() {
@@ -407,9 +415,7 @@ fn item(p: &mut Parser) {
                     p.bump_name();
                 }
 
-                if p.at(TokenKind::Colon) {
-                    p.bump();
-
+                if p.eat(TokenKind::Colon) {
                     m = m.complete(p, NodeKind::DtLabel).precede(p);
                 } else if p.at(TokenKind::Ampersand) {
                     // label + extension e.g. `bar: &foo {};`
@@ -455,10 +461,9 @@ fn item(p: &mut Parser) {
 
         reference(p);
 
-        if p.at(TokenKind::AtSign) {
+        if p.eat(TokenKind::AtSign) {
             // unit address
             // FIXME: move to reference
-            p.bump();
             p.expect(TokenKind::Ident);
         }
 
@@ -497,17 +502,14 @@ fn item(p: &mut Parser) {
         p.bump();
         p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::Directive);
-    } else if p.at(TokenKind::DtIncludeDirective) {
+    } else if p.eat(TokenKind::DtIncludeDirective) {
         // TODO: only match this at root
         // When an error is emitted, hint that include directives aren't supported outside the top
         // level
-        p.bump();
 
         p.expect(TokenKind::String);
         m.complete(p, NodeKind::Directive);
-    } else if p.at(TokenKind::MemreserveDirective) {
-        p.bump();
-
+    } else if p.eat(TokenKind::MemreserveDirective) {
         let m_params = p.start();
         p.expect(TokenKind::Number);
         p.expect(TokenKind::Number);
@@ -541,10 +543,93 @@ fn item(p: &mut Parser) {
     vis!(end);
 }
 
+const BEGIN_COND_SET: &[TokenKind] = &[
+    TokenKind::IfndefDirective,
+    TokenKind::IfdefDirective,
+    TokenKind::IfDirective,
+];
+const CONTINUE_COND_SET: &[TokenKind] = &[
+    TokenKind::ElifndefDirective,
+    TokenKind::ElifdefDirective,
+    TokenKind::ElifDirective,
+    TokenKind::ElseDirective,
+];
+
+/// Parses a preprocessor directive into a CST tree.
+///
+/// - `inside`: Parser function for things inside a preprocessor directive. Don't put a loop inside
+///   it, don't explicitly run [`preprocessor_directive`] and don't explicitly handle tokens that
+///   end a preprocessor conditional branch, as they are all done automatically.
+fn preprocessor_directive(p: &mut Parser, inside: impl Fn(&mut Parser)) -> bool {
+    fn cond_branches_and_end(p: &mut Parser, inside: impl Fn(&mut Parser)) {
+        let mut m_branch = p.start();
+
+        while !p.silent_at(TokenKind::EndifDirective) && !p.at_end() {
+            if p.silent_at_set(CONTINUE_COND_SET) {
+                m_branch.complete(p, NodeKind::PreprocessorBranch);
+                p.bump();
+                m_branch = p.start();
+            } else {
+                inside(p);
+            }
+        }
+
+        m_branch.complete(p, NodeKind::PreprocessorBranch);
+
+        p.expect(TokenKind::EndifDirective);
+    }
+
+    p.add_expected(Expected::PreprocessorDirective);
+
+    if p.silent_at_set(BEGIN_COND_SET) {
+        let m_cond = p.start();
+        p.bump();
+        cond_branches_and_end(p, inside);
+        m_cond.complete(p, NodeKind::PreprocessorConditional);
+        true
+    } else if p.silent_at(TokenKind::EndifDirective) {
+        p.error()
+            .bump_wrap_err()
+            .msg_custom(Cow::Borrowed("Unmatched `#endif`"))
+            .emit();
+        true
+    } else if p.silent_at_set(CONTINUE_COND_SET) {
+        p.error()
+            .msg_custom(Cow::Borrowed(
+                "Preprocessor conditional continuation without preceding `#if` or equivalent.",
+            ))
+            .emit();
+
+        let m_err = p.start();
+        p.bump();
+        cond_branches_and_end(p, inside);
+        m_err.complete(p, NodeKind::ParseError);
+        true
+    } else if p.silent_at_set(&[
+        TokenKind::UndefDirective,
+        // TODO: #pragma support in analyzer code
+        //TokenKind::PragmaDirective,
+        TokenKind::DefineDirective,
+        TokenKind::IncludeDirective,
+        // TODO: #error support in analyzer code
+        //TokenKind::ErrorDirective,
+    ]) {
+        p.bump();
+        true
+    } else if p.silent_at_set(&[TokenKind::PragmaDirective, TokenKind::ErrorDirective]) {
+        p.error()
+            .bump_wrap_err()
+            .msg_custom(Cow::Borrowed("Preprocessor directive not yet implemented"))
+            .emit();
+        true
+    } else {
+        false
+    }
+}
+
 pub(super) fn entry_sourcefile(p: &mut Parser) {
-    while !p.at_end() {
-        if p.at_preprocessor_directive() {
-            p.bump();
+    fn toplevel_item(p: &mut Parser) {
+        if preprocessor_directive(p, toplevel_item) {
         } else if p.silent_at(TokenKind::RCurly) {
             p.error().msg_custom(Cow::Borrowed("Unmatched `}`")).emit();
 
@@ -554,6 +639,10 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
         } else {
             item(p);
         }
+    }
+
+    while !p.at_end() {
+        toplevel_item(p);
     }
 }
 
@@ -581,6 +670,7 @@ pub(super) mod tests {
     };
 
     use super::*;
+    use expect_test::{expect_file, ExpectFile};
     use pretty_assertions::assert_eq;
 
     pub fn node(kind: NodeKind, children: Vec<GreenItem>) -> GreenItem {
@@ -984,34 +1074,43 @@ pub(super) mod tests {
         );
     }
 
+    #[track_caller]
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn test_expected(src: &str, expect: ExpectFile) {
+        let parse_output = parse(src);
+        assert_eq!(parse_output.lex_errors, &[]);
+        assert_eq!(parse_output.errors, &[]);
+
+        let output = parse_output.green_node.print_tree();
+
+        expect.assert_eq(&output);
+    }
+
     #[test]
     fn parse_from_test_data_1() {
-        let src = include_str!("../test_data/1.dts");
-
-        let parse_output = parse(src);
-        assert_eq!(parse_output.lex_errors, &[]);
-        assert_eq!(parse_output.errors, &[]);
-
-        assert_eq!(
-            parse_output.green_node.print_tree(),
-            include_str!("../test_data/1.dts.expect")
+        test_expected(
+            include_str!("../test_data/1.dts"),
+            expect_file!["../test_data/1.dts.expect"],
         );
     }
 
     #[test]
-    fn parse_from_test_data_2() {
-        let src = include_str!("../test_data/2-macro-def.dts");
-
-        let parse_output = parse(src);
-        assert_eq!(parse_output.lex_errors, &[]);
-        assert_eq!(parse_output.errors, &[]);
-
-        assert_eq!(
-            parse_output.green_node.print_tree(),
-            include_str!("../test_data/2-macro-def.dts.expect")
+    fn parse_from_test_data_2_macros() {
+        test_expected(
+            include_str!("../test_data/2-macro-def.dts"),
+            expect_file!["../test_data/2-macro-def.dts.expect"],
         );
     }
 
+    #[test]
+    fn parse_from_test_data_3_preproc() {
+        test_expected(
+            include_str!("../test_data/3-preproc-dir.dts"),
+            expect_file!["../test_data/3-preproc-dir.dts.expect"],
+        );
+    }
+
+    // TODO: use expect-test and print_tree
     #[test]
     fn parse_node() {
         check(

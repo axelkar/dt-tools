@@ -15,7 +15,7 @@ license.workspace = true
 [dependencies]
 drop_bomb = "0.1"
 either.workspace = true
-enum-as-inner = "0.6"
+enum-as-inner = "0.7.0"
 itertools.workspace = true
 logos.workspace = true
 smallvec = "1.13"
@@ -23,6 +23,8 @@ thiserror.workspace = true
 tracing.workspace = true
 dt-diagnostic.workspace = true
 displaydoc.workspace = true
+expect-test.workspace = true
+constcat = "0.6.1"
 
 [dev-dependencies]
 notify = "8.0.0"

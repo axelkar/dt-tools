@@ -1,0 +1,50 @@
+SourceFile@0..228
+  Directive@0..9
+    V1Directive@0..8 "/dts-v1/"
+    Semicolon@8..9 ";"
+  Whitespace@9..11 "\n\n"
+  LineComment@11..30 "// Try line comment"
+  Whitespace@30..31 "\n"
+  PreprocessorConditional@31..118
+    IfDirective@31..67 "#if 1 // This macro squares a number"
+    Whitespace@67..68 "\n"
+    PreprocessorBranch@68..73
+      DtNode@68..73
+        Slash@68..69 "/"
+        Whitespace@69..70 " "
+        LCurly@70..71 "{"
+        RCurly@71..72 "}"
+        Semicolon@72..73 ";"
+    Whitespace@73..74 "\n"
+    ElifDirective@74..83 "#elif FOO"
+    Whitespace@83..84 "\n"
+    PreprocessorBranch@84..84
+    ElseDirective@84..93 "#else BAR"
+    Whitespace@93..94 "\n"
+    PreprocessorBranch@94..111
+      DtNode@94..111
+        DtPhandle@94..107
+          Ampersand@94..95 "&"
+          Name@95..107 "do_something"
+        Whitespace@107..108 " "
+        LCurly@108..109 "{"
+        RCurly@109..110 "}"
+        Semicolon@110..111 ";"
+    Whitespace@111..112 "\n"
+    EndifDirective@112..118 "#endif"
+  Whitespace@118..120 "\n\n"
+  LineComment@120..140 "// Try block comment"
+  Whitespace@140..141 "\n"
+  PreprocessorConditional@141..202
+    IfDirective@141..190 "#if /* Multiplies\ntwo numbers */ \\\n  ((a) * (b))\n"
+    PreprocessorBranch@190..195
+      DtNode@190..195
+        Slash@190..191 "/"
+        Whitespace@191..192 " "
+        LCurly@192..193 "{"
+        RCurly@193..194 "}"
+        Semicolon@194..195 ";"
+    Whitespace@195..196 "\n"
+    EndifDirective@196..202 "#endif"
+  Whitespace@202..204 "\n\n"
+  IncludeDirective@204..228 "#include \\\n  \"filename\"\n"

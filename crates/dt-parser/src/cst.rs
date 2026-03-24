@@ -19,22 +19,25 @@ use crate::TextRange;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
     // Entrypoints
-    /// See [`Entrypoint`](super::parser::Entrypoint)
+    /// See [`Entrypoint::SourceFile`](super::parser::Entrypoint::SourceFile)
     SourceFile,
-    /// See [`Entrypoint`](super::parser::Entrypoint)
+    /// See [`Entrypoint::Name`](super::parser::Entrypoint::Name)
     EntryName,
-    /// See [`Entrypoint`](super::parser::Entrypoint)
+    /// See [`Entrypoint::PropValues`](super::parser::Entrypoint::PropValues)
     EntryPropValues,
-    /// See [`Entrypoint`](super::parser::Entrypoint)
+    /// See [`Entrypoint::Cells`](super::parser::Entrypoint::Cells)
     EntryCells,
 
-    /// A node wrapping a parse error
+    /// Node wrapping a parse error
     ParseError,
-    /// A node wrapping a DTS directive
+    /// Node wrapping a DTS directive
     Directive,
-    /// A node wrapping a DTS directive's arguments
+    /// Node wrapping a DTS directive's arguments
     DirectiveArguments,
-    PreprocessorDirective,
+    /// Preprocessor conditional, which contains the preprocessor directives and the branches.
+    PreprocessorConditional,
+    /// Code in a preprocessor conditional's branch.
+    PreprocessorBranch,
     DtNode,
     DtProperty,
     DtCellList,

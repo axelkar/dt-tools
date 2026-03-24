@@ -38,18 +38,6 @@ const NAME_SET: [TokenKind; 4] = [
 ];
 const LABEL_NAME_SET: [TokenKind; 2] = [TokenKind::Ident, TokenKind::Number];
 
-const PREPROCESSOR_DIRECTIVE_SET: [TokenKind; 9] = [
-    TokenKind::UndefDirective,
-    TokenKind::PragmaDirective,
-    TokenKind::ElseDirective,
-    TokenKind::EndifDirective,
-    TokenKind::IfndefDirective,
-    TokenKind::IfdefDirective,
-    TokenKind::IfDirective,
-    TokenKind::DefineDirective,
-    TokenKind::IncludeDirective,
-];
-
 // TODO: Event incremental reparse:
 // > Events can make our parser faster if we have a previous parse tree lying around; rather than
 // > constructing a new parse tree every time, we can patch an existing one with the events of the
@@ -356,12 +344,6 @@ impl<'t, 'input> Parser<'t, 'input> {
     pub fn at_name(&mut self) -> bool {
         self.expected.push(Expected::Kind(TokenKind::Name));
         self.silent_at_set(&NAME_SET)
-    }
-
-    /// Returns true if at a preprocessor directive token.
-    pub fn at_preprocessor_directive(&mut self) -> bool {
-        self.expected.push(Expected::PreprocessorDirective);
-        self.silent_at_set(&PREPROCESSOR_DIRECTIVE_SET)
     }
 
     /// Returns true if at a macro invocation with arguments.
