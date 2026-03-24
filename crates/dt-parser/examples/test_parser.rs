@@ -57,7 +57,7 @@ fn visualize() {
                 "kind": "init",
                 "tokens": tokens.into_iter().map(|tok| json!({
                     "error": tok.kind.err().map(|err| err.to_string()),
-                    "kind": tok.kind.ok().map(|kind| format!("{:?}", kind)),
+                    "kind": tok.kind.ok().map(|kind| format!("{kind:?}")),
                     "text": tok.text,
                     "text_range": {
                         "start": tok.text_range.start,

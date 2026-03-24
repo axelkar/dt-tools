@@ -434,7 +434,6 @@ impl<'t, 'input> Parser<'t, 'input> {
 
 #[cfg(feature = "visualize")]
 pub mod visualizer {
-    use super::*;
     use std::cell::RefCell;
 
     use crate::lexer::{LexError, TokenKind};
@@ -443,7 +442,7 @@ pub mod visualizer {
     pub struct OwnedToken {
         pub kind: Result<TokenKind, LexError>,
         pub text: String,
-        pub text_range: TextRange,
+        pub text_range: crate::TextRange,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]

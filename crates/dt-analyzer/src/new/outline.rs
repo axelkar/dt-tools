@@ -255,7 +255,7 @@ pub fn analyze_file(
     src: &str,
     diag: &(impl DiagnosticCollector + Sync),
 ) -> Vec<AnalyzedToplevel> {
-    // Passthrough the span to the Rayon worker threads
+    // Pass through the span to the Rayon worker threads
     let span = tracing::Span::current();
 
     let mut analyzed: Vec<_> = file
@@ -275,6 +275,7 @@ pub fn analyze_file(
     analyzed
 }
 
+#[expect(clippy::too_many_lines, reason = "no good way to make this shorter")]
 fn maybe_analyze_toplevel(
     item: ast::ToplevelItem,
     src: &str,
@@ -375,7 +376,7 @@ fn maybe_analyze_toplevel(
                     .map(|(dir, branch)| PreprocessorBranch {
                         directive_text: dir.syntax().text().to_owned(),
                         toplevels: {
-                            // Passthrough the span to the Rayon worker threads
+                            // Pass through the span to the Rayon worker threads
                             let span = tracing::Span::current();
 
                             branch

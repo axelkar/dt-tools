@@ -660,10 +660,6 @@ pub(super) fn entry_name(p: &mut Parser) {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::needless_raw_string_hashes,
-    reason = "expect-test auto update adds r#"
-)]
 pub(super) mod tests {
     use crate::parser::{parse, Entrypoint};
 
