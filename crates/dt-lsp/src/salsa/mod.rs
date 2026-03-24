@@ -7,6 +7,12 @@ pub mod db;
 pub mod file;
 mod macros;
 
+#[salsa::input(singleton)]
+pub struct IncludeDirs {
+    #[returns(ref)]
+    include_dirs: Vec<camino::Utf8PathBuf>
+}
+
 #[salsa::tracked]
 pub struct Parse<'db> {
     #[returns(ref)]
@@ -94,7 +100,7 @@ pub fn document_deps<'db>(
 
     let parent_path = file.path(db).parent().ok_or(())?;
     // FIXME: actual config singleton!
-    let include_dirs: &[&camino::Utf8Path] = &[];
+    let include_dirs = IncludeDirs::get(db).include_dirs(db);
 
     let files = db.get_files();
     for include in outline
@@ -165,6 +171,8 @@ mod tests {
     #[test]
     fn test_document_deps() {
         let db = crate::salsa::db::BaseDatabase::default();
+        IncludeDirs::new(&db, vec![]);
+
         let file_path =
             Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
         let file = db.get_files().get_file(&db, file_path);

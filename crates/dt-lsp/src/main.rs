@@ -1,4 +1,5 @@
 use ::salsa::Setter;
+use camino::Utf8PathBuf;
 use dt_analyzer::new::outline::AnalyzedToplevel;
 use dt_diagnostic::DiagnosticCollector;
 use dt_parser::{ast, parser::parse, TextRange};
@@ -442,20 +443,16 @@ impl Backend {
             .expect("a file always has a parent")
             .to_owned();
 
-        // Linux kernel DTC include path:
-        // - include (for #define's in header files)
-        // - scripts/dtc/include-prefixes
+        let mut included_paths = Vec::new();
 
-        let include_dirs = &[
+        let include_dirs = [
             PathBuf::from("/home/axel/dev/mainlining/linux/include"),
             PathBuf::from("/home/axel/dev/mainlining/linux/scripts/dtc/include-prefixes"),
         ];
 
-        let mut included_paths = Vec::new();
-
         // TODO: only re-check when includes are updated or include config is changed
         for include in toplevels.iter().filter_map(AnalyzedToplevel::as_include) {
-            let include_path = include.find_file(parent_path.as_ref(), include_dirs);
+            let include_path = include.find_file(parent_path.as_ref(), &include_dirs);
 
             let Some(include_path) = include_path else {
                 diag.emit(dt_diagnostic::Diagnostic::new(
@@ -544,7 +541,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             resolved_client_capabilities: parking_lot::Mutex::default(),
             workspace_folders: Mutex::new(Vec::new()),
             main_file: parking_lot::Mutex::new(None),
-            db: parking_lot::Mutex::new(BaseDatabase::default()),
+            db: parking_lot::Mutex::new({
+                let db = BaseDatabase::default();
+
+                // TODO: make configurable, use dt-workspace
+                // Linux kernel DTC include path:
+                // - include (for #define's in header files)
+                // - scripts/dtc/include-prefixes
+                crate::salsa::IncludeDirs::new(
+                    &db,
+                    vec![
+                        Utf8PathBuf::from("/home/axel/dev/mainlining/linux/include"),
+                        Utf8PathBuf::from(
+                            "/home/axel/dev/mainlining/linux/scripts/dtc/include-prefixes",
+                        ),
+                    ],
+                );
+                db
+            }),
         }),
     });
 
@@ -570,8 +584,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         tracing_subscriber::fmt()
             .with_env_filter(tracing_env_filter)
-            .with_writer(std::io::stderr)
-            .with_ansi(false)
+            .with_writer(std::io::stderr) // stdout is used for LSP
+            .with_ansi(false) // most likely ends up in a log file so ANSI colors are annoying
             .init();
 
         info!("Using stdio");
@@ -624,6 +638,7 @@ mod tests {
         );
         assert_eq!(range_to_lsp(TextRange { start: 0, end: 2 }, &rope), None);
 
+        // TODO: make diagnostics with zero length work
         // Let's hope fully empty files (e.g. created through VS Code or Windows) don't get
         // diagnostics with nonzero length (invalid according to LSP spec? or?). Not sure how rust-analyzer handles this.
         let rope = ropey::Rope::from_str("");
