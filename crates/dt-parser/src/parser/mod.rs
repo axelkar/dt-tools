@@ -481,13 +481,10 @@ pub mod visualizer {
 
 #[cfg(test)]
 mod tests {
-    use expect_test::{Expect, expect};
+    use expect_test::{expect, Expect};
 
     use super::sink::Sink;
-    use crate::{
-        cst::NodeKind,
-        lexer::Lexer,
-    };
+    use crate::{cst::NodeKind, lexer::Lexer};
 
     use super::*;
 
@@ -517,13 +514,16 @@ Tree:
 
         let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
 
-        check_parse_output(output, expect![[r#"
+        check_parse_output(
+            output,
+            expect![[r#"
             Errors: []
 
             Tree:
             SourceFile@0..4
               Unrecognized@0..4 "\"abc"
-        "#]]);
+        "#]],
+        );
     }
 
     #[test]
@@ -545,7 +545,9 @@ Tree:
 
         // FIXME: with Sink code
         let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
-        check_parse_output(output, expect![[r#"
+        check_parse_output(
+            output,
+            expect![[r#"
             Errors: []
 
             Tree:
@@ -554,7 +556,8 @@ Tree:
                 DtProperty@0..5
                   DtCellList@0..5
                     Ident@0..5 "ident"
-        "#]]);
+        "#]],
+        );
     }
 
     #[test]
@@ -582,7 +585,9 @@ Tree:
 
         // FIXME: with Sink code
         let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
-        check_parse_output(output, expect![[r#"
+        check_parse_output(
+            output,
+            expect![[r#"
             Errors: []
 
             Tree:
@@ -593,7 +598,8 @@ Tree:
                     Ident@0..5 "hello"
                   Whitespace@5..6 " "
                   Ident@6..11 "world"
-        "#]]);
+        "#]],
+        );
     }
 
     #[test]
@@ -621,7 +627,9 @@ Tree:
 
         // FIXME: this is NOT an example for prev_next currently. expect comma, semicolon or both!!
         // oh and the code that does it will be defined in the grammar instead of the parser later
-        check_parse_output(output, expect![[r#"
+        check_parse_output(
+            output,
+            expect![[r#"
             Errors: [
                 ParseError {
                     message: "Expected ‘}’, but found end-of-file",
@@ -638,6 +646,7 @@ Tree:
               LCurly@0..1 "{"
               Whitespace@1..4 "\n  "
               LineComment@4..10 "// foo"
-        "#]]);
+        "#]],
+        );
     }
 }

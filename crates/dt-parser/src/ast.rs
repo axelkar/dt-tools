@@ -938,7 +938,11 @@ impl AstNodeOrToken for ToplevelItem {
         match syntax.green.kind {
             NodeKind::DtNode => Some(Self::Node(DtNode { syntax })),
             NodeKind::Directive => Some(Self::Directive(Directive { syntax })),
-            NodeKind::PreprocessorConditional => Some(Self::PreprocessorConditional(PreprocessorConditional { syntax })),
+            NodeKind::PreprocessorConditional => {
+                Some(Self::PreprocessorConditional(PreprocessorConditional {
+                    syntax,
+                }))
+            }
             _ => None,
         }
     }

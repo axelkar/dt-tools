@@ -10,7 +10,7 @@ mod macros;
 #[salsa::input(singleton)]
 pub struct IncludeDirs {
     #[returns(ref)]
-    include_dirs: Vec<camino::Utf8PathBuf>
+    include_dirs: Vec<camino::Utf8PathBuf>,
 }
 
 #[salsa::tracked]

@@ -442,6 +442,7 @@ dependencies = [
 name = "dt-lint"
 version = "0.1.0"
 dependencies = [
+ "dt-diagnostic",
  "dt-parser",
  "tracing",
 ]

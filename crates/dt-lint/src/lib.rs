@@ -4,11 +4,8 @@
 //!
 //! [1]: https://www.devicetree.org/
 
-use dt_parser::{
-    ast::{self, HasLabel},
-    TextRange,
-};
-use std::borrow::Cow;
+use dt_diagnostic::{Diagnostic, DiagnosticMessage, MultiSpan, Severity};
+use dt_parser::ast::{self, HasLabel};
 
 mod dtc_style;
 mod kernel_coding_style;
@@ -25,25 +22,6 @@ pub mod lints {
 // TODO: something like this:
 // https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/visit/index.html
 
-pub type DiagnosticMessage = Cow<'static, str>;
-
-/// Just like the [MultiSpan from rustc & clippy][1]
-///
-/// [1]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_error_messages/struct.MultiSpan.html
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MultiSpan {
-    pub primary_spans: Vec<TextRange>,
-    pub span_labels: Vec<(TextRange, DiagnosticMessage)>,
-}
-impl From<TextRange> for MultiSpan {
-    fn from(value: TextRange) -> Self {
-        Self {
-            primary_spans: vec![value],
-            span_labels: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintId {
     DtcStyle,
@@ -58,18 +36,10 @@ impl std::fmt::Display for LintId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LintSeverity {
-    Warn,
-    Error,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EarlyLint {
     pub id: LintId,
-    pub span: MultiSpan,
-    pub msg: DiagnosticMessage,
-    pub severity: LintSeverity,
+    pub diagnostic: Diagnostic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,15 +53,17 @@ impl EarlyContext<'_> {
         &mut self,
         id: LintId,
         msg: impl Into<DiagnosticMessage> + Clone,
-        severity: LintSeverity,
+        severity: Severity,
         span: impl Into<MultiSpan>,
     ) {
         tracing::debug!("adding lint {}, {:?}", msg.clone().into(), severity);
         self.lints.push(EarlyLint {
             id,
-            span: span.into(),
-            msg: msg.into(),
-            severity,
+            diagnostic: Diagnostic {
+                span: span.into(),
+                msg: msg.into(),
+                severity,
+            },
         });
     }
     pub fn add_lint(&mut self, lint: EarlyLint) {

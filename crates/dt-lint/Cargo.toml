@@ -14,6 +14,7 @@ license.workspace = true
 
 [dependencies]
 dt-parser.workspace = true
+dt-diagnostic.workspace = true
 tracing.workspace = true
 
 [lints]

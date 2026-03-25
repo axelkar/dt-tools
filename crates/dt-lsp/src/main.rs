@@ -272,11 +272,11 @@ impl Backend {
 
         let parse = parse(&text);
 
-        let mut diagnostics = Vec::new();
+        let mut lsp_diagnostics = Vec::new();
 
         let earliest_lex_error_range = parse.lex_errors.first().map(|e| e.text_range);
         for lex_error in &parse.lex_errors {
-            diagnostics.push(Diagnostic::new_simple(
+            lsp_diagnostics.push(Diagnostic::new_simple(
                 range_to_lsp(lex_error.text_range, &rope).expect("range should be in the rope"),
                 format!("{} [lex error]", lex_error.inner),
             ));
@@ -289,7 +289,7 @@ impl Backend {
                 }
             }
 
-            diagnostics.push(Diagnostic {
+            lsp_diagnostics.push(Diagnostic {
                 range: range_to_lsp(error.primary_span, &rope)
                     .expect("range should be in the rope"),
                 severity: Some(DiagnosticSeverity::ERROR),
@@ -312,7 +312,7 @@ impl Backend {
                 ..Default::default()
             });
             for span_label in &error.span_labels {
-                diagnostics.push(Diagnostic {
+                lsp_diagnostics.push(Diagnostic {
                     range: range_to_lsp(span_label.span, &rope)
                         .expect("range should be in the rope"),
                     severity: Some(DiagnosticSeverity::HINT),
@@ -333,24 +333,26 @@ impl Backend {
 
         let file_ast = parse.source_file();
 
-        diagnostics.extend(
+        lsp_diagnostics.extend(
             dt_lint::default_lint(&file_ast, &text, is_main_file)
                 .iter()
                 .flat_map(|lint| {
-                    lint.span
+                    lint.diagnostic
+                        .span
                         .primary_spans
                         .iter()
                         .enumerate()
                         .map(|(i, span)| Diagnostic {
                             range: range_to_lsp(*span, &rope).expect("range should be in the rope"),
-                            severity: Some(match lint.severity {
-                                dt_lint::LintSeverity::Warn => DiagnosticSeverity::WARNING,
-                                dt_lint::LintSeverity::Error => DiagnosticSeverity::ERROR,
+                            severity: Some(match lint.diagnostic.severity {
+                                dt_diagnostic::Severity::Warn => DiagnosticSeverity::WARNING,
+                                dt_diagnostic::Severity::Error => DiagnosticSeverity::ERROR,
                             }),
                             source: Some(format!("dt-tools(lint {})", lint.id)),
-                            message: lint.msg.clone().into_owned(),
+                            message: lint.diagnostic.msg.clone().into_owned(),
                             related_information: Some(
-                                lint.span
+                                lint.diagnostic
+                                    .span
                                     .primary_spans
                                     .iter()
                                     .enumerate()
@@ -363,29 +365,32 @@ impl Backend {
                                         },
                                         message: "see also".to_owned(),
                                     })
-                                    .chain(lint.span.span_labels.iter().map(|span| {
-                                        DiagnosticRelatedInformation {
-                                            location: Location {
-                                                uri: uri.clone(),
-                                                range: range_to_lsp(span.0, &rope)
-                                                    .expect("range should be in the rope"),
-                                            },
-                                            message: span.1.clone().into_owned(),
-                                        }
-                                    }))
+                                    .chain(lint.diagnostic.span.span_labels.iter().map(
+                                        |span_label| {
+                                            DiagnosticRelatedInformation {
+                                                location: Location {
+                                                    uri: uri.clone(),
+                                                    range: range_to_lsp(span_label.span, &rope)
+                                                        .expect("range should be in the rope"),
+                                                },
+                                                message: span_label.msg.clone().into_owned(),
+                                            }
+                                        },
+                                    ))
                                     .collect(),
                             ),
                             ..Default::default()
                         })
-                        .chain(lint.span.span_labels.iter().map(|(span, hint)| {
+                        .chain(lint.diagnostic.span.span_labels.iter().map(|span_label| {
                             Diagnostic {
-                                range: range_to_lsp(*span, &rope)
+                                range: range_to_lsp(span_label.span, &rope)
                                     .expect("range should be in the rope"),
                                 severity: Some(DiagnosticSeverity::HINT),
                                 source: Some(format!("dt-tools(lint {})", lint.id)),
-                                message: hint.clone().into_owned(),
+                                message: span_label.msg.clone().into_owned(),
                                 related_information: Some(
-                                    lint.span
+                                    lint.diagnostic
+                                        .span
                                         .primary_spans
                                         .iter()
                                         .map(|span| DiagnosticRelatedInformation {
@@ -404,8 +409,8 @@ impl Backend {
                 }),
         );
 
-        let mut new_diagnostics = Vec::new();
-        let diag = parking_lot::Mutex::new(&mut new_diagnostics);
+        let mut dt_diagnostics = Vec::new();
+        let diag = parking_lot::Mutex::new(&mut dt_diagnostics);
 
         let db = &mut *self.state.db.lock();
         let file = db.get_files().get_file(db, path.to_owned());
@@ -484,17 +489,17 @@ impl Backend {
             }
         }
 
-        for new_diagnostic in new_diagnostics {
+        for new_diagnostic in dt_diagnostics {
             // TODO: level
             for primary_span in new_diagnostic.span.primary_spans {
-                diagnostics.push(Diagnostic::new_simple(
+                lsp_diagnostics.push(Diagnostic::new_simple(
                     range_to_lsp(primary_span, &rope).expect("range should be in the rope"),
                     new_diagnostic.msg.clone().into_owned(),
                 ));
             }
 
             for span_label in new_diagnostic.span.span_labels {
-                diagnostics.push(Diagnostic::new(
+                lsp_diagnostics.push(Diagnostic::new(
                     range_to_lsp(span_label.span, &rope).expect("range should be in the rope"),
                     Some(DiagnosticSeverity::HINT),
                     None,
@@ -520,11 +525,11 @@ impl Backend {
         // TODO: special highlighting for known special names?
         // phandle, #*-cells, #*-size, pinctrl-*, etc.
 
-        diagnostics.dedup();
+        lsp_diagnostics.dedup();
         let client = self.client.clone();
         tokio_handle.spawn(async move {
             client
-                .publish_diagnostics(uri.clone(), diagnostics, Some(version))
+                .publish_diagnostics(uri.clone(), lsp_diagnostics, Some(version))
                 .await;
         });
     }

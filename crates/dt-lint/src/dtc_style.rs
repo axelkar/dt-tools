@@ -1,10 +1,11 @@
+use dt_diagnostic::Severity;
 use dt_parser::{
     ast::{self, AstNode, AstNodeOrToken, HasLabel as _},
     cst::NodeKind,
     lexer::TokenKind,
 };
 
-use crate::{EarlyLintPass, LintId, LintSeverity};
+use crate::{EarlyLintPass, LintId};
 
 /// Lint items by [`dtc`](https://github.com/dgibson/dtc)'s rules
 ///
@@ -33,7 +34,7 @@ impl EarlyLintPass for DtcStyle {
                     cx.add_lint_from_cst(
                         LintId::DtcStyle,
                         "First item must be `/dts-v1/;` directive",
-                        LintSeverity::Error,
+                        Severity::Error,
                         first.syntax().text_range(),
                     );
                 }
@@ -44,7 +45,7 @@ impl EarlyLintPass for DtcStyle {
             cx.add_lint_from_cst(
                 LintId::DtcStyle,
                 "Properties must not be defined outside nodes",
-                LintSeverity::Error,
+                Severity::Error,
                 prop.syntax().text_range(),
             );
         }
@@ -54,7 +55,7 @@ impl EarlyLintPass for DtcStyle {
                 cx.add_lint_from_cst(
                     LintId::DtcStyle,
                     "Subnodes must be defined inside other nodes",
-                    LintSeverity::Error,
+                    Severity::Error,
                     node.syntax().text_range(),
                 );
             }
@@ -82,7 +83,7 @@ impl EarlyLintPass for DtcStyle {
                     cx.add_lint_from_cst(
                         LintId::DtcStyle,
                         "Properties must not be defined after nodes",
-                        LintSeverity::Error,
+                        Severity::Error,
                         last_prop.syntax().text_range(),
                     );
                 }
@@ -99,7 +100,7 @@ impl EarlyLintPass for DtcStyle {
             cx.add_lint_from_cst(
                 LintId::DtcStyle,
                 "Properties must not have unit addresses",
-                LintSeverity::Error,
+                Severity::Error,
                 unit_address.text_range(),
             );
         }
