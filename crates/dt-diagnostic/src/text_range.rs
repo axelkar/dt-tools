@@ -1,8 +1,6 @@
 use std::fmt::{Debug, Display};
 use std::ops::Range;
 
-// TODO: About identical files: don't deduplicate the root Arcs.
-// Check out rust-analyzer hir::semantics::SemanticsImpl::find_file.
 // TODO: use `text_size::TextRange` instead
 // TODO: u32
 

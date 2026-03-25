@@ -607,20 +607,12 @@ fn preprocessor_directive(p: &mut Parser, inside: impl Fn(&mut Parser)) -> bool 
         true
     } else if p.silent_at_set(&[
         TokenKind::UndefDirective,
-        // TODO: #pragma support in analyzer code
-        //TokenKind::PragmaDirective,
+        TokenKind::PragmaDirective,
         TokenKind::DefineDirective,
         TokenKind::IncludeDirective,
-        // TODO: #error support in analyzer code
-        //TokenKind::ErrorDirective,
+        TokenKind::ErrorDirective,
     ]) {
         p.bump();
-        true
-    } else if p.silent_at_set(&[TokenKind::PragmaDirective, TokenKind::ErrorDirective]) {
-        p.error()
-            .bump_wrap_err()
-            .msg_custom(Cow::Borrowed("Preprocessor directive not yet implemented"))
-            .emit();
         true
     } else {
         false

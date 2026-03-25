@@ -10,10 +10,10 @@ use crate::salsa::db::BaseDb;
 #[salsa::input(singleton)]
 pub struct IncludeDirs {
     #[returns(ref)]
-    include_dirs: Vec<camino::Utf8PathBuf>,
+    pub include_dirs: Vec<camino::Utf8PathBuf>,
 }
 
-/// Dependencies of a document.
+/// Resolved dependencies of a document.
 #[salsa::tracked]
 pub struct DocumentDeps<'db> {
     #[tracked]
@@ -26,7 +26,7 @@ pub struct DocumentDeps<'db> {
 }
 
 // TODO: per-AnalyzedInclude??
-/// Dependencies of a document.
+/// Resolves the dependencies of a document.
 ///
 /// # Panics
 ///
@@ -42,7 +42,6 @@ pub fn document_deps(
     let parent_path = file.path(db).parent().ok_or(())?;
     let outline = super::outline(db, file).ok_or(())?;
 
-    // FIXME: actual config singleton!
     let include_dirs = IncludeDirs::get(db).include_dirs(db);
 
     let files = db.get_files();
@@ -71,6 +70,7 @@ pub fn document_deps(
 
     Ok(DocumentDeps::new(db, included_files, diagnostics))
 }
+
 #[cfg(test)]
 mod tests {
     use camino::Utf8Path;

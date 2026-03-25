@@ -6,7 +6,8 @@ use dt_diagnostic::{Diagnostic, MultiSpan, Severity};
 pub mod db;
 pub mod file;
 pub mod includes;
-mod macros;
+pub mod preprocessor;
+pub mod macros;
 
 #[salsa::tracked]
 pub struct Parse<'db> {
@@ -58,7 +59,7 @@ pub fn outline(db: &dyn db::BaseDb, file: file::File) -> Option<Outline<'_>> {
     let file_ast = parse.parse(db).source_file();
 
     let mut diagnostics = Vec::new();
-    let diag = std::sync::Mutex::new(&mut diagnostics);
+    let diag = parking_lot::Mutex::new(&mut diagnostics);
 
     let toplevels = dt_analyzer::new::outline::analyze_file(&file_ast, file.contents(db), &diag);
 
@@ -139,6 +140,10 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
 
     if let Ok(document_deps) = includes::document_deps(db, file) {
         diagnostics.extend_from_slice(document_deps.diagnostics(db));
+    }
+
+    if let Some(result) = preprocessor::preprocessor_eval_file(db, file, None) {
+        diagnostics.extend_from_slice(result.diagnostics(db));
     }
 
     diagnostics.dedup();

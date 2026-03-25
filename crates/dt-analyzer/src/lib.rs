@@ -50,7 +50,7 @@ pub mod macros;
 pub mod new;
 mod prop;
 pub mod resolved_prop;
-mod string;
+pub mod string;
 #[cfg(test)]
 mod tests;
 

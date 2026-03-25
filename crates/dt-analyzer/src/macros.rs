@@ -381,7 +381,7 @@ pub struct MacroDefinition {
     dont_prescan_indices: Vec<usize>,
 }
 impl MacroDefinition {
-    pub(crate) fn parse(input: &str) -> Result<Self, MacroDefinitionParseError> {
+    pub fn parse(input: &str) -> Result<Self, MacroDefinitionParseError> {
         debug_assert!(input.starts_with('#'));
         let s = input
             .get(1..)
