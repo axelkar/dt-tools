@@ -1,4 +1,6 @@
-use crate::{offset_to_position, position_to_offset, salsa::db::BaseDb, uri_to_path};
+use crate::{
+    lsp_utils::{offset_to_position, position_to_offset}, salsa::{db::BaseDb, includes::document_deps}, uri_to_path
+};
 use dt_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
@@ -54,7 +56,7 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
 
     let offset = position_to_offset(params.position, rope)?;
 
-    let Ok(document_deps) = crate::salsa::document_deps(db, file) else {
+    let Ok(document_deps) = document_deps(db, file) else {
         return None;
     };
 

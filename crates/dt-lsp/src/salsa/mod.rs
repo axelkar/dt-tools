@@ -2,22 +2,16 @@ use std::borrow::Cow;
 
 use dt_analyzer::new::outline::AnalyzedToplevel;
 use dt_diagnostic::{Diagnostic, MultiSpan, Severity};
-use dt_parser::TextRange;
 
 pub mod db;
 pub mod file;
+pub mod includes;
 mod macros;
-
-#[salsa::input(singleton)]
-pub struct IncludeDirs {
-    #[returns(ref)]
-    include_dirs: Vec<camino::Utf8PathBuf>,
-}
 
 #[salsa::tracked]
 pub struct Parse<'db> {
-    // TODO: shouldn't this be no_eq as well like parse_file()??
     #[returns(ref)]
+    #[no_eq]
     pub parse: dt_parser::parser::Parse<'static>,
 }
 
@@ -55,11 +49,10 @@ pub struct Outline<'db> {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-// `no_eq`: Probably faster to compare the inputs than the whole AST
 /// Computes an outline composed of [`dt_analyzer::new::outline::AnalyzedToplevel`]s.
 ///
 /// Returns `None` if the file doesn't exist.
-#[salsa::tracked(no_eq)]
+#[salsa::tracked]
 pub fn outline(db: &dyn db::BaseDb, file: file::File) -> Option<Outline<'_>> {
     let parse = parse_file(db, file)?;
     let file_ast = parse.parse(db).source_file();
@@ -86,61 +79,6 @@ fn tag_diagnostic(diagnostic: &mut Diagnostic, tag: &str) {
     for span_label in &mut diagnostic.span.span_labels {
         write!(span_label.msg.to_mut(), " [{tag}]").ok();
     }
-}
-
-/// Dependencies of a document.
-#[salsa::tracked]
-pub struct DocumentDeps<'db> {
-    #[tracked]
-    #[returns(ref)]
-    pub included_files: Vec<(TextRange, file::File)>,
-
-    #[tracked]
-    #[returns(ref)]
-    pub diagnostics: Vec<Diagnostic>,
-}
-
-// TODO: per-AnalyzedInclude??
-/// Dependencies of a document.
-#[salsa::tracked]
-pub fn document_deps(
-    db: &dyn db::BaseDb,
-    file: file::File,
-) -> Result<DocumentDeps<'_>, ()> {
-    let mut included_files = Vec::new();
-    let mut diagnostics = Vec::new();
-
-    let parent_path = file.path(db).parent().ok_or(())?;
-    let outline = outline(db, file).ok_or(())?;
-
-    // FIXME: actual config singleton!
-    let include_dirs = IncludeDirs::get(db).include_dirs(db);
-
-    let files = db.get_files();
-    for include in outline
-        .toplevels(db)
-        .iter()
-        .flat_map(AnalyzedToplevel::flatten_conditionals)
-        .filter_map(AnalyzedToplevel::as_include)
-    {
-        if let Some(file) = include
-            .possible_paths_utf8(parent_path, include_dirs)
-            .map(|path| files.get_file(db, &path))
-            .find(|file| file.is_readable_file(db))
-        {
-            included_files.push((include.text_range, file));
-        } else {
-            diagnostics.push(Diagnostic::new(
-                include.text_range,
-                Cow::Borrowed("Couldn't find file to include"),
-                Severity::Error,
-            ));
-        };
-    }
-
-    tag_diagnostics(&mut diagnostics, concat!(module_path!(), "::document_deps"));
-
-    Ok(DocumentDeps::new(db, included_files, diagnostics))
 }
 
 #[salsa::tracked(returns(ref))]
@@ -199,7 +137,7 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
         diagnostics.extend_from_slice(outline.diagnostics(db));
     }
 
-    if let Ok(document_deps) = document_deps(db, file) {
+    if let Ok(document_deps) = includes::document_deps(db, file) {
         diagnostics.extend_from_slice(document_deps.diagnostics(db));
     }
 
@@ -241,30 +179,13 @@ mod tests {
         assert!(
             matches!(
                 toplevels.as_slice(),
-                &[AnalyzedToplevel::Include(_), AnalyzedToplevel::Include(_)]
+                &[
+                    AnalyzedToplevel::Include(_),
+                    AnalyzedToplevel::PreprocessorConditional { .. },
+                    AnalyzedToplevel::Include(_)
+                ]
             ),
             "toplevels are not as expected: {toplevels:#?}"
-        );
-    }
-
-    #[test]
-    fn test_document_deps() {
-        let db = crate::salsa::db::BaseDatabase::default();
-        IncludeDirs::new(&db, vec![]);
-
-        let file_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
-        let file = db.get_files().get_file(&db, &file_path);
-
-        let document_deps =
-            document_deps(&db, file).expect("File should be readable and have a parent");
-
-        assert_eq!(document_deps.included_files(&db).len(), 2);
-
-        let diagnostics = document_deps.diagnostics(&db);
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "diagnostics are not as expected: {diagnostics:#?}"
         );
     }
 }

@@ -1,4 +1,7 @@
 /dts-v1/;
 
 #include "included.dtsi"
+#if 1
+#  include "example.dtsi"
+#endif
 #include "nonexistent.dtsi"
