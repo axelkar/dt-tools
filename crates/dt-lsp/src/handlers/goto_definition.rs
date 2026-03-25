@@ -1,4 +1,4 @@
-use crate::position_to_offset;
+use crate::{path_to_uri, position_to_offset, salsa::db::BaseDb, uri_to_path};
 use dt_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
@@ -6,7 +6,7 @@ use dt_parser::{
     match_ast,
 };
 use tower_lsp_server::ls_types::{
-    GotoDefinitionParams, GotoDefinitionResponse, Location, MessageType, Position, Range, Uri,
+    GotoDefinitionParams, GotoDefinitionResponse, Location, MessageType, Position, Range,
 };
 
 pub async fn goto_definition(
@@ -15,17 +15,31 @@ pub async fn goto_definition(
 ) -> Option<GotoDefinitionResponse> {
     let params = params.text_document_position_params;
     let uri = params.text_document.uri;
-    tracing::info!(?uri);
-    let document = state.state.index_documents.get(&uri)?;
+    let path = uri_to_path(&uri).expect("Invalid document URI");
+    tracing::info!(?path);
 
-    let cst = document.file.as_ref()?.syntax();
-    let offset = position_to_offset(params.position, &document.rope)?;
+    let db = state.session.db.lock().clone();
+    let db = &db;
+    let file = db.get_files().get_file(db, &path);
 
-    if let Some((include_path, _)) = document.included_paths.as_ref().and_then(|v| {
-        v.iter()
-            .find(|(_, text_range)| text_range.byte_range().contains(&offset))
-    }) {
-        let uri = Uri::from_file_path(include_path).expect("Included path should be absolute");
+    let Some(rope) = crate::salsa::rope(db, file) else {
+        return None;
+    };
+    let parse = crate::salsa::parse_file(db, file)?;
+    let file_ast = parse.parse(db).source_file();
+    let cst = file_ast.syntax();
+
+    let offset = position_to_offset(params.position, rope)?;
+
+    let Ok(document_deps) = crate::salsa::document_deps(db, file) else { return None; };
+
+    if let Some((_, file)) = document_deps
+        .included_files(db)
+        .iter()
+        .find(|(text_range, _)| text_range.byte_range().contains(&offset))
+    {
+        let uri =
+            path_to_uri(file.path(db)).expect("Resolved included path should be absolute");
         return Some(GotoDefinitionResponse::Scalar(Location::new(
             uri,
             Range {

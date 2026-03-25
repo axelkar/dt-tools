@@ -1,6 +1,6 @@
 //! Holds the [`File`] database input.
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use salsa::Durability;
 
 use crate::{salsa::db::BaseDb, FxDashMap};
@@ -10,6 +10,8 @@ use crate::{salsa::db::BaseDb, FxDashMap};
 pub struct File {
     #[returns(ref)]
     pub path: Utf8PathBuf,
+
+    // TODO: combine `contents` and `is_readable_file` into `contents: Option<String>`
 
     /// **Note:** The file may not exist. Check [`File::is_readable_file`] before reading contents.
     #[returns(ref)]
@@ -37,18 +39,18 @@ impl Files {
     /// The path must be absolute.
     // DashMap::entry requires the path to be owned...
     #[must_use]
-    pub fn get_file(&self, db: &dyn BaseDb, path: Utf8PathBuf) -> File {
+    pub fn get_file(&self, db: &dyn BaseDb, path: &Utf8Path) -> File {
         assert!(path.is_absolute());
 
-        *self.by_path.entry(path.clone()).or_insert_with(|| {
+        *self.by_path.entry_ref(path).or_insert_with(|| {
             tracing::trace!("Adding file '{path}'");
 
-            let (contents, is_readable_file) = match std::fs::read_to_string(&path) {
+            let (contents, is_readable_file) = match std::fs::read_to_string(path) {
                 Ok(contents) => (contents, true),
                 Err(_) => (String::new(), false),
             };
 
-            File::builder(path, contents, is_readable_file)
+            File::builder(path.to_owned(), contents, is_readable_file)
                 .path_durability(Durability::HIGH) // the path is immutable
                 .new(db)
         })
@@ -61,19 +63,19 @@ impl std::panic::RefUnwindSafe for Files {}
 
 #[cfg(test)]
 mod tests {
-    use camino::Utf8PathBuf;
+    use camino::Utf8Path;
 
     use crate::salsa::db::BaseDb;
 
     #[test]
     fn read_file() {
         let db = crate::salsa::db::BaseDatabase::default();
-        let file_path = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/basic.dts");
-        let file = db.get_files().get_file(&db, file_path.clone());
+        let file_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/basic.dts");
+        let file = db.get_files().get_file(&db, &file_path.clone());
 
         assert_eq!(
             (file.contents(&db), file.is_readable_file(&db)),
-            (&std::fs::read_to_string(&file_path).unwrap(), true)
+            (&std::fs::read_to_string(file_path).unwrap(), true)
         );
     }
 }

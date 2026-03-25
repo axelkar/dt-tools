@@ -17,7 +17,9 @@ dt-lint.path = "./crates/dt-lint"
 dt-diagnostic.path = "./crates/dt-diagnostic"
 dt-workspace.path = "./crates/dt-workspace"
 tracing = "0.1.40"
-dashmap = "6.0.1"
+#dashmap = "7.0.0-rc2" # experimental version for entry_ref support
+# https://github.com/xacrimon/dashmap/pull/367
+dashmap = { git = "https://github.com/axelkar/dashmap" }
 rustc-hash = "2.0.0"
 itertools = "0.14.0"
 tracing-subscriber = "0.3.18"

@@ -13,6 +13,7 @@ use dt_parser::{
     lexer::TokenKind,
     TextRange,
 };
+use either::Either;
 use enum_as_inner::EnumAsInner;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use rustc_hash::FxHashMap;
@@ -49,6 +50,15 @@ impl AnalyzedToplevel {
             Self::Include(inc) => inc.text_range,
             Self::MacroDefinition { text_range, .. }
             | Self::PreprocessorConditional { text_range, .. } => *text_range,
+        }
+    }
+    /// Returns an iterator that flattens [`Self::PreprocessorConditional`].
+    pub fn flatten_conditionals(&self) -> impl Iterator<Item = &Self> {
+        match self {
+            Self::PreprocessorConditional { branches, .. } => {
+                Either::Left(branches.iter().flat_map(|branch| &branch.toplevels))
+            }
+            _ => Either::Right(std::iter::once(self)),
         }
     }
 }

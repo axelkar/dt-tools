@@ -1,15 +1,10 @@
 use ::salsa::Setter;
-use camino::Utf8PathBuf;
-use dt_analyzer::new::outline::AnalyzedToplevel;
-use dt_diagnostic::DiagnosticCollector;
-use dt_parser::{ast, parser::parse, TextRange};
+use camino::{Utf8Path, Utf8PathBuf};
+use dt_parser::TextRange;
 use fluent_uri::component::Scheme;
 use ropey::Rope;
 use std::borrow::Cow;
-use std::{
-    net::{Ipv4Addr, SocketAddr},
-    path::PathBuf,
-};
+use std::net::{Ipv4Addr, SocketAddr};
 use tokio::{net::TcpListener, sync::Mutex};
 use tower_lsp_server::ls_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, DidChangeTextDocumentParams,
@@ -37,22 +32,18 @@ pub type FxDashMap<K, V> =
     dashmap::DashMap<K, V, std::hash::BuildHasherDefault<rustc_hash::FxHasher>>;
 
 #[derive(Debug)]
-pub struct Document {
-    pub rope: Rope,
-
+pub struct OpenDocument {
     /// The latest version of the document, set by the LSP client. The server will panic in
     /// debug mode if we attempt to update the document with an 'older' version.
     pub version: i32,
-
-    // FIXME: only lsp stuff here!
-    pub file: Option<ast::SourceFile>,
-    pub analyzed: Option<Vec<AnalyzedToplevel>>,
-    pub included_paths: Option<Vec<(PathBuf, TextRange)>>,
 }
 
 /// The global state for the LSP
 pub struct Session {
-    index_documents: FxDashMap<Uri, Document>,
+    /// Files open in the LSP client.
+    ///
+    /// Key is the path on a filesystem, not the [`Uri`].
+    open_docs: FxDashMap<Utf8PathBuf, OpenDocument>,
 
     resolved_client_capabilities: parking_lot::Mutex<Arc<ResolvedClientCapabilities>>,
 
@@ -67,12 +58,30 @@ pub struct Session {
     db: parking_lot::Mutex<BaseDatabase>,
 }
 
+impl Session {
+    pub fn set_file_contents_from_lsp(&self, path: &Utf8Path, contents: String, version: i32) {
+        debug!(version, ?path, "set file contents from LSP");
+
+        let db = &mut *self.db.lock();
+        let file = db.get_files().get_file(db, path);
+
+        // Because we got a change notification from LSP...
+        // FIXME: rename `is_readable_file` to something more fitting
+        file.set_contents(db).to(contents);
+        file.set_is_readable_file(db).to(true);
+
+        if let Some(mut open_doc) = self.open_docs.get_mut(path) {
+            open_doc.version = version;
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Backend {
     /// Handle for communication with the LSP client.
     client: Client,
     // An `Arc` so it can be used on a background thread.
-    state: Arc<Session>,
+    session: Arc<Session>,
 }
 
 type Result<T, E = tower_lsp_server::jsonrpc::Error> = std::result::Result<T, E>;
@@ -87,13 +96,13 @@ impl LanguageServer for Backend {
             }
         }
 
-        *self.state.resolved_client_capabilities.lock() =
+        *self.session.resolved_client_capabilities.lock() =
             Arc::new(ResolvedClientCapabilities::new(&params.capabilities));
 
         // TODO: support legacy clients using root_uri
         if let Some(workspace_folders) = params.workspace_folders {
             tracing::info!("Workspace folders: {workspace_folders:?}");
-            *self.state.workspace_folders.lock().await = workspace_folders;
+            *self.session.workspace_folders.lock().await = workspace_folders;
         } else {
             tracing::info!("Connected in single-file mode");
         }
@@ -122,6 +131,8 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 // implementation_provider: (), // TODO: for labels
                 // references_provider: (), // TODO: for labels
+                // TODO: special highlighting for known special names?
+                // phandle, #*-cells, #*-size, pinctrl-*, etc.
                 //document_highlight_provider: (),
                 //document_symbol_provider: (),
                 //code_action_provider: (),
@@ -160,22 +171,32 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "file opened!")
             .await;
 
+        let path = uri_to_path(&params.text_document.uri).expect("Invalid document URI");
+
+        self.session.open_docs.insert(
+            path.as_ref().to_owned(),
+            OpenDocument {
+                version: params.text_document.version,
+            },
+        );
+
+        self.session.set_file_contents_from_lsp(
+            &path,
+            params.text_document.text,
+            params.text_document.version,
+        );
+
         {
             // Set the first opened file to be the main file
-            let mut main_file = self.state.main_file.lock();
-            if main_file.is_none() {
-                *main_file = Some(params.text_document.uri.clone());
-            }
+            let mut main_file = self.session.main_file.lock();
+            main_file.get_or_insert_with(|| params.text_document.uri.clone());
+
+            // TODO: main file in Salsa?
         }
 
         // TODO: warn files that aren't included by main_file
 
-        self.on_change(
-            params.text_document.uri,
-            params.text_document.text,
-            params.text_document.version,
-            tokio::runtime::Handle::current(),
-        );
+        self.push_diagnostics_for_open_docs().await;
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
@@ -183,22 +204,34 @@ impl LanguageServer for Backend {
             params.content_changes[0].range, None,
             "asked for TextDocumentSyncKind::FULL"
         );
-        self.on_change(
-            params.text_document.uri,
-            std::mem::take(&mut params.content_changes[0].text),
+
+        let path = uri_to_path(&params.text_document.uri).expect("Invalid document URI");
+        self.session.set_file_contents_from_lsp(
+            &path,
+            params.content_changes.swap_remove(0).text,
             params.text_document.version,
-            tokio::runtime::Handle::current(),
         );
+
+        self.push_diagnostics_for_open_docs().await;
     }
     async fn did_save(&self, _: DidSaveTextDocumentParams) {
         self.client
             .log_message(MessageType::INFO, "file saved!")
             .await;
     }
-    async fn did_close(&self, _: DidCloseTextDocumentParams) {
-        debug!("file closed");
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let path = uri_to_path(&params.text_document.uri).expect("Invalid document URI");
+        self.session.open_docs.remove(path.as_ref());
 
-        // TODO: remove main file?
+        {
+            // Set the first opened file to be the main file
+            let mut main_file = self.session.main_file.lock();
+            if *main_file == Some(params.text_document.uri) {
+                *main_file = None;
+            }
+        }
+
+        debug!("file closed");
 
         self.client
             .log_message(MessageType::INFO, "file closed!")
@@ -217,7 +250,7 @@ impl LanguageServer for Backend {
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
         // TODO: recompute includes etc.
-        let mut folders = self.state.workspace_folders.lock().await;
+        let mut folders = self.session.workspace_folders.lock().await;
         for removed in params.event.removed {
             let pos = folders.iter().position(|x| *x == removed).unwrap();
             folders.swap_remove(pos);
@@ -227,311 +260,108 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
-    #[tracing::instrument(skip_all, fields(uri = %*uri))]
-    fn on_change(
-        &self,
-        uri: Uri,
-        text: String,
-        version: i32,
-        tokio_handle: tokio::runtime::Handle,
-    ) {
-        const SCHEME_FILE: &Scheme = Scheme::new_or_panic("file");
+    async fn push_diagnostics_for_open_docs(&self) {
+        // TODO: worker thread
+        for entry in &self.session.open_docs {
+            let path = entry.key();
+            let uri = path_to_uri(path).expect("An open document should(?) exist");
 
-        debug!(version, "File with URI `{}` was changed", *uri);
-        let rope = ropey::Rope::from_str(&text);
+            let lsp_diagnostics = {
+                let db = &mut *self.session.db.lock();
+                let file = db.get_files().get_file(db, path);
+                let diagnostics = crate::salsa::compute_file_diagnostics(db, file);
+                let Some(rope) = crate::salsa::rope(db, file) else {
+                    continue;
+                };
 
-        assert_eq!(
-            uri.scheme(),
-            SCHEME_FILE,
-            "LSP should only allow file: URIs"
-        );
-        let path = uri.to_file_path().expect("Invalid file path");
-        let path = camino::Utf8Path::from_path(&path)
-            .expect("to_file_path's implementation always guarantees valid UTF-8");
+                // TODO: add this to dt-diagnostic?
+                // could be like "dt-tools(lint {})"
+                let source = Some("dt-tools".to_owned());
 
-        self.state.index_documents.insert(
-            uri.clone(),
-            Document {
-                rope: rope.clone(),
-                version,
-                file: None,
-                analyzed: None,
-                included_paths: None,
-            },
-        );
-        // TODO: Check if it exists already, with equal text
-        // It may be an included file or a reopened file
-
-        let is_main_file = self
-            .state
-            .main_file
-            .lock()
-            .as_deref()
-            .map(fluent_uri::Uri::as_str)
-            == Some(uri.as_str());
-
-        let parse = parse(&text);
-
-        let mut lsp_diagnostics = Vec::new();
-
-        let earliest_lex_error_range = parse.lex_errors.first().map(|e| e.text_range);
-        for lex_error in &parse.lex_errors {
-            lsp_diagnostics.push(Diagnostic::new_simple(
-                range_to_lsp(lex_error.text_range, &rope).expect("range should be in the rope"),
-                format!("{} [lex error]", lex_error.inner),
-            ));
-        }
-
-        for error in &parse.errors {
-            if let Some(earliest_lex_error_range) = earliest_lex_error_range {
-                if error.primary_span.start >= earliest_lex_error_range.start {
-                    break;
-                }
-            }
-
-            lsp_diagnostics.push(Diagnostic {
-                range: range_to_lsp(error.primary_span, &rope)
-                    .expect("range should be in the rope"),
-                severity: Some(DiagnosticSeverity::ERROR),
-                source: Some("dt-tools(syntax-error)".to_owned()),
-                message: error.message.as_ref().to_owned(),
-                related_information: Some(
-                    error
-                        .span_labels
-                        .iter()
-                        .map(|span_label| DiagnosticRelatedInformation {
-                            location: Location {
-                                uri: uri.clone(),
-                                range: range_to_lsp(span_label.span, &rope)
+                diagnostics
+                    .iter()
+                    .flat_map(|diagnostic| {
+                        diagnostic
+                            .span
+                            .primary_spans
+                            .iter()
+                            .enumerate()
+                            .map(|(i, span)| Diagnostic {
+                                range: range_to_lsp(*span, rope)
                                     .expect("range should be in the rope"),
-                            },
-                            message: span_label.msg.clone().into_owned(),
-                        })
-                        .collect(),
-                ),
-                ..Default::default()
-            });
-            for span_label in &error.span_labels {
-                lsp_diagnostics.push(Diagnostic {
-                    range: range_to_lsp(span_label.span, &rope)
-                        .expect("range should be in the rope"),
-                    severity: Some(DiagnosticSeverity::HINT),
-                    source: Some("dt-tools(syntax-error)".to_owned()),
-                    message: span_label.msg.as_ref().to_owned(),
-                    related_information: Some(vec![DiagnosticRelatedInformation {
-                        location: Location {
-                            uri: uri.clone(),
-                            range: range_to_lsp(error.primary_span, &rope)
-                                .expect("range should be in the rope"),
-                        },
-                        message: "original diagnostic".to_owned(),
-                    }]),
-                    ..Default::default()
-                });
-            }
-        }
-
-        let file_ast = parse.source_file();
-
-        lsp_diagnostics.extend(
-            dt_lint::default_lint(&file_ast, &text, is_main_file)
-                .iter()
-                .flat_map(|lint| {
-                    lint.diagnostic
-                        .span
-                        .primary_spans
-                        .iter()
-                        .enumerate()
-                        .map(|(i, span)| Diagnostic {
-                            range: range_to_lsp(*span, &rope).expect("range should be in the rope"),
-                            severity: Some(match lint.diagnostic.severity {
-                                dt_diagnostic::Severity::Warn => DiagnosticSeverity::WARNING,
-                                dt_diagnostic::Severity::Error => DiagnosticSeverity::ERROR,
-                            }),
-                            source: Some(format!("dt-tools(lint {})", lint.id)),
-                            message: lint.diagnostic.msg.clone().into_owned(),
-                            related_information: Some(
-                                lint.diagnostic
-                                    .span
-                                    .primary_spans
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(j, _)| *j != i)
-                                    .map(|(_, span)| DiagnosticRelatedInformation {
-                                        location: Location {
-                                            uri: uri.clone(),
-                                            range: range_to_lsp(*span, &rope)
-                                                .expect("range should be in the rope"),
-                                        },
-                                        message: "see also".to_owned(),
-                                    })
-                                    .chain(lint.diagnostic.span.span_labels.iter().map(
-                                        |span_label| {
-                                            DiagnosticRelatedInformation {
-                                                location: Location {
-                                                    uri: uri.clone(),
-                                                    range: range_to_lsp(span_label.span, &rope)
-                                                        .expect("range should be in the rope"),
-                                                },
-                                                message: span_label.msg.clone().into_owned(),
-                                            }
-                                        },
-                                    ))
-                                    .collect(),
-                            ),
-                            ..Default::default()
-                        })
-                        .chain(lint.diagnostic.span.span_labels.iter().map(|span_label| {
-                            Diagnostic {
-                                range: range_to_lsp(span_label.span, &rope)
-                                    .expect("range should be in the rope"),
-                                severity: Some(DiagnosticSeverity::HINT),
-                                source: Some(format!("dt-tools(lint {})", lint.id)),
-                                message: span_label.msg.clone().into_owned(),
+                                severity: Some(match diagnostic.severity {
+                                    dt_diagnostic::Severity::Warn => DiagnosticSeverity::WARNING,
+                                    dt_diagnostic::Severity::Error => DiagnosticSeverity::ERROR,
+                                }),
+                                source: source.clone(),
+                                message: diagnostic.msg.clone().into_owned(),
                                 related_information: Some(
-                                    lint.diagnostic
+                                    diagnostic
                                         .span
                                         .primary_spans
                                         .iter()
-                                        .map(|span| DiagnosticRelatedInformation {
+                                        .enumerate()
+                                        .filter(|(j, _)| *j != i)
+                                        .map(|(_, span)| DiagnosticRelatedInformation {
+                                            // link to other primary spans
                                             location: Location {
                                                 uri: uri.clone(),
-                                                range: range_to_lsp(*span, &rope)
+                                                range: range_to_lsp(*span, rope)
                                                     .expect("range should be in the rope"),
                                             },
-                                            message: "original diagnostic".to_owned(),
+                                            message: "see also".to_owned(),
                                         })
+                                        .chain(diagnostic.span.span_labels.iter().map(
+                                            |span_label| {
+                                                DiagnosticRelatedInformation {
+                                                    // link to span labels
+                                                    location: Location {
+                                                        uri: uri.clone(),
+                                                        range: range_to_lsp(span_label.span, rope)
+                                                            .expect("range should be in the rope"),
+                                                    },
+                                                    message: span_label.msg.clone().into_owned(),
+                                                }
+                                            },
+                                        ))
                                         .collect(),
                                 ),
                                 ..Default::default()
-                            }
-                        }))
-                }),
-        );
-
-        let mut dt_diagnostics = Vec::new();
-        let diag = parking_lot::Mutex::new(&mut dt_diagnostics);
-
-        let db = &mut *self.state.db.lock();
-        let file = db.get_files().get_file(db, path.to_owned());
-
-        // Because we got a change notification from LSP...
-        // FIXME: rename `is_readable_file` to something more fitting
-        file.set_contents(db).to(text.clone());
-        file.set_is_readable_file(db).to(true);
-
-        let Some(outline) = crate::salsa::outline(db, file) else {
-            tracing::error!("File should maybe exist?!");
-            return;
-        };
-
-        diag.lock().extend_from_slice(outline.diagnostics(db));
-        let toplevels = outline.toplevels(db);
-
-        let document_deps =
-            crate::salsa::document_deps(db, file, outline).expect("a file always has a parent");
-        diag.lock().extend_from_slice(document_deps.diagnostics(db));
-
-        let includes = &[]; // TODO
-        let analyzed2 = dt_analyzer::new::stage2::compute(toplevels, includes, &diag);
-        //if is_main_file {
-        if false {
-            use std::io::Write;
-            let mut f = std::fs::File::create("analyzed2.dbg").unwrap();
-            write!(f, "analyzed2={analyzed2:#?}").unwrap();
-            let mut f = std::fs::File::create("analyzed1.dbg").unwrap();
-            write!(f, "analyzed1={toplevels:#?}").unwrap();
-        }
-
-        let parent_path = path
-            .parent()
-            .expect("a file always has a parent")
-            .to_owned();
-
-        let mut included_paths = Vec::new();
-
-        let include_dirs = [
-            PathBuf::from("/home/axel/dev/mainlining/linux/include"),
-            PathBuf::from("/home/axel/dev/mainlining/linux/scripts/dtc/include-prefixes"),
-        ];
-
-        // TODO: only re-check when includes are updated or include config is changed
-        for include in toplevels.iter().filter_map(AnalyzedToplevel::as_include) {
-            let include_path = include.find_file(parent_path.as_ref(), &include_dirs);
-
-            let Some(include_path) = include_path else {
-                diag.emit(dt_diagnostic::Diagnostic::new(
-                    include.text_range,
-                    Cow::Borrowed("Couldn't find file to include"),
-                    dt_diagnostic::Severity::Error,
-                ));
-                continue;
+                            })
+                            .chain(diagnostic.span.span_labels.iter().map(|span_label| {
+                                Diagnostic {
+                                    range: range_to_lsp(span_label.span, rope)
+                                        .expect("range should be in the rope"),
+                                    severity: Some(DiagnosticSeverity::HINT),
+                                    source: source.clone(),
+                                    message: span_label.msg.clone().into_owned(),
+                                    related_information: Some(
+                                        diagnostic
+                                            .span
+                                            .primary_spans
+                                            .iter()
+                                            .map(|span| DiagnosticRelatedInformation {
+                                                // link to primary spans
+                                                location: Location {
+                                                    uri: uri.clone(),
+                                                    range: range_to_lsp(*span, rope)
+                                                        .expect("range should be in the rope"),
+                                                },
+                                                message: "original diagnostic".to_owned(),
+                                            })
+                                            .collect(),
+                                    ),
+                                    ..Default::default()
+                                }
+                            }))
+                    })
+                    .collect::<Vec<_>>()
             };
 
-            included_paths.push((include_path.clone(), include.text_range));
-
-            let new_uri = Uri::from_file_path(include_path.clone()).unwrap();
-
-            tracing::info!("dot {:?} -> {:?}", uri.to_string(), new_uri.to_string());
-
-            // FIXME: not opened in LSP, should we really fake an URI?
-            if !self.state.index_documents.contains_key(&new_uri) {
-                let this = self.clone();
-                let tokio_handle = tokio_handle.clone();
-                rayon::spawn(move || {
-                    // AnalyzedInclude::find_file made sure it exists
-                    if let Ok(text) = std::fs::read_to_string(include_path) {
-                        // HACK: faked LSP version
-                        let version = 0;
-                        this.on_change(new_uri, text, version, tokio_handle);
-                    }
-                });
-            }
-        }
-
-        for new_diagnostic in dt_diagnostics {
-            // TODO: level
-            for primary_span in new_diagnostic.span.primary_spans {
-                lsp_diagnostics.push(Diagnostic::new_simple(
-                    range_to_lsp(primary_span, &rope).expect("range should be in the rope"),
-                    new_diagnostic.msg.clone().into_owned(),
-                ));
-            }
-
-            for span_label in new_diagnostic.span.span_labels {
-                lsp_diagnostics.push(Diagnostic::new(
-                    range_to_lsp(span_label.span, &rope).expect("range should be in the rope"),
-                    Some(DiagnosticSeverity::HINT),
-                    None,
-                    None,
-                    span_label.msg.into_owned(),
-                    None,
-                    None,
-                ));
-            }
-        }
-
-        self.state.index_documents.insert(
-            uri.clone(),
-            Document {
-                rope,
-                version,
-                file: Some(file_ast),
-                analyzed: Some(toplevels.clone()),
-                included_paths: Some(included_paths),
-            },
-        );
-
-        // TODO: special highlighting for known special names?
-        // phandle, #*-cells, #*-size, pinctrl-*, etc.
-
-        lsp_diagnostics.dedup();
-        let client = self.client.clone();
-        tokio_handle.spawn(async move {
-            client
-                .publish_diagnostics(uri.clone(), lsp_diagnostics, Some(version))
+            self.client
+                .publish_diagnostics(uri.clone(), lsp_diagnostics, Some(entry.version))
                 .await;
-        });
+        }
     }
 }
 
@@ -541,8 +371,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (service, socket) = LspService::new(|client| Backend {
         client,
-        state: Arc::new(Session {
-            index_documents: FxDashMap::default(),
+        session: Arc::new(Session {
+            open_docs: FxDashMap::default(),
             resolved_client_capabilities: parking_lot::Mutex::default(),
             workspace_folders: Mutex::new(Vec::new()),
             main_file: parking_lot::Mutex::new(None),
@@ -622,6 +452,33 @@ fn range_to_lsp(text_range: TextRange, rope: &Rope) -> Option<Range> {
     })
 }
 
+fn uri_to_path(uri: &Uri) -> Option<Cow<'_, Utf8Path>> {
+    const SCHEME_FILE: &Scheme = Scheme::new_or_panic("file");
+
+    if uri.scheme() != SCHEME_FILE {
+        return None;
+    }
+
+    let path = uri.to_file_path()?;
+    let path = match path {
+        Cow::Owned(path) => Cow::Owned(
+            camino::Utf8PathBuf::from_path_buf(path)
+                .expect("to_file_path's implementation always guarantees valid UTF-8"),
+        ),
+        Cow::Borrowed(path) => Cow::Borrowed(
+            camino::Utf8Path::from_path(path)
+                .expect("to_file_path's implementation always guarantees valid UTF-8"),
+        ),
+    };
+    Some(path)
+}
+
+/// Returns `None` if the path is relative and inaccessible.
+fn path_to_uri(path: &Utf8Path) -> Option<Uri> {
+    // We can create URIs outself because other LSPs like rust-analyzer do it as well.
+    Uri::from_file_path(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -643,10 +500,24 @@ mod tests {
         );
         assert_eq!(range_to_lsp(TextRange { start: 0, end: 2 }, &rope), None);
 
-        // TODO: make diagnostics with zero length work
+        // TODO: make length>0 diagnostics in an empty document work
         // Let's hope fully empty files (e.g. created through VS Code or Windows) don't get
         // diagnostics with nonzero length (invalid according to LSP spec? or?). Not sure how rust-analyzer handles this.
         let rope = ropey::Rope::from_str("");
         assert_eq!(range_to_lsp(TextRange { start: 0, end: 1 }, &rope), None);
+
+        assert_eq!(
+            range_to_lsp(TextRange { start: 0, end: 0 }, &rope),
+            Some(Range {
+                start: Position {
+                    line: 0,
+                    character: 0
+                },
+                end: Position {
+                    line: 0,
+                    character: 0
+                },
+            })
+        );
     }
 }

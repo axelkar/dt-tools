@@ -322,6 +322,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "7.0.0-rc2"
+source = "git+https://github.com/axelkar/dashmap#23f2a1520cde0b02860c549a86ce57b0f0e87b5d"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "equivalent",
+ "hashbrown 0.15.2",
+ "lock_api",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "derive_more"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -452,7 +465,7 @@ name = "dt-lsp"
 version = "0.1.0"
 dependencies = [
  "camino",
- "dashmap",
+ "dashmap 7.0.0-rc2",
  "dt-analyzer",
  "dt-diagnostic",
  "dt-lint",
@@ -1785,7 +1798,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f0e711655c89181a6bc6a2cc348131fcd9680085f5b06b6af13427a393a6e72"
 dependencies = [
  "bytes",
- "dashmap",
+ "dashmap 6.0.1",
  "futures",
  "httparse",
  "ls-types",
