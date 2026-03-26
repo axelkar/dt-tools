@@ -1,5 +1,7 @@
 use crate::{
-    lsp_utils::{offset_to_position, position_to_offset}, salsa::{db::BaseDb, includes::document_deps}, uri_to_path
+    lsp_utils::{offset_to_position, position_to_offset},
+    salsa::{db::BaseDb, includes::document_deps},
+    uri_to_path,
 };
 use dt_parser::{
     ast::{self, AstNode},

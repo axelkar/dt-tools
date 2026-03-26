@@ -3,11 +3,10 @@ use camino::{Utf8Path, Utf8PathBuf};
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::{net::TcpListener, sync::Mutex};
 use tower_lsp_server::ls_types::{
-    DidChangeTextDocumentParams,
-    DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    MessageType, OneOf, ServerCapabilities, ServerInfo,
+    DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
+    InitializeResult, InitializedParams, MessageType, OneOf, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkspaceFolder,
     WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
@@ -278,7 +277,9 @@ impl Backend {
 
                 diagnostics
                     .iter()
-                    .flat_map(|diagnostic| lsp_utils::dt_diagnostic_to_lsp(diagnostic, rope, &source, &uri))
+                    .flat_map(|diagnostic| {
+                        lsp_utils::dt_diagnostic_to_lsp(diagnostic, rope, &source, &uri)
+                    })
                     .collect::<Vec<_>>()
             };
 

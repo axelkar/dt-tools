@@ -6,6 +6,12 @@ pub enum StringParseError {
     EscapeAtEndOfString,
     /// hex escape with no valid digits
     HexNoDigits,
+
+    /// When parsing a char literal, there were too many chars.
+    CharTooManyChars,
+
+    /// When parsing a char literal, there was no char.
+    CharMissingChar,
 }
 
 struct InterpretEscapedString<'a> {
@@ -57,4 +63,20 @@ pub fn interpret_escaped_string(s: &str) -> Result<String, StringParseError> {
         s: s.chars().peekable(),
     })
     .collect()
+}
+
+pub fn interpret_escaped_char(s: &str) -> Result<char, StringParseError> {
+    debug_assert!(s.starts_with('\''));
+    debug_assert!(s.ends_with('\''));
+    let s = s.get(1..(s.len() - 1)).expect("lexer safe");
+    let mut iter = InterpretEscapedString {
+        s: s.chars().peekable(),
+    };
+    let ch = iter.next().ok_or(StringParseError::CharMissingChar)??;
+
+    if iter.next().is_some() {
+        Err(StringParseError::CharTooManyChars)
+    } else {
+        Ok(ch)
+    }
 }

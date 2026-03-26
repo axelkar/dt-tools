@@ -27,6 +27,15 @@ pub enum NodeKind {
     EntryPropValues,
     /// See [`Entrypoint::Cells`](super::parser::Entrypoint::Cells)
     EntryCells,
+    /// See [`Entrypoint::PreprocessorConditional`](super::parser::Entrypoint::PreprocessorConditional)
+    EntryPreprocessorConditional,
+    PreprocessorDefinedOperation,
+
+    // Parts of an expression
+    InfixExpr,
+    PrefixExpr,
+    ParenExpr,
+    LiteralExpr,
 
     /// Node wrapping a parse error
     ParseError,

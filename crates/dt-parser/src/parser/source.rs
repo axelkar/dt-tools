@@ -102,6 +102,10 @@ impl<'t, 'input> Source<'t, 'input> {
         }
     }
 
+    pub(super) fn peek_text(&mut self) -> Option<&'input str> {
+        Some(self.tokens.get(self.cursor)?.text)
+    }
+
     pub(super) fn next_token(&mut self) -> Option<&'t Token<'input>> {
         self.skip_trivia();
 

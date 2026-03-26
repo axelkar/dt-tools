@@ -4,6 +4,14 @@ use constcat::concat_slices;
 #[cfg(feature = "grammar-tracing")]
 use tracing::debug;
 
+use crate::{
+    cst::NodeKind,
+    lexer::TokenKind,
+    parser::{CompletedMarker, Expected, Marker, Parser},
+};
+
+pub(crate) mod expr;
+
 macro_rules! vis {
     (begin) => {
         #[cfg(feature = "visualize")]
@@ -24,18 +32,14 @@ macro_rules! vis {
         &name[..name.len() - 3]
     }};
 }
-
-use crate::{
-    cst::NodeKind,
-    lexer::TokenKind,
-    parser::{CompletedMarker, Expected, Marker, Parser},
-};
+// Export the macro with path-based scoping
+pub(crate) use vis;
 
 /// Parses a macro invocation.
 ///
 /// May or may not have arguments.
 ///
-/// As cells and values, we know that any idents must be macros, even without arguments.
+/// As this is used in DTS cells, DTS values and preprocessor conditionals, we know that any idents must be macros, even without arguments.
 ///
 /// In references, labels, nodes and properties they may be just names, depending on a macro being named
 /// the same.
@@ -73,66 +77,6 @@ fn macro_invocation(m: Marker, p: &mut Parser) -> CompletedMarker {
         p.expect(TokenKind::RParen);
     }
     m.complete(p, NodeKind::MacroInvocation)
-}
-
-/// Parses an int expression.
-///
-/// - Form: `(1 + 2 + PREPROCESSOR_CONST)`.
-// TODO: ternary expressions in macros, see `linux/arch/arm64/boot/dts/marvell/cn9130.dtsi` `CP11X_PCIEx_MEM_BASE`
-// TODO: label names from macros, see `linux/arch/arm64/boot/dts/marvell/armada-cp11x.dtsi` line 28
-fn dt_expr(p: &mut Parser) {
-    // TODO: https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
-    const OPERATOR_SET: &[TokenKind] = &[
-        TokenKind::Plus,
-        TokenKind::Asterisk,
-        TokenKind::Minus,
-        TokenKind::Slash,
-        TokenKind::Modulo, // TODO: not in spec?
-        TokenKind::BitwiseOr,
-    ];
-
-    const EXPR_RECOVERY_SET: &[TokenKind] =
-        &[TokenKind::Number, TokenKind::Ident, TokenKind::LParen];
-
-    vis!(begin);
-    let m = p.start();
-
-    assert!(p.eat(TokenKind::LParen));
-
-    while !(p.at(TokenKind::RParen) || p.at_end()) {
-        if p.silent_at_set(OPERATOR_SET) {
-            // Recover if an argument is missing and only got a delimiter,
-            // e.g. `a + + b`.
-            // TODO: add "Expected number or preprocessor macro"
-            p.error().msg_expected().bump_wrap_err().emit();
-            continue;
-        }
-
-        if p.eat(TokenKind::Number) {
-        } else if p.at(TokenKind::Ident) {
-            macro_invocation(p.start(), p);
-        } else if p.at(TokenKind::LParen) {
-            // Start a parantesized expression
-            dt_expr(p);
-        } else {
-            p.error().msg_expected().bump_wrap_err().emit();
-            break;
-        }
-
-        if p.at_set(OPERATOR_SET) {
-            p.bump();
-        } else if p.silent_at_set(ITEM_RECOVERY_SET) {
-            break;
-        } else if p.silent_at_set(EXPR_RECOVERY_SET) {
-            p.error().msg_expected().emit();
-        } else {
-            break;
-        }
-    }
-    p.expect(TokenKind::RParen);
-
-    m.complete(p, NodeKind::DtExpr);
-    vis!(end);
 }
 
 /// Parses a reference without the leading ampersand and a node.
@@ -217,6 +161,26 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
 
     Ok(())
 }
+
+/// Parses a Devicetree expression within parenthesis.
+///
+/// [From specification]: "values may be represented as arithmetic, bitwise, or logical expressions within parenthesis"
+///
+/// - Form: `(1 + 2 + PREPROCESSOR_MACRO)`.
+///
+/// [spec]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
+fn dt_expr(p: &mut Parser) {
+    let m = p.start();
+
+    assert!(p.eat(TokenKind::LParen));
+
+    expr::expr(p, false);
+
+    p.expect(TokenKind::RParen);
+
+    m.complete(p, NodeKind::DtExpr);
+}
+
 
 /// Parses a Devicetree cell list.
 ///
@@ -561,6 +525,8 @@ const CONTINUE_COND_SET: &[TokenKind] = &[
 ///   it, don't explicitly run [`preprocessor_directive`] and don't explicitly handle tokens that
 ///   end a preprocessor conditional branch, as they are all done automatically.
 fn preprocessor_directive(p: &mut Parser, inside: impl Fn(&mut Parser)) -> bool {
+    // TODO: this inside nodes
+
     fn cond_branches_and_end(p: &mut Parser, inside: impl Fn(&mut Parser)) {
         let mut m_branch = p.start();
 
@@ -641,10 +607,6 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
 pub(super) fn entry_name(p: &mut Parser) {
     if p.at_name() {
         p.bump_name();
-        // TODO: move to Entrypoint struct?
-        if !p.at_end() {
-            p.error().msg_expected().emit();
-        }
     } else {
         // This just quits parsing. Is this preferred?
         p.error().msg_expected().bump_wrap_err().emit();
@@ -652,7 +614,7 @@ pub(super) fn entry_name(p: &mut Parser) {
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+mod tests {
     use crate::parser::{parse, Entrypoint};
 
     use expect_test::{expect, expect_file, Expect, ExpectFile};
@@ -687,7 +649,7 @@ Tree:
 
     #[track_caller]
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
-    fn check_ep(ep: Entrypoint, input: &str, expect: Expect) {
+    pub(super) fn check_ep(ep: Entrypoint, input: &str, expect: Expect) {
         let parse_output = ep.parse(input);
         expect.assert_eq(&format!(
             "Errors: {:#?}
@@ -827,7 +789,8 @@ Tree:
 
     #[test]
     fn references() {
-        // According to the DT spec v0.4, labels can only match [0-9a-zA-Z_]
+        // https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#labels
+        // According to the specification, labels can only match [0-9a-zA-Z_]
         // Note how the comma is not included in the label:
         check_ep(
             Entrypoint::PropValues,
@@ -1267,6 +1230,53 @@ Tree:
                       MacroInvocation@44..47
                         Ident@44..47 "FOO"
                     Semicolon@47..48 ";"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_char() {
+        check_ep(
+            Entrypoint::Cells,
+            r"'\0' '\x01' 2",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                EntryCells@0..13
+                  Char@0..4 "'\\0'"
+                  Whitespace@4..5 " "
+                  Char@5..11 "'\\x01'"
+                  Whitespace@11..12 " "
+                  Number@12..13 "2"
+            "#]],
+        );
+
+        check_ep(
+            Entrypoint::Cells,
+            r"('\0') ('\x01') (2)",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                EntryCells@0..19
+                  DtExpr@0..6
+                    LParen@0..1 "("
+                    LiteralExpr@1..5
+                      Char@1..5 "'\\0'"
+                    RParen@5..6 ")"
+                  Whitespace@6..7 " "
+                  DtExpr@7..15
+                    LParen@7..8 "("
+                    LiteralExpr@8..14
+                      Char@8..14 "'\\x01'"
+                    RParen@14..15 ")"
+                  Whitespace@15..16 " "
+                  DtExpr@16..19
+                    LParen@16..17 "("
+                    LiteralExpr@17..18
+                      Number@17..18 "2"
+                    RParen@18..19 ")"
             "#]],
         );
     }

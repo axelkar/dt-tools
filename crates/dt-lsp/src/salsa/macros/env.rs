@@ -41,7 +41,7 @@ impl<'db> MacroEnv<'db> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MacroEnvMut<'db> {
     pub parent: Option<MacroEnv<'db>>,
     /// Inner `Option` so it can be overriden over `parent` to `None`.

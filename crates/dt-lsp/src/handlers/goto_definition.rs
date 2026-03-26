@@ -1,4 +1,9 @@
-use crate::{lsp_utils::position_to_offset, path_to_uri, salsa::{db::BaseDb, includes::document_deps}, uri_to_path};
+use crate::{
+    lsp_utils::position_to_offset,
+    path_to_uri,
+    salsa::{db::BaseDb, includes::document_deps},
+    uri_to_path,
+};
 use dt_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
@@ -31,15 +36,16 @@ pub async fn goto_definition(
 
     let offset = position_to_offset(params.position, rope)?;
 
-    let Ok(document_deps) = document_deps(db, file) else { return None; };
+    let Ok(document_deps) = document_deps(db, file) else {
+        return None;
+    };
 
     if let Some((_, file)) = document_deps
         .included_files(db)
         .iter()
         .find(|(text_range, _)| text_range.byte_range().contains(&offset))
     {
-        let uri =
-            path_to_uri(file.path(db)).expect("Resolved included path should be absolute");
+        let uri = path_to_uri(file.path(db)).expect("Resolved included path should be absolute");
         return Some(GotoDefinitionResponse::Scalar(Location::new(
             uri,
             Range {

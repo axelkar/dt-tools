@@ -15,6 +15,7 @@ use crate::{
 pub enum Expected {
     Kind(TokenKind),
     PreprocessorDirective,
+    PreprocessorDefinedOperator,
     Value,
     Cell,
     LabelName,
@@ -25,6 +26,7 @@ impl core::fmt::Display for Expected {
         match self {
             Expected::Kind(kind) => kind.fmt(f),
             Expected::PreprocessorDirective => f.write_str("preprocessor directive"),
+            Expected::PreprocessorDefinedOperator => f.write_str("preprocessor `defined` operator"),
             Expected::Value => f.write_str("value"),
             Expected::Cell => f.write_str("cell"),
             Expected::LabelName => f.write_str("label name"),

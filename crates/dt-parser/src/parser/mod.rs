@@ -6,11 +6,7 @@
 use std::sync::Arc;
 
 use crate::{
-    ast,
-    cst::{GreenNode, NodeKind},
-    grammar,
-    lexer::TokenKind,
-    TextRange,
+    TextRange, ast, cst::{GreenNode, NodeKind, RedNode}, grammar, lexer::TokenKind
 };
 
 use self::event::Event;
@@ -64,7 +60,13 @@ impl Parse<'_> {
     #[must_use]
     pub fn source_file(&self) -> ast::SourceFile {
         use ast::AstNode as _;
-        ast::SourceFile::cast(crate::cst::RedNode::new(Arc::new(self.green_node.clone()))).unwrap()
+        ast::SourceFile::cast(self.red_node()).unwrap()
+    }
+
+    /// Returns a [`RedNode`] of the root node.
+    #[must_use]
+    pub fn red_node(&self) -> Arc<RedNode> {
+        RedNode::new(Arc::new(self.green_node.clone()))
     }
 
     /// Removes any references to the input.
@@ -97,6 +99,8 @@ pub enum Entrypoint {
     PropValues,
     /// Parses into a [`NodeKind::EntryCells`] with [`ast::Cell`]s
     Cells,
+    /// Parses into a [`NodeKind::EntryPreprocessorConditional`] with an [`ast::Expr`].
+    PreprocessorConditional,
 }
 impl Entrypoint {
     /// Parses the input according to the entrypoint.
@@ -138,18 +142,32 @@ impl Entrypoint {
             }
             Self::PropValues => {
                 grammar::propvalues(p, &[]).ok();
-                // TODO: should this be added to the other branches?
-                if !p.at_end() {
-                    p.add_expected(Expected::Eof);
-                    p.error().msg_expected().bump_wrap_err().emit();
-                }
                 NodeKind::EntryPropValues
             }
             Self::Cells => {
                 grammar::cells::<true>(p).ok();
                 NodeKind::EntryCells
             }
+            Self::PreprocessorConditional => {
+                grammar::expr::entry_preprocessor_conditional(p);
+                NodeKind::EntryPreprocessorConditional
+            }
         };
+
+        // Add all tokens to CST and error
+        if !p.at_end() {
+            p.add_expected(Expected::Eof);
+            let m = p.start();
+
+            p.error().msg_expected().emit();
+
+            // Bump all
+            while !p.at_end() {
+                p.bump();
+            }
+
+            m.complete(p, NodeKind::ParseError);
+        }
 
         let sink = sink::Sink::new(&tokens, parser.events, root_kind);
 
@@ -262,14 +280,18 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
 
     /// Bumps when `kind` is the current token's kind and errors otherwise.
-    pub fn expect(&mut self, kind: TokenKind) {
+    ///
+    /// Returns true if a token was bumped.
+    pub fn expect(&mut self, kind: TokenKind) -> bool {
         #[cfg(feature = "grammar-tracing")]
         debug!(?kind, "expect");
 
         if self.at(kind) {
             self.bump();
+            true
         } else {
             self.error().msg_expected().emit();
+            false
         }
     }
 
@@ -366,6 +388,10 @@ impl<'t, 'input> Parser<'t, 'input> {
     /// Bumps label name tokens into [`TokenKind::Name`].
     pub fn bump_label_name(&mut self) {
         self.bump_name_generic(&LABEL_NAME_SET);
+    }
+
+    pub fn text(&mut self) -> Option<&str> {
+        self.source.peek_text()
     }
 
     #[inline]

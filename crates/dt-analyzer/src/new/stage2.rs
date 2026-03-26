@@ -17,7 +17,7 @@ use enum_as_inner::EnumAsInner;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    macros::{evaluate_macro, MacroDefinition},
+    macros::{substitute_macro_ast, MacroDefinition},
     resolved_prop::Value,
 };
 
@@ -175,7 +175,7 @@ fn get_node_prop_name(
         }
     };
 
-    let s = evaluate_macro(macro_ast.as_ref(), macro_def)
+    let s = substitute_macro_ast(macro_ast.as_ref(), macro_def)
         .expect("FIXME: no error")
         .1;
 

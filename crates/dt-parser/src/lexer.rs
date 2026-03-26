@@ -178,7 +178,7 @@ pub enum TokenKind {
     /// **Combined token**, which is only generated in the parser.
     Name,
 
-    #[regex(r#"[^ \t\r\n"'/*+%|{}<>\[()?;:&=@,0-9-][^ \t\r\n"'/*+%|{}<>\[()?;:&=@,-]*"#)]
+    #[regex(r#"[^ \t\r\n"'/*+%|{}<>\[()?;:&=@,\-0-9\^!~][^ \t\r\n"'/*+%|{}<>\[()?;:&=@,\-\^!~]*"#)]
     Ident,
 
     #[token("=")]
@@ -187,9 +187,11 @@ pub enum TokenKind {
     #[token(";")]
     Semicolon,
 
+    /// May represent a bitwise and operator.
     #[regex("&")]
     Ampersand,
 
+    /// May represent the second operator in a ternary expression (`condition ? value_if_true : value_if_false`).
     #[token(":")]
     Colon,
 
@@ -220,8 +222,10 @@ pub enum TokenKind {
     LCurly,
     #[token("}")]
     RCurly,
+    /// May represent a less than relational operator.
     #[token("<")]
     LAngle,
+    /// May represent a greater than relational operator.
     #[token(">")]
     RAngle,
     //#[token("[")]
@@ -233,19 +237,47 @@ pub enum TokenKind {
     #[token(")")]
     RParen,
 
-    // -- Math symbols --
-    #[token("/")]
-    Slash,
-    #[token("*")]
-    Asterisk,
+    // -- Operators --
     #[token("+")]
     Plus,
     #[token("-")]
     Minus,
+    #[token("*")]
+    Asterisk,
+    #[token("/")]
+    Slash,
     #[token("%")]
     Modulo,
+    // note: bitwise and may be represented by Ampersand
     #[token("|")]
     BitwiseOr,
+    #[token("^")]
+    BitwiseXor,
+    #[token("~")]
+    BitwiseNot,
+    #[token("<<")]
+    BitwiseShl,
+    #[token(">>")]
+    BitwiseShr,
+    #[token("&&")]
+    LogicalAnd,
+    #[token("||")]
+    LogicalOr,
+    #[token("!")]
+    LogicalNot,
+    // note: relational less than is LAngle
+    // note: relational greater than is RAngle
+    #[token("<=")]
+    RelationalLtEq,
+    #[token(">=")]
+    RelationalGtEq,
+    #[token("==")]
+    RelationalEq,
+    #[token("!=")]
+    RelationalNeq,
+    /// Represents the first operator in a ternary expression (`condition ? value_if_true : value_if_false`).
+    #[token("?")]
+    QuestionMark,
 }
 
 impl TokenKind {
@@ -277,12 +309,24 @@ impl TokenKind {
             TokenKind::RAngle => ">",
             TokenKind::LParen => "(",
             TokenKind::RParen => ")",
-            TokenKind::Slash => "/",
-            TokenKind::Asterisk => "*",
             TokenKind::Plus => "+",
             TokenKind::Minus => "-",
+            TokenKind::Asterisk => "*",
+            TokenKind::Slash => "/",
             TokenKind::Modulo => "%",
             TokenKind::BitwiseOr => "|",
+            TokenKind::BitwiseNot => "~",
+            TokenKind::BitwiseShl => "<<",
+            TokenKind::BitwiseShr => ">>",
+            TokenKind::BitwiseXor => "^",
+            TokenKind::LogicalAnd => "&&",
+            TokenKind::LogicalOr => "||",
+            TokenKind::LogicalNot => "!",
+            TokenKind::RelationalLtEq => "<=",
+            TokenKind::RelationalGtEq => ">=",
+            TokenKind::RelationalEq => "==",
+            TokenKind::RelationalNeq => "!=",
+            TokenKind::QuestionMark => "?",
             _ => return None,
         })
     }
@@ -317,6 +361,28 @@ impl TokenKind {
                 | TokenKind::IncludeDirective
                 | TokenKind::ErrorDirective
         )
+    }
+
+    /// Returns a preprocessor directive's name, if applicable.
+    #[must_use]
+    pub fn preprocessor_directive_name(self) -> Option<&'static str> {
+        Some(match self {
+            TokenKind::IfDirective => "if",
+            TokenKind::IfdefDirective => "ifdef",
+            TokenKind::IfndefDirective => "ifndef",
+            TokenKind::ElifDirective => "elif",
+            TokenKind::ElifdefDirective => "elifdef",
+            TokenKind::ElifndefDirective => "elifndef",
+            TokenKind::ElseDirective => "else",
+            TokenKind::EndifDirective => "endif",
+
+            TokenKind::PragmaDirective => "pragma",
+            TokenKind::DefineDirective => "define",
+            TokenKind::UndefDirective => "undef",
+            TokenKind::IncludeDirective => "include",
+            TokenKind::ErrorDirective => "error",
+            _ => return None,
+        })
     }
 }
 
@@ -365,12 +431,24 @@ impl core::fmt::Display for TokenKind {
             TokenKind::RAngle => "‘>’",
             TokenKind::LParen => "‘(’",
             TokenKind::RParen => "‘)’",
-            TokenKind::Slash => "‘/’",
-            TokenKind::Asterisk => "‘*’",
             TokenKind::Plus => "‘+’",
             TokenKind::Minus => "‘-’",
+            TokenKind::Asterisk => "‘*’",
+            TokenKind::Slash => "‘/’",
             TokenKind::Modulo => "‘%’",
             TokenKind::BitwiseOr => "‘|’",
+            TokenKind::BitwiseNot => "‘~’",
+            TokenKind::BitwiseShl => "‘<<’",
+            TokenKind::BitwiseShr => "‘>>’",
+            TokenKind::BitwiseXor => "‘^‘",
+            TokenKind::LogicalAnd => "‘&&‘",
+            TokenKind::LogicalOr => "‘||‘",
+            TokenKind::LogicalNot => "‘!‘",
+            TokenKind::RelationalLtEq => "‘<=‘",
+            TokenKind::RelationalGtEq => "‘>=‘",
+            TokenKind::RelationalEq => "‘==‘",
+            TokenKind::RelationalNeq => "‘!=‘",
+            TokenKind::QuestionMark => "‘?‘",
         })
     }
 }

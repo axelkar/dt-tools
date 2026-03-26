@@ -585,7 +585,7 @@ impl MacroDefinition {
 ///
 /// Also known as `trmap`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct TextRangeMap {
+pub struct TextRangeMap {
     /// Map ranges in the output from `from_offset` to the next `TextRangeMap`'s `from_offset`
     pub from_offset: usize,
     /// Where to map it to
@@ -602,7 +602,7 @@ impl TextRangeMap {
 // TODO: concat into stringification?
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum TextRangeMapTo {
+pub enum TextRangeMapTo {
     /// Forward to argument at index
     ArgumentIdx(usize),
     /// Forward to offset in macro definition string
@@ -647,8 +647,11 @@ impl TextRangeMapTo {
 //
 // https://gcc.gnu.org/onlinedocs/gcc-3.4.3/cpp/Argument-Prescan.html
 
-/// Evaluates a macro, directly from its AST.
-pub(crate) fn evaluate_macro(
+/// Substitutes a macro, directly from its AST.
+///
+/// If the `ast` parameter is set to `None`, it is assumed that it's an object-like macro and not
+/// a function-like macro.
+pub fn substitute_macro_ast(
     ast: Option<&ast::MacroInvocation>,
     def: &MacroDefinition,
 ) -> Result<(Vec<TextRangeMap>, String), String> {

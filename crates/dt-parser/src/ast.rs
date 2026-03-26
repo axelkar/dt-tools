@@ -115,6 +115,30 @@ pub trait AstNodeOrToken: Sized {
     fn syntax(&self) -> RedItemRef<'_>;
 }
 
+macro_rules! define_ast_node {
+    ($($(#[$attr:meta])* $name:ident : $kind:ident);+ $(;)?) => {
+        $(
+            $(#[$attr])*
+            #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+            pub struct $name {
+                syntax: Arc<RedNode>
+            }
+
+            impl AstNode for $name {
+                fn cast(syntax: Arc<RedNode>) -> Option<Self> {
+                    match syntax.green.kind {
+                        NodeKind::$kind => Some(Self { syntax }),
+                        _ => None,
+                    }
+                }
+                fn syntax(&self) -> &Arc<RedNode> {
+                    &self.syntax
+                }
+            }
+        )+
+    }
+}
+
 // TODO: Better to just make if-let chains? I think this breaks rust-analyzer
 /// Matches an [`Arc<RedNode>`][RedNode] against an `ast` type.
 ///
@@ -182,26 +206,15 @@ pub trait HasMacroInvocation: AstNode {
     }
 }
 
-/// A [Devicetree][1] source file, which contains [`ToplevelItem`]s.
-///
-/// Kind: [`NodeKind::SourceFile`]
-///
-/// [1]: https://devicetree.org
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SourceFile {
-    syntax: Arc<RedNode>,
+define_ast_node! {
+    /// A [Devicetree][1] source file, which contains [`ToplevelItem`]s.
+    ///
+    /// Kind: [`NodeKind::SourceFile`]
+    ///
+    /// [1]: https://devicetree.org
+    SourceFile: SourceFile;
 }
-impl AstNode for SourceFile {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::SourceFile => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
-    }
-}
+
 impl SourceFile {
     /// Returns an iterator over direct [`ToplevelItem`] children.
     pub fn items(&self) -> impl Iterator<Item = ToplevelItem> + '_ {
@@ -235,48 +248,23 @@ impl SourceFile {
     }
 }
 
-/// A [DTS directive][1].
-///
-/// Kind: [`NodeKind::Directive`]
-///
-/// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#compiler-directives
-// TODO: directive parameters
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Directive {
-    syntax: Arc<RedNode>,
-}
-impl AstNode for Directive {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::Directive => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
-    }
+define_ast_node! {
+    /// A [DTS directive][1].
+    ///
+    /// Kind: [`NodeKind::Directive`]
+    ///
+    /// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#compiler-directives
+    // TODO: directive parameters
+    Directive: Directive;
+
+    /// A [Devicetree property][1].
+    ///
+    /// Kind: [`NodeKind::DtProperty`]
+    ///
+    /// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
+    DtProperty: DtProperty;
 }
 
-/// A [Devicetree property][1].
-///
-/// Kind: [`NodeKind::DtProperty`]
-///
-/// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DtProperty {
-    syntax: Arc<RedNode>,
-}
-impl AstNode for DtProperty {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::DtProperty => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
-    }
-}
 impl DtProperty {
     /// Returns an iterator over direct [`PropValue`] children.
     ///
@@ -408,23 +396,11 @@ impl AstNodeOrToken for Cell {
     }
 }
 
-/// A phandle item as a [`Cell`] or a [`PropValue`].
-///
-/// Kind: [`NodeKind::DtPhandle`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DtPhandle {
-    syntax: Arc<RedNode>,
-}
-impl AstNode for DtPhandle {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::DtPhandle => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
-    }
+define_ast_node! {
+    /// A phandle item as a [`Cell`] or a [`PropValue`].
+    ///
+    /// Kind: [`NodeKind::DtPhandle`]
+    DtPhandle: DtPhandle;
 }
 impl DtPhandle {
     /// Returns true if this is a path phandle and not a label phandle.
@@ -447,23 +423,11 @@ impl DtPhandle {
 impl HasName for DtPhandle {}
 impl HasMacroInvocation for DtPhandle {}
 
-/// A macro invocation in an expression in a [`Cell`], as a [`PropValue`] or in a name position.
-///
-/// Kind: [`NodeKind::MacroInvocation`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MacroInvocation {
-    syntax: Arc<RedNode>,
-}
-impl AstNode for MacroInvocation {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::MacroInvocation => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
-    }
+define_ast_node! {
+    /// A macro invocation in an expression in a [`Cell`], as a [`PropValue`] or in a name position.
+    ///
+    /// Kind: [`NodeKind::MacroInvocation`]
+    MacroInvocation: MacroInvocation;
 }
 impl MacroInvocation {
     /// Returns the macro's identifier
@@ -489,23 +453,11 @@ impl MacroInvocation {
     }
 }
 
-/// A Devicetree cell list.
-///
-/// Kind: [`NodeKind::DtCellList`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DtCellList {
-    syntax: Arc<RedNode>,
-}
-impl AstNode for DtCellList {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::DtCellList => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
-    }
+define_ast_node! {
+    /// A Devicetree cell list.
+    ///
+    /// Kind: [`NodeKind::DtCellList`]
+    DtCellList: DtCellList;
 }
 impl DtCellList {
     // TODO: add example
@@ -514,25 +466,13 @@ impl DtCellList {
     }
 }
 
-/// A [Devicetree node][1].
-///
-/// Kind: [`NodeKind::DtNode`]
-///
-/// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DtNode {
-    syntax: Arc<RedNode>,
-}
-impl AstNode for DtNode {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::DtNode => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
-    }
+define_ast_node! {
+    /// A [Devicetree node][1].
+    ///
+    /// Kind: [`NodeKind::DtNode`]
+    ///
+    /// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
+    DtNode: DtNode;
 }
 impl DtNode {
     /// Returns an iterator over direct [`DtProperty`] children.
@@ -811,52 +751,35 @@ impl NameRef {
     }
 }
 
-/// A [`DtNode`]'s optional label
-///
-/// Kind: [`NodeKind::DtLabel`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DtLabel {
-    syntax: Arc<RedNode>,
-}
-impl AstNode for DtLabel {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::DtLabel => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
-    }
+define_ast_node! {
+    /// A [`DtNode`]'s optional label
+    ///
+    /// Kind: [`NodeKind::DtLabel`]
+    DtLabel: DtLabel;
 }
 impl HasName for DtLabel {}
 impl HasMacroInvocation for DtLabel {}
 
-/// A preprocessor conditional.
-///
-/// Kind: [`NodeKind::PreprocessorConditional`]
-///
-/// # Example
-///
-/// ```dts
-/// #if 1
-/// #else
-/// #endif
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PreprocessorConditional {
-    syntax: Arc<RedNode>,
+define_ast_node! {
+    /// An expression in a [`Cell`] that should evaluate to an integer. Often parenthesized.
+    ///
+    /// Kind: [`NodeKind::DtExpr`]
+    DtExpr: DtExpr;
 }
-impl AstNode for PreprocessorConditional {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::PreprocessorConditional => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
-    }
+
+define_ast_node! {
+    /// A preprocessor conditional.
+    ///
+    /// Kind: [`NodeKind::PreprocessorConditional`]
+    ///
+    /// # Example
+    ///
+    /// ```dts
+    /// #if 1
+    /// #else
+    /// #endif
+    /// ```
+    PreprocessorConditional: PreprocessorConditional;
 }
 impl PreprocessorConditional {
     /// Returns an iterator over the branches in the preprocessor conditional.
@@ -877,22 +800,16 @@ impl PreprocessorConditional {
     }
 }
 
-/// Branch of a preprocessor conditional.
-///
-/// Kind: [`NodeKind::PreprocessorBranch`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PreprocessorBranch {
-    syntax: Arc<RedNode>,
+define_ast_node! {
+    /// Branch of a preprocessor conditional.
+    ///
+    /// Kind: [`NodeKind::PreprocessorBranch`]
+    PreprocessorBranch: PreprocessorBranch;
 }
-impl AstNode for PreprocessorBranch {
-    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
-        match syntax.green.kind {
-            NodeKind::PreprocessorBranch => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedNode> {
-        &self.syntax
+impl PreprocessorBranch {
+    /// Returns an iterator over direct [`ToplevelItem`] children.
+    pub fn items(&self) -> impl Iterator<Item = ToplevelItem> + '_ {
+        self.syntax.children().filter_map(ToplevelItem::cast)
     }
 }
 
@@ -957,6 +874,66 @@ impl AstNodeOrToken for ToplevelItem {
             Self::Directive(it) => TreeItem::Node(&it.syntax),
             Self::PreprocessorConditional(it) => TreeItem::Node(&it.syntax),
             Self::PreprocessorDirective(it) => TreeItem::Token(&it.syntax),
+        }
+    }
+}
+
+define_ast_node! {
+    PrefixExpr: PrefixExpr;
+    ParenExpr: ParenExpr;
+    LiteralExpr: LiteralExpr;
+    /// Note: watch out for the ternary expression. It should have three [`Expr`] children.
+    InfixExpr: InfixExpr;
+}
+
+impl ParenExpr {
+    /// Returns the contained [`Expr`].
+    pub fn expr(&self) -> Option<Expr> {
+        self.syntax.child_nodes().find_map(Expr::cast)
+    }
+}
+impl PrefixExpr {
+    /// Returns the token kind of the operation.
+    pub fn op(&self) -> Option<TokenKind> {
+        self.syntax
+            .green
+            .child_tokens()
+            .map(|tok| tok.kind)
+            .find(|kind| !kind.is_trivia())
+    }
+    /// Returns the contained [`Expr`].
+    pub fn expr(&self) -> Option<Expr> {
+        self.syntax.child_nodes().find_map(Expr::cast)
+    }
+}
+
+/// Expression that should evaluate to an integer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
+pub enum Expr {
+    PrefixExpr(PrefixExpr),
+    ParenExpr(ParenExpr),
+    MacroInvocation(MacroInvocation),
+    LiteralExpr(LiteralExpr),
+    InfixExpr(InfixExpr),
+}
+impl AstNode for Expr {
+    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
+        match syntax.green.kind {
+            NodeKind::PrefixExpr => Some(Self::PrefixExpr(PrefixExpr { syntax })),
+            NodeKind::ParenExpr => Some(Self::ParenExpr(ParenExpr { syntax })),
+            NodeKind::MacroInvocation => Some(Self::MacroInvocation(MacroInvocation { syntax })),
+            NodeKind::LiteralExpr => Some(Self::LiteralExpr(LiteralExpr { syntax })),
+            NodeKind::InfixExpr => Some(Self::InfixExpr(InfixExpr { syntax })),
+            _ => None,
+        }
+    }
+    fn syntax(&self) -> &Arc<RedNode> {
+        match self {
+            Self::PrefixExpr(it) => it.syntax(),
+            Self::ParenExpr(it) => it.syntax(),
+            Self::MacroInvocation(it) => it.syntax(),
+            Self::LiteralExpr(it) => it.syntax(),
+            Self::InfixExpr(it) => it.syntax(),
         }
     }
 }

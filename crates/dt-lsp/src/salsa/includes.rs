@@ -32,10 +32,7 @@ pub struct DocumentDeps<'db> {
 ///
 /// Will panic if [`IncludeDirs`] hasn't been defined.
 #[salsa::tracked]
-pub fn document_deps(
-    db: &dyn BaseDb,
-    file: super::file::File,
-) -> Result<DocumentDeps<'_>, ()> {
+pub fn document_deps(db: &dyn BaseDb, file: super::file::File) -> Result<DocumentDeps<'_>, ()> {
     let mut included_files = Vec::new();
     let mut diagnostics = Vec::new();
 

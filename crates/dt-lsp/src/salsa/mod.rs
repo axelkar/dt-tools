@@ -4,10 +4,11 @@ use dt_analyzer::new::outline::AnalyzedToplevel;
 use dt_diagnostic::{Diagnostic, MultiSpan, Severity};
 
 pub mod db;
+mod expr_eval;
 pub mod file;
 pub mod includes;
-pub mod preprocessor;
 pub mod macros;
+pub mod preprocessor;
 
 #[salsa::tracked]
 pub struct Parse<'db> {

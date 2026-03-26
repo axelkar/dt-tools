@@ -1,10 +1,12 @@
-//! Preprocessor macros, conditionals and includes are all tied very much together. Here, almost everything gets evaluated.
+//! Preprocessor macros, conditionals and includes are all tied very much together, which means they must be evaluated in order.
 
 use std::borrow::Cow;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use dt_analyzer::macros::MacroDefinition;
-use dt_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
+use dt_diagnostic::{
+    Diagnostic, DiagnosticCollector, MultiSpan, OffsetDiagnosticCollector, Severity,
+};
 use dt_parser::{
     ast::{self, AstNode, AstNodeOrToken, AstToken},
     lexer::TokenKind,
@@ -55,7 +57,6 @@ pub enum PpEvalFileResultToplevelInner<'db> {
         name: String,
     },
     Undef,
-    // TODO: conditionals should be evaluated, right?
     Conditional,
 }
 
@@ -73,7 +74,11 @@ pub fn possible_include_paths_utf8<'a, P: AsRef<Utf8Path>>(
         .map(move |base_path| base_path.join(path))
 }
 
-fn get_pp_dir_args<'inp>(input: &'inp str, directive: &str) -> &'inp str {
+fn get_pp_directive_args(
+    input: &str,
+    directive: &str,
+    text_range: TextRange,
+) -> (String, TextRange) {
     debug_assert!(input.starts_with('#'));
     let s = input
         .get(1..)
@@ -85,12 +90,42 @@ fn get_pp_dir_args<'inp>(input: &'inp str, directive: &str) -> &'inp str {
         .get(directive.len()..)
         .expect("lexer safe")
         .trim_start_matches([' ', '\t']);
-    s
+
+    let start_offset = subslice_offset(input, s).unwrap();
+
+    // Newlines are escaped outside comments. Let's undo that to make the text parseable.
+    let s = s.replace("\\\n", " \n");
+
+    debug_assert_eq!(text_range.start + input.len(), text_range.end);
+    (
+        s,
+        TextRange {
+            start: text_range.start + start_offset,
+            end: text_range.end,
+        },
+    )
 }
 #[cfg(test)]
 #[test]
-fn test_pp_dir_args() {
-    assert_eq!(get_pp_dir_args("# foo bar baz", "foo"), "bar baz");
+fn test_get_pp_directive_args() {
+    let input = "#include a";
+    assert_eq!(
+        get_pp_directive_args(
+            input,
+            "include",
+            TextRange {
+                start: 0,
+                end: input.len()
+            }
+        ),
+        (
+            "a".to_owned(),
+            TextRange {
+                start: "#include ".len(),
+                end: input.len()
+            }
+        )
+    );
 }
 
 fn subslice_offset(this: &str, inner: &str) -> Option<usize> {
@@ -111,22 +146,22 @@ fn test_subslice_offset() {
     assert_eq!(subslice_offset(s, &s[1..]), Some(1));
 }
 
-fn get_pp_dir_arg_string<'inp>(
-    input: &'inp str,
+fn get_pp_directive_arg_string(
+    input: &str,
     directive: &str,
     text_range: TextRange,
     diag: &impl DiagnosticCollector,
-) -> Option<(bool, &'inp str)> {
-    // TODO: real evaluation and macro substitution
+) -> Option<(bool, String)> {
+    // TODO: macro substitution in #include
 
-    let args = get_pp_dir_args(input, directive);
+    let (args, args_text_range) = get_pp_directive_args(input, directive, text_range);
 
     let (relative, split) = match args.as_bytes().first() {
         Some(b'<') => (false, args.get(1..).expect("safe").split_once('>')),
         Some(b'"') => (true, args.get(1..).expect("safe").split_once('"')),
         None => {
             diag.emit(Diagnostic::new(
-                text_range,
+                args_text_range,
                 Cow::Borrowed("Expected an argument"),
                 Severity::Error,
             ));
@@ -134,7 +169,7 @@ fn get_pp_dir_arg_string<'inp>(
         }
         _ => {
             diag.emit(Diagnostic::new(
-                text_range,
+                args_text_range,
                 Cow::Borrowed("Unexpected character in argument, expected `\"` or `<`."),
                 Severity::Error,
             ));
@@ -144,7 +179,7 @@ fn get_pp_dir_arg_string<'inp>(
 
     let Some((s, rest)) = split else {
         diag.emit(Diagnostic::new(
-            text_range,
+            args_text_range,
             Cow::Borrowed("Missing string terminator"),
             Severity::Error,
         ));
@@ -152,22 +187,93 @@ fn get_pp_dir_arg_string<'inp>(
     };
 
     if !rest.is_empty() {
-        if let Some(offset) = subslice_offset(input, rest) {
+        diag.emit(Diagnostic::new(
+            args_text_range,
+            Cow::Borrowed("Unexpected characters after include string"),
+            Severity::Warn,
+        ));
+    }
+
+    Some((relative, s.to_owned()))
+}
+
+fn pp_cond_directive_eval(
+    db: &dyn BaseDb,
+    env: &mut MacroEnvMut,
+    directive: &ast::PreprocessorDirective,
+    diag: &impl DiagnosticCollector,
+) -> Option<bool> {
+    let input = directive.syntax().text();
+    let Some(directive_name) = directive.syntax().green.kind.preprocessor_directive_name() else {
+        diag.emit(Diagnostic::new(
+            directive.syntax().text_range(),
+            Cow::Borrowed("Internal compiler error: preprocessor directive should have a name"),
+            Severity::Warn,
+        ));
+        return None;
+    };
+
+    let text_range = directive.syntax().text_range();
+    let (args, args_text_range) = get_pp_directive_args(input, directive_name, text_range);
+
+    if directive_name == "else" {
+        if !args.is_empty() {
             diag.emit(Diagnostic::new(
-                TextRange {
-                    start: text_range.start + offset,
-                    end: text_range.end,
-                },
-                Cow::Borrowed("Unexpected characters after include string"),
+                args_text_range,
+                Cow::Borrowed("Extra arguments to `#else`"),
                 Severity::Warn,
             ));
         }
+
+        // Else branch is always enabled
+        return Some(true);
+    }
+    // TODO: ifdef, elifdef -> if defined, elif defined
+
+    let parse = dt_parser::parser::Entrypoint::PreprocessorConditional.parse(&args);
+
+    let offset_diag = OffsetDiagnosticCollector {
+        inner: diag,
+        offset: args_text_range.start - text_range.start,
+    };
+
+    if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
+        let earliest_lex_error_range = parse.lex_errors.first().map(|e| e.text_range);
+        for lex_error in &parse.lex_errors {
+            offset_diag.emit(Diagnostic::new(
+                lex_error.text_range,
+                format!("{} [lex error]", lex_error.inner).into(),
+                Severity::Error,
+            ));
+        }
+
+        for error in &parse.errors {
+            if let Some(earliest_lex_error_range) = earliest_lex_error_range {
+                if error.primary_span.start >= earliest_lex_error_range.start {
+                    break;
+                }
+            }
+
+            let mut diagnostic = Diagnostic {
+                span: MultiSpan {
+                    primary_spans: vec![error.primary_span],
+                    span_labels: error.span_labels.clone(),
+                },
+                msg: error.message.clone(),
+                severity: Severity::Error,
+            };
+            super::tag_diagnostic(&mut diagnostic, "dt-tools(syntax-error)");
+            offset_diag.emit(diagnostic);
+        }
+        return None;
     }
 
-    Some((relative, s))
-}
+    let expr_ast = parse.red_node().child_nodes().find_map(ast::Expr::cast)?;
 
-// TODO: not only toplevel.. :(
+    let val = super::expr_eval::eval(db, env, expr_ast, diag)?;
+
+    Some(val != 0)
+}
 
 /// Walks toplevel items of a file, evaluating necessary preprocessor directives and macros.
 ///
@@ -205,182 +311,17 @@ pub fn preprocessor_eval_file<'db>(
     // Path of the current file's parent directory.
     let parent_path = file.path(db).parent()?;
     let include_dirs = IncludeDirs::get(db).include_dirs(db);
-    let files = db.get_files();
 
     for item in file_ast.items() {
-        let text_range = item.syntax().text_range();
-
-        let inner = match item {
-            ast::ToplevelItem::Node(dt_node) => {
-                // TODO: recurse!!!
-                continue;
-            }
-            ast::ToplevelItem::Directive(dir) => {
-                let mut iter = dir.syntax().child_tokens();
-
-                // Skip until DtIncludeDirective is found, continue items if it isn't found
-                if !iter.any(|tok| tok.green.kind == TokenKind::DtIncludeDirective) {
-                    continue;
-                }
-
-                let Some(string_tok) = iter.find(|tok| tok.green.kind == TokenKind::String) else {
-                    continue;
-                };
-                let path = match dt_analyzer::string::interpret_escaped_string(string_tok.text()) {
-                    Ok(path) => path,
-                    Err(err) => {
-                        diag.emit(Diagnostic::new(
-                            string_tok.text_range(),
-                            Cow::Owned(err.to_string()),
-                            Severity::Error,
-                        ));
-                        continue;
-                    }
-                };
-
-                let Some(file) =
-                    possible_include_paths_utf8(true, &path, parent_path, include_dirs)
-                        .map(|path| files.get_file(db, &path))
-                        .find(|file| file.is_readable_file(db))
-                else {
-                    diag.emit(Diagnostic::new(
-                        text_range,
-                        Cow::Borrowed("Couldn't find file to include"),
-                        Severity::Error,
-                    ));
-                    continue;
-                };
-
-                let result =
-                    preprocessor_eval_file(db, file, Some(env.into_salsa_tracked_struct(db)))
-                        .expect("The file should exist, its existence is confirmed above");
-
-                env = MacroEnvMut {
-                    parent: Some(result.env_after(db)),
-                    own_map: FxHashMap::default(),
-                };
-
-                PpEvalFileResultToplevelInner::Include {
-                    is_preprocessor: false,
-                    file,
-                    result,
-                }
-            }
-            // TODO: conditionals!
-            ast::ToplevelItem::PreprocessorConditional(preprocessor_conditional) => continue,
-            ast::ToplevelItem::PreprocessorDirective(dir) => match dir.kind() {
-                TokenKind::PragmaDirective => {
-                    // TODO: implement #pragma
-
-                    diag.emit(Diagnostic::new(
-                        text_range,
-                        Cow::Borrowed("`#pragma` is unimplemented"),
-                        Severity::Error,
-                    ));
-                    continue;
-                }
-                TokenKind::DefineDirective => {
-                    let parsed = match MacroDefinition::parse(dir.syntax().text()) {
-                        Ok(inc) => inc,
-                        Err(err) => {
-                            diag.emit(Diagnostic::new(
-                                if let Some(local_range) = err.text_range() {
-                                    local_range.offset(dir.syntax().text_offset)
-                                } else {
-                                    dir.syntax().text_range()
-                                },
-                                Cow::Owned(err.to_string()),
-                                Severity::Error,
-                            ));
-                            continue;
-                        }
-                    };
-
-                    let name_clone = parsed.name.clone();
-                    env.own_map.insert(parsed.name.clone(), Some(parsed));
-
-                    PpEvalFileResultToplevelInner::MacroDefinition { name: name_clone }
-                }
-                TokenKind::UndefDirective => {
-                    let input = dir.syntax().text();
-                    let args = get_pp_dir_args(input, "undef");
-
-                    if args.contains(' ') {
-                        diag.emit(Diagnostic::new(
-                            dir.syntax().text_range(),
-                            Cow::Borrowed("Arguments to `#undef` should be just a macro name"),
-                            Severity::Error,
-                        ));
-                        continue;
-                    }
-
-                    env.own_map.insert(args.to_owned(), None);
-
-                    PpEvalFileResultToplevelInner::Undef
-                }
-                TokenKind::IncludeDirective => {
-                    // TODO: real evaluation and macro substitution
-                    let input = dir.syntax().text();
-
-                    let Some((relative, path)) =
-                        get_pp_dir_arg_string(input, "include", text_range, &diag)
-                    else {
-                        continue;
-                    };
-
-                    let Some(file) =
-                        possible_include_paths_utf8(relative, path, parent_path, include_dirs)
-                            .map(|path| files.get_file(db, &path))
-                            .find(|file| file.is_readable_file(db))
-                    else {
-                        diag.emit(Diagnostic::new(
-                            text_range,
-                            Cow::Borrowed("Couldn't find file to include"),
-                            Severity::Error,
-                        ));
-                        continue;
-                    };
-
-                    let result =
-                        preprocessor_eval_file(db, file, Some(env.into_salsa_tracked_struct(db)))
-                            .expect("The file should exist, its existence is confirmed above");
-
-                    env = MacroEnvMut {
-                        parent: Some(result.env_after(db)),
-                        own_map: FxHashMap::default(),
-                    };
-
-                    PpEvalFileResultToplevelInner::Include {
-                        is_preprocessor: true,
-                        file,
-                        result,
-                    }
-                }
-                TokenKind::ErrorDirective => {
-                    let input = dir.syntax().text();
-                    let args = get_pp_dir_args(input, "error");
-
-                    diag.emit(Diagnostic::new(
-                        text_range,
-                        // TODO: remove debug thing
-                        Cow::Owned(format!(
-                            "`#error`: {args}, defined({args})={}",
-                            env.get_macro(db, args).is_some()
-                        )),
-                        Severity::Error,
-                    ));
-                    continue;
-                }
-                _ => continue,
-            },
-        };
-
-        toplevels.push(PpEvalFileResultToplevel::new(
+        handle_toplevel_item(
             db,
-            text_range,
-            inner,
-            env.to_salsa_tracked_struct_mut(db),
-        ));
+            &mut env,
+            &diag,
+            parent_path,
+            include_dirs,
+            &mut toplevels,
+            item,
+        );
     }
 
     super::tag_diagnostics(
@@ -394,4 +335,209 @@ pub fn preprocessor_eval_file<'db>(
         env.into_salsa_tracked_struct(db),
         diagnostics,
     ))
+}
+
+fn handle_toplevel_item<'db>(
+    db: &'db dyn BaseDb,
+    env: &mut MacroEnvMut<'db>,
+    diag: &impl DiagnosticCollector,
+    parent_path: &Utf8Path,
+    include_dirs: &[Utf8PathBuf],
+    toplevels: &mut Vec<PpEvalFileResultToplevel<'db>>,
+    item: ast::ToplevelItem,
+) {
+    let files = db.get_files();
+
+    let text_range = item.syntax().text_range();
+
+    let inner: PpEvalFileResultToplevelInner = match item {
+        ast::ToplevelItem::Node(dt_node) => {
+            // TODO: recurse!!!
+            return;
+        }
+        ast::ToplevelItem::Directive(dir) => {
+            let mut iter = dir.syntax().child_tokens();
+
+            // Skip until DtIncludeDirective is found, continue items if it isn't found
+            if !iter.any(|tok| tok.green.kind == TokenKind::DtIncludeDirective) {
+                return;
+            }
+
+            let Some(string_tok) = iter.find(|tok| tok.green.kind == TokenKind::String) else {
+                return;
+            };
+
+            let path = match dt_analyzer::string::interpret_escaped_string(string_tok.text()) {
+                Ok(path) => path,
+                Err(err) => {
+                    diag.emit(Diagnostic::new(
+                        string_tok.text_range(),
+                        Cow::Owned(err.to_string()),
+                        Severity::Error,
+                    ));
+                    return;
+                }
+            };
+
+            let Some(file) = possible_include_paths_utf8(true, &path, parent_path, include_dirs)
+                .map(|path| files.get_file(db, &path))
+                .find(|file| file.is_readable_file(db))
+            else {
+                diag.emit(Diagnostic::new(
+                    text_range,
+                    Cow::Borrowed("Couldn't find file to include"),
+                    Severity::Error,
+                ));
+                return;
+            };
+
+            let result = preprocessor_eval_file(
+                db,
+                file,
+                Some(std::mem::take(env).into_salsa_tracked_struct(db)),
+            )
+            .expect("The file should exist, its existence is confirmed above");
+
+            *env = MacroEnvMut {
+                parent: Some(result.env_after(db)),
+                own_map: FxHashMap::default(),
+            };
+
+            PpEvalFileResultToplevelInner::Include {
+                is_preprocessor: false,
+                file,
+                result,
+            }
+        }
+        ast::ToplevelItem::PreprocessorConditional(preprocessor_conditional) => {
+            let Some((_dir, branch)) =
+                preprocessor_conditional.branches().find(|(dir, _branch)| {
+                    pp_cond_directive_eval(db, env, dir, &diag).is_some_and(|val| val)
+                })
+            else {
+                return;
+            };
+
+            for item in branch.items() {
+                handle_toplevel_item(db, env, diag, parent_path, include_dirs, toplevels, item);
+            }
+            return;
+        }
+        ast::ToplevelItem::PreprocessorDirective(dir) => match dir.kind() {
+            TokenKind::PragmaDirective => {
+                // TODO: implement #pragma
+
+                diag.emit(Diagnostic::new(
+                    text_range,
+                    Cow::Borrowed("`#pragma` is unimplemented"),
+                    Severity::Error,
+                ));
+                return;
+            }
+            TokenKind::DefineDirective => {
+                let parsed = match MacroDefinition::parse(dir.syntax().text()) {
+                    Ok(inc) => inc,
+                    Err(err) => {
+                        diag.emit(Diagnostic::new(
+                            if let Some(local_range) = err.text_range() {
+                                local_range.offset(dir.syntax().text_offset)
+                            } else {
+                                dir.syntax().text_range()
+                            },
+                            Cow::Owned(err.to_string()),
+                            Severity::Error,
+                        ));
+                        return;
+                    }
+                };
+
+                let name_clone = parsed.name.clone();
+                env.own_map.insert(parsed.name.clone(), Some(parsed));
+
+                PpEvalFileResultToplevelInner::MacroDefinition { name: name_clone }
+            }
+            TokenKind::UndefDirective => {
+                let input = dir.syntax().text();
+                let (args, args_text_range) =
+                    get_pp_directive_args(input, "undef", dir.syntax().text_range());
+
+                if args.contains(' ') {
+                    diag.emit(Diagnostic::new(
+                        args_text_range,
+                        Cow::Borrowed("Arguments to `#undef` should be just a macro name"),
+                        Severity::Error,
+                    ));
+                    return;
+                }
+
+                env.own_map.insert(args, None);
+
+                PpEvalFileResultToplevelInner::Undef
+            }
+            TokenKind::IncludeDirective => {
+                // TODO: real evaluation and macro substitution
+                let input = dir.syntax().text();
+
+                let Some((relative, path)) =
+                    get_pp_directive_arg_string(input, "include", text_range, &diag)
+                else {
+                    return;
+                };
+
+                let Some(file) =
+                    possible_include_paths_utf8(relative, &path, parent_path, include_dirs)
+                        .map(|path| files.get_file(db, &path))
+                        .find(|file| file.is_readable_file(db))
+                else {
+                    diag.emit(Diagnostic::new(
+                        text_range,
+                        Cow::Borrowed("Couldn't find file to include"),
+                        Severity::Error,
+                    ));
+                    return;
+                };
+
+                let result = preprocessor_eval_file(
+                    db,
+                    file,
+                    Some(std::mem::take(env).into_salsa_tracked_struct(db)),
+                )
+                .expect("The file should exist, its existence is confirmed above");
+
+                *env = MacroEnvMut {
+                    parent: Some(result.env_after(db)),
+                    own_map: FxHashMap::default(),
+                };
+
+                PpEvalFileResultToplevelInner::Include {
+                    is_preprocessor: true,
+                    file,
+                    result,
+                }
+            }
+            TokenKind::ErrorDirective => {
+                let input = dir.syntax().text();
+                let (args, _args_text_range) =
+                    get_pp_directive_args(input, "error", dir.syntax().text_range());
+
+                diag.emit(Diagnostic::new(
+                    text_range,
+                    // TODO: remove debug thing
+                    Cow::Owned(format!(
+                        "`#error`: {args}, eval({args})={}",
+                        env.get_macro(db, &args).is_some()
+                    )),
+                    Severity::Error,
+                ));
+                return;
+            }
+            _ => return,
+        },
+    };
+    toplevels.push(PpEvalFileResultToplevel::new(
+        db,
+        text_range,
+        inner,
+        env.to_salsa_tracked_struct_mut(db),
+    ));
 }
