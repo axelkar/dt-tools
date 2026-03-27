@@ -1,11 +1,10 @@
-use std::path::PathBuf;
-
+use camino::Utf8PathBuf;
 use serde::Deserialize;
 
 /// Workspace configuration using environment variables
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct EnvConfig {
-    pub include_paths: Option<Vec<PathBuf>>,
+    pub include_dirs: Option<Vec<Utf8PathBuf>>,
 }
 
 impl EnvConfig {
@@ -23,12 +22,12 @@ mod tests {
     fn parse() {
         assert_eq!(
             envy::from_iter::<_, EnvConfig>([(
-                "INCLUDE_PATHS".to_owned(),
+                "INCLUDE_DIRS".to_owned(),
                 "linux,linux-old".to_owned()
             )])
             .unwrap(),
             EnvConfig {
-                include_paths: Some(vec!["linux".into(), "linux-old".into()])
+                include_dirs: Some(vec!["linux".into(), "linux-old".into()])
             }
         );
     }

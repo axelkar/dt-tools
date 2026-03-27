@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use camino::Utf8PathBuf;
 use clap::{
     builder::{
         styling::{AnsiColor, Style},
@@ -78,18 +79,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .init();
 
-    let cwd = Path::new(".").canonicalize()?;
-    let (toml_config, workspace_dir) = match Workspace::find_workspace_dir(&cwd) {
-        WorkspacePathFindResult::TomlConfig {
-            toml_file_path,
-            workspace_dir,
-        } => (Some(TomlConfig::load(&toml_file_path)), workspace_dir),
-        WorkspacePathFindResult::LinuxMarker { workspace_dir }
-        | WorkspacePathFindResult::Fallback { workspace_dir } => (None, workspace_dir),
+    let cwd = Utf8PathBuf::from_path_buf(Path::new(".").canonicalize()?)
+        .map_err(|_| "Current directory should be UTF-8")?;
+    let res = dt_workspace::Workspace::find_workspace_dir(&cwd);
+    let workspace_dir = res.workspace_dir();
+
+    let toml_config = match &res {
+        WorkspacePathFindResult::TomlConfig { toml_file_path, .. } => {
+            Some(TomlConfig::load(toml_file_path))
+        }
+        WorkspacePathFindResult::LinuxMarker { .. } => {
+            Some(Ok(dt_workspace::linux_default_config(workspace_dir)))
+        }
+        WorkspacePathFindResult::Fallback { .. } => None,
     };
 
     let _workspace = dbg!(Workspace {
-        config: CombinedConfig::merge(
+        config: CombinedConfig::merge_cli(
             Some(cli.config),
             Some(EnvConfig::from_env()?),
             toml_config.transpose()?,

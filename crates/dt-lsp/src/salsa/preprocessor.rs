@@ -385,7 +385,9 @@ fn handle_toplevel_item<'db>(
             else {
                 diag.emit(Diagnostic::new(
                     text_range,
-                    Cow::Borrowed("Couldn't find file to include"),
+                    Cow::Owned(format!(
+                        "Couldn't find file to include from include_dirs={include_dirs:?}"
+                    )),
                     Severity::Error,
                 ));
                 return;
@@ -491,7 +493,9 @@ fn handle_toplevel_item<'db>(
                 else {
                     diag.emit(Diagnostic::new(
                         text_range,
-                        Cow::Borrowed("Couldn't find file to include"),
+                        Cow::Owned(format!(
+                            "Couldn't find file to include from include_dirs={include_dirs:?}"
+                        )),
                         Severity::Error,
                     ));
                     return;

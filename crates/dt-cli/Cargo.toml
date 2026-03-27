@@ -21,6 +21,7 @@ dt-analyzer.workspace = true
 dt-workspace = { workspace = true, features = ["cli"] }
 codespan-reporting.workspace = true
 dt-diagnostic = { workspace = true, features = ["codespan-reporting"] }
+camino.workspace = true
 
 [lints]
 workspace = true

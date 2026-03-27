@@ -1,5 +1,9 @@
 use ::salsa::Setter;
 use camino::{Utf8Path, Utf8PathBuf};
+use dt_workspace::config::env_config::EnvConfig;
+use dt_workspace::config::toml_config::TomlConfig;
+use dt_workspace::config::CombinedConfig;
+use dt_workspace::WorkspacePathFindResult;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::{net::TcpListener, sync::Mutex};
 use tower_lsp_server::ls_types::{
@@ -16,10 +20,12 @@ use tracing_subscriber::EnvFilter;
 use triomphe::Arc;
 
 use crate::capabilities::ResolvedClientCapabilities;
+use crate::err_report::Report;
 use crate::lsp_utils::{path_to_uri, uri_to_path};
 use crate::salsa::db::{BaseDatabase, BaseDb};
 
 mod capabilities;
+mod err_report;
 mod handlers;
 mod lsp_utils;
 pub mod salsa;
@@ -45,6 +51,7 @@ pub struct Session {
     resolved_client_capabilities: parking_lot::Mutex<Arc<ResolvedClientCapabilities>>,
 
     workspace_folders: Mutex<Vec<WorkspaceFolder>>,
+    dt_workspace: parking_lot::Mutex<Option<dt_workspace::Workspace>>,
     /// The file where evaluation will start from
     ///
     /// Files not (recursively) included in this file must not be analyzed
@@ -70,6 +77,71 @@ impl Session {
         if let Some(mut open_doc) = self.open_docs.get_mut(path) {
             open_doc.version = version;
         }
+    }
+    async fn update_workspace(&self) {
+        let folders = self.workspace_folders.lock().await;
+        // TODO: actually support multiple workspace folders
+        let folder = folders.first();
+        let dt_workspace = folder.and_then(|folder| {
+            let path = uri_to_path(&folder.uri).expect("Invalid document URI");
+            let res = dt_workspace::Workspace::find_workspace_dir(&path);
+            let workspace_dir = res.workspace_dir();
+
+            let toml_config = match &res {
+                WorkspacePathFindResult::TomlConfig { toml_file_path, .. } => {
+                    Some(TomlConfig::load(toml_file_path))
+                }
+                WorkspacePathFindResult::LinuxMarker { .. } => {
+                    Some(Ok(dt_workspace::linux_default_config(workspace_dir)))
+                }
+                WorkspacePathFindResult::Fallback { .. } => None,
+            };
+
+            let toml_config = match toml_config {
+                Some(Err(err)) => {
+                    tracing::error!(
+                        "Failed to parse TOML config from LSP workspace path {path:?}: {}",
+                        Report::new(err),
+                    );
+                    return None;
+                }
+                Some(Ok(toml_config)) => Some(toml_config),
+                None => None,
+            };
+
+            Some(dt_workspace::Workspace {
+                config: CombinedConfig::merge_no_cli(
+                    EnvConfig::from_env()
+                        .inspect_err(|err| {
+                            tracing::warn!(
+                                "Failed to parse workspace config from environment: {}",
+                                Report::new(err),
+                            );
+                        })
+                        .ok(),
+                    toml_config,
+                ),
+                path: workspace_dir.to_path_buf(),
+            })
+        });
+        info!(?dt_workspace, "Updated workspace");
+
+        let db = &mut *self.db.lock();
+
+        // TODO: recommend these if there is an include error
+        // Linux kernel DTC include dirs:
+        // - include (for #define's in header files)
+        // - scripts/dtc/include-prefixes
+
+        crate::salsa::includes::IncludeDirs::new(
+            db,
+            dt_workspace
+                .as_ref()
+                .map(|dt_workspace| dt_workspace.config.include_dirs.clone())
+                .unwrap_or_default(),
+        );
+
+        *self.dt_workspace.lock() = dt_workspace;
     }
 }
 
@@ -100,6 +172,7 @@ impl LanguageServer for Backend {
         if let Some(workspace_folders) = params.workspace_folders {
             tracing::info!("Workspace folders: {workspace_folders:?}");
             *self.session.workspace_folders.lock().await = workspace_folders;
+            self.session.update_workspace().await;
         } else {
             tracing::info!("Connected in single-file mode");
         }
@@ -246,13 +319,17 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
-        // TODO: recompute includes etc.
-        let mut folders = self.session.workspace_folders.lock().await;
-        for removed in params.event.removed {
-            let pos = folders.iter().position(|x| *x == removed).unwrap();
-            folders.swap_remove(pos);
+        {
+            let mut folders = self.session.workspace_folders.lock().await;
+            for removed in params.event.removed {
+                let pos = folders.iter().position(|x| *x == removed).unwrap();
+                folders.swap_remove(pos);
+            }
+            folders.extend_from_slice(&params.event.added);
         }
-        folders.extend_from_slice(&params.event.added);
+        self.session.update_workspace().await;
+
+        // TODO: recompute includes etc.
     }
 }
 
@@ -300,25 +377,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             open_docs: FxDashMap::default(),
             resolved_client_capabilities: parking_lot::Mutex::default(),
             workspace_folders: Mutex::new(Vec::new()),
+            dt_workspace: parking_lot::Mutex::default(),
             main_file: parking_lot::Mutex::new(None),
-            db: parking_lot::Mutex::new({
-                let db = BaseDatabase::default();
-
-                // TODO: make configurable, use dt-workspace
-                // Linux kernel DTC include path:
-                // - include (for #define's in header files)
-                // - scripts/dtc/include-prefixes
-                crate::salsa::includes::IncludeDirs::new(
-                    &db,
-                    vec![
-                        Utf8PathBuf::from("/home/axel/dev/mainlining/linux/include"),
-                        Utf8PathBuf::from(
-                            "/home/axel/dev/mainlining/linux/scripts/dtc/include-prefixes",
-                        ),
-                    ],
-                );
-                db
-            }),
+            db: parking_lot::Mutex::new(BaseDatabase::default()),
         }),
     });
 

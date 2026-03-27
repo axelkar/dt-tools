@@ -31,6 +31,7 @@ rustc-hash.workspace = true
 dt-diagnostic = { workspace = true, features = ["parking_lot"] }
 salsa.workspace = true
 camino.workspace = true
+dt-workspace.workspace = true
 
 [lints]
 workspace = true

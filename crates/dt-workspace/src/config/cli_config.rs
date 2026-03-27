@@ -1,13 +1,13 @@
-use std::path::PathBuf;
-
+use camino::Utf8PathBuf;
 use clap::Parser;
 
 /// Command-line interface (CLI) workspace configuration
-#[derive(Debug, PartialEq, Parser)]
+#[derive(Clone, Debug, PartialEq, Parser)]
 pub struct CliConfig {
-    /// List of comma-separated paths to search for C macros
-    #[arg(short = 'I', long, value_delimiter = ',')]
-    pub include_paths: Option<Vec<PathBuf>>,
+    /// List of search paths for `#include` directives.
+    // In the manner of GCC: https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html
+    #[arg(short = 'I', long = "include-directory")]
+    pub include_dirs: Option<Vec<Utf8PathBuf>>,
 }
 
 #[cfg(test)]
@@ -17,9 +17,9 @@ mod tests {
     #[test]
     fn parse() {
         assert_eq!(
-            CliConfig::parse_from(["dt-tools", "-I", "linux,linux-old"]),
+            CliConfig::parse_from(["dt-tools", "-I", "a,b", "-I", "c"]),
             CliConfig {
-                include_paths: Some(vec!["linux".into(), "linux-old".into()]),
+                include_dirs: Some(vec!["a,b".into(), "c".into()]),
             }
         );
     }

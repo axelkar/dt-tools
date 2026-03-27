@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-
+use camino::Utf8PathBuf;
 #[cfg(feature = "cli")]
 use cli_config::CliConfig;
 use env_config::EnvConfig;
@@ -11,18 +10,8 @@ pub mod env_config;
 pub mod toml_config;
 
 /// Helper macro for getting a field from structs.
-///
-/// First argument must be `cli,` or `@without_cli`. The former automatically removes itself when the `cli` feature is not enabled.
 macro_rules! config_field {
-  ($cli:ident, $($rest:ident),+; $field:ident) => {
-    {
-        #[cfg(feature = "cli")]
-        { config_field!(@without_cli $cli, $($rest),+; $field) }
-        #[cfg(not(feature = "cli"))]
-        { config_field!(@without_cli $($rest),+; $field) }
-    }
-  };
-  (@without_cli $start:ident$(, $fallback:ident)*; $field:ident) => {
+  ($start:ident$(, $fallback:ident)*; $field:ident) => {
       $start.and_then(|value| value.$field)
         $(
         .or_else(|| $fallback.and_then(|value| value.$field))
@@ -37,19 +26,28 @@ macro_rules! config_field {
 /// - [`TomlConfig`]
 #[derive(Debug, Default, PartialEq)]
 pub struct CombinedConfig {
-    include_paths: Vec<PathBuf>,
+    pub include_dirs: Vec<Utf8PathBuf>,
 }
 
 impl CombinedConfig {
-    /// Merges [`CliConfig`] (if `cli` feature is enabled), [`EnvConfig`] and [`TomlConfig`]
+    /// Merges [`EnvConfig`] and [`TomlConfig`]
     #[must_use]
-    pub fn merge(
-        #[cfg(feature = "cli")] cli: Option<CliConfig>,
+    pub fn merge_no_cli(env: Option<EnvConfig>, toml: Option<TomlConfig>) -> Self {
+        Self {
+            include_dirs: config_field!(env, toml; include_dirs).unwrap_or_default(),
+        }
+    }
+
+    /// Merges [`CliConfig`], [`EnvConfig`] and [`TomlConfig`]
+    #[must_use]
+    #[cfg(feature = "cli")]
+    pub fn merge_cli(
+        cli: Option<CliConfig>,
         env: Option<EnvConfig>,
         toml: Option<TomlConfig>,
     ) -> Self {
         Self {
-            include_paths: config_field!(cli, env, toml; include_paths).unwrap_or_default(),
+            include_dirs: config_field!(cli, env, toml; include_dirs).unwrap_or_default(),
         }
     }
 }
@@ -62,25 +60,28 @@ mod tests {
     fn merge() {
         #[cfg(feature = "cli")]
         let cli = CliConfig {
-            include_paths: Some(vec!["cli".into()]),
+            include_dirs: Some(vec!["cli".into()]),
         };
         let env = EnvConfig {
-            include_paths: Some(vec!["env".into()]),
+            include_dirs: Some(vec!["env".into()]),
         };
         let toml = TomlConfig {
-            include_paths: Some(vec!["toml".into()]),
+            include_dirs: Some(vec!["toml".into()]),
         };
+
+        #[cfg(feature = "cli")]
+        assert_eq!(
+            CombinedConfig {
+                include_dirs: vec!["cli".into()],
+            },
+            CombinedConfig::merge_cli(Some(cli), Some(env.clone()), Some(toml.clone()),)
+        );
 
         assert_eq!(
             CombinedConfig {
-                include_paths: vec![if cfg!(feature = "cli") { "cli" } else { "env" }.into()],
+                include_dirs: vec!["env".into()],
             },
-            CombinedConfig::merge(
-                #[cfg(feature = "cli")]
-                Some(cli),
-                Some(env),
-                Some(toml),
-            )
+            CombinedConfig::merge_no_cli(Some(env), Some(toml),)
         );
     }
 }
