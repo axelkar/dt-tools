@@ -1,5 +1,5 @@
 [package]
-name = "dt-tools-binding-matcher"
+name = "dt-tools-binding"
 edition = "2024"
 description = "Devicetree binding matcher"
 keywords = ["devicetree"]

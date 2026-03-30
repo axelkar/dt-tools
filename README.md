@@ -33,7 +33,7 @@
 * [`dt-tools-analyzer`](crates/dt-tools-analyzer) is a source file analyzer
 * [`dt-tools-lsp`](crates/dt-tools-lsp) is a [language server](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide#why-language-server). It basically adds IDE support.
 * [`dt-tools-lint`](crates/dt-tools-lint) is a linter for DTS
-* [`dt-tools-binding-matcher`](crates/dt-tools-binding-matcher) is a crate supposed to validate and match devicetree binding YAMLs
+* [`dt-tools-binding`](crates/dt-tools-binding) is a crate supposed to validate and match devicetree binding YAMLs
 
 ## Screenshots
 

@@ -369,7 +369,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dt-tools-binding-matcher"
+name = "dt-tools-binding"
 version = "0.1.0"
 dependencies = [
  "anyhow",
