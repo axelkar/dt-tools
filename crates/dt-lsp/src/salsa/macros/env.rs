@@ -32,12 +32,32 @@ impl<'db> MacroEnv<'db> {
     /// referring to [`MacroEnv::own_map`].
     #[salsa::tracked(returns(as_ref))]
     pub fn get_macro(self, db: &'db dyn BaseDb, name: MacroName<'db>) -> Option<MacroDefinition> {
+        tracing::debug!(
+            name = name.text(db),
+            self = ?self.0,
+            self.parent = ?self.parent(db).map(|parent| parent.0),
+            "get_macro",
+        );
+
         self.own_map(db)
             .get(name.text(db))
             .map(Option::as_ref)
             .or_else(|| Some(self.parent(db)?.get_macro(db, name)))
             .flatten() // flattening at the end makes sure own_map can override None
             .cloned()
+    }
+
+    pub fn clone_to_map(
+        self,
+        db: &'db dyn BaseDb,
+        map: &mut FxHashMap<String, Option<MacroDefinition>>,
+    ) {
+        if let Some(parent) = self.parent(db) {
+            parent.clone_to_map(db, map);
+        }
+        for (k, v) in self.own_map(db) {
+            map.insert(k.clone(), v.clone());
+        }
     }
 }
 
@@ -62,6 +82,20 @@ impl<'db> MacroEnvMut<'db> {
             })
             .flatten() // flattening at the end makes sure own_map can override None
     }
+
+    pub fn flatten_ancestors(&mut self, db: &'db dyn BaseDb) {
+        let mut map = FxHashMap::default();
+
+        if let Some(parent) = std::mem::take(&mut self.parent) {
+            parent.clone_to_map(db, &mut map);
+        }
+
+        for (k, v) in std::mem::take(&mut self.own_map) {
+            map.insert(k.clone(), v.clone());
+        }
+        self.own_map = map;
+    }
+
     pub fn into_salsa_tracked_struct(self, db: &'db dyn BaseDb) -> MacroEnv<'db> {
         if let (true, Some(parent)) = (self.own_map.is_empty(), self.parent) {
             parent

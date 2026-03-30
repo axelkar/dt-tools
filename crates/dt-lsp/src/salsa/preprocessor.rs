@@ -204,22 +204,41 @@ fn pp_cond_directive_eval(
     diag: &impl DiagnosticCollector,
 ) -> Option<bool> {
     let input = directive.syntax().text();
+
+    let directive_text_range = directive.syntax().text_range();
+
     let Some(directive_name) = directive.syntax().green.kind.preprocessor_directive_name() else {
         diag.emit(Diagnostic::new(
-            directive.syntax().text_range(),
+            directive_text_range,
             Cow::Borrowed("Internal compiler error: preprocessor directive should have a name"),
             Severity::Warn,
         ));
         return None;
     };
 
-    let text_range = directive.syntax().text_range();
-    let (args, args_text_range) = get_pp_directive_args(input, directive_name, text_range);
+    let (mut condition, mut condition_text_range) =
+        get_pp_directive_args(input, directive_name, directive_text_range);
 
-    if directive_name == "else" {
-        if !args.is_empty() {
+    if directive_name == "ifdef" || directive_name == "elifdef" {
+        // TODO: add a test for this and preprocessor directives in general
+        condition.insert_str(0, "defined(");
+        condition.push(')');
+
+        // TODO: proper trmaps...
+        condition_text_range =
+            condition_text_range.offset_wrapping_signed(-"defined(".len().cast_signed());
+        condition_text_range.end -= 1;
+    } else if directive_name == "ifndef" || directive_name == "elifndef" {
+        condition.insert_str(0, "!defined(");
+        condition.push(')');
+
+        condition_text_range =
+            condition_text_range.offset_wrapping_signed(-"!defined(".len().cast_signed());
+        condition_text_range.end -= 1;
+    } else if directive_name == "else" {
+        if !condition.is_empty() {
             diag.emit(Diagnostic::new(
-                args_text_range,
+                condition_text_range,
                 Cow::Borrowed("Extra arguments to `#else`"),
                 Severity::Warn,
             ));
@@ -228,13 +247,12 @@ fn pp_cond_directive_eval(
         // Else branch is always enabled
         return Some(true);
     }
-    // TODO: ifdef, elifdef -> if defined, elif defined
 
-    let parse = dt_parser::parser::Entrypoint::PreprocessorConditional.parse(&args);
+    let parse = dt_parser::parser::Entrypoint::PreprocessorConditional.parse(&condition);
 
     let offset_diag = OffsetDiagnosticCollector {
         inner: diag,
-        offset: args_text_range.start - text_range.start,
+        offset: condition_text_range.start,
     };
 
     if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
@@ -270,7 +288,7 @@ fn pp_cond_directive_eval(
 
     let expr_ast = parse.red_node().child_nodes().find_map(ast::Expr::cast)?;
 
-    let val = super::expr_eval::eval(db, env, expr_ast, diag)?;
+    let val = super::expr_eval::eval(db, env, expr_ast, &offset_diag)?;
 
     Some(val != 0)
 }
@@ -285,7 +303,7 @@ fn pp_cond_directive_eval(
 /// - For each toplevel item:
 ///   - Update the macro environment as appropriate.
 ///   - On an include, recurse `eval_outline` because we have to know the next macro env.
-///   - On a conditional, evalute it and choose the correct branch, if any.
+///   - On a conditional, evalute the conditions of the branches and choose the correct branch, if any.
 ///
 /// # Panics
 ///
@@ -442,9 +460,9 @@ fn handle_toplevel_item<'db>(
                     Err(err) => {
                         diag.emit(Diagnostic::new(
                             if let Some(local_range) = err.text_range() {
-                                local_range.offset(dir.syntax().text_offset)
+                                local_range.offset(text_range.start)
                             } else {
-                                dir.syntax().text_range()
+                                text_range
                             },
                             Cow::Owned(err.to_string()),
                             Severity::Error,
@@ -454,14 +472,14 @@ fn handle_toplevel_item<'db>(
                 };
 
                 let name_clone = parsed.name.clone();
+                let existed = env.get_macro(db, &name_clone).is_some();
                 env.own_map.insert(parsed.name.clone(), Some(parsed));
 
                 PpEvalFileResultToplevelInner::MacroDefinition { name: name_clone }
             }
             TokenKind::UndefDirective => {
                 let input = dir.syntax().text();
-                let (args, args_text_range) =
-                    get_pp_directive_args(input, "undef", dir.syntax().text_range());
+                let (args, args_text_range) = get_pp_directive_args(input, "undef", text_range);
 
                 if args.contains(' ') {
                     diag.emit(Diagnostic::new(
@@ -521,14 +539,13 @@ fn handle_toplevel_item<'db>(
             }
             TokenKind::ErrorDirective => {
                 let input = dir.syntax().text();
-                let (args, _args_text_range) =
-                    get_pp_directive_args(input, "error", dir.syntax().text_range());
+                let (args, _args_text_range) = get_pp_directive_args(input, "error", text_range);
 
                 diag.emit(Diagnostic::new(
                     text_range,
                     // TODO: remove debug thing
                     Cow::Owned(format!(
-                        "`#error`: {args}, eval({args})={}",
+                        "`#error`: {args:?}, defined {args:?}={}",
                         env.get_macro(db, &args).is_some()
                     )),
                     Severity::Error,
@@ -538,6 +555,10 @@ fn handle_toplevel_item<'db>(
             _ => return,
         },
     };
+
+    // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
+    env.flatten_ancestors(db);
+
     toplevels.push(PpEvalFileResultToplevel::new(
         db,
         text_range,

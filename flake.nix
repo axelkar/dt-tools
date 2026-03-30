@@ -106,7 +106,7 @@
           vscode = pkgs.mkShellNoCC {
             strictDeps = true;
             nativeBuildInputs = with pkgs; [
-              nodejs_23
+              nodejs_latest
               vscodium
               vsce
             ];

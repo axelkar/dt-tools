@@ -135,6 +135,7 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
         }
     }
 
+    /*
     if let Some(outline) = outline(db, file) {
         diagnostics.extend_from_slice(outline.diagnostics(db));
     }
@@ -142,6 +143,7 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
     if let Ok(document_deps) = includes::document_deps(db, file) {
         diagnostics.extend_from_slice(document_deps.diagnostics(db));
     }
+    */
 
     if let Some(result) = preprocessor::preprocessor_eval_file(db, file, None) {
         diagnostics.extend_from_slice(result.diagnostics(db));

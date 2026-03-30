@@ -10,6 +10,7 @@ use dt_parser::{
 use crate::salsa::{db::BaseDb, macros::env::MacroEnvMut};
 
 // TODO: in preprocessor conditional mode, undefined macros that are used as object-like macros evaluate to zero as defined here: https://gcc.gnu.org/onlinedocs/cpp/If.html
+#[expect(clippy::too_many_lines, reason = "It's pretty enough as is")]
 pub fn eval(
     db: &dyn BaseDb,
     env: &MacroEnvMut,
@@ -24,7 +25,14 @@ pub fn eval(
                 TokenKind::Minus => Some(-value()?),
                 TokenKind::Ident => {
                     // `defined` operator
-                    let macro_ast = prefix_expr.expr()?.into_macro_invocation().ok()?;
+                    let inner_expr = prefix_expr.expr()?;
+
+                    let inner_expr = match inner_expr.into_paren_expr() {
+                        Ok(paren_expr) => paren_expr.expr()?,
+                        Err(inner_expr) => inner_expr,
+                    };
+
+                    let macro_ast = inner_expr.into_macro_invocation().ok()?;
                     let name: &str = &macro_ast.green_ident()?.text;
                     Some(i64::from(env.get_macro(db, name).is_some()))
                 }
@@ -215,6 +223,8 @@ mod tests {
 
         assert_eq!(check("defined FOO", &env), Some(1));
         assert_eq!(check("defined BAR", &env), Some(0));
+        assert_eq!(check("defined(FOO)", &env), Some(1));
+        assert_eq!(check("defined(BAR)", &env), Some(0));
     }
 
     #[test]

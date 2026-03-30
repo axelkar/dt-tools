@@ -181,7 +181,6 @@ fn dt_expr(p: &mut Parser) {
     m.complete(p, NodeKind::DtExpr);
 }
 
-
 /// Parses a Devicetree cell list.
 ///
 /// - Form: `<1>`.

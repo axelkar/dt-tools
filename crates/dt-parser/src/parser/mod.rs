@@ -6,7 +6,11 @@
 use std::sync::Arc;
 
 use crate::{
-    TextRange, ast, cst::{GreenNode, NodeKind, RedNode}, grammar, lexer::TokenKind
+    ast,
+    cst::{GreenNode, NodeKind, RedNode},
+    grammar,
+    lexer::TokenKind,
+    TextRange,
 };
 
 use self::event::Event;

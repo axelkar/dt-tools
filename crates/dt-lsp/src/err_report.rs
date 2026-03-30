@@ -135,17 +135,15 @@ impl<E: std::error::Error> fmt::Display for Report<E> {
             write!(f, "\n\nCaused by:")?;
             if let [source] = sources[..] {
                 // Only a single source
-                write!(
-                    f,
-                    "\n{}",
-                    IndentAdapterFmt::new(source).indent("      ")
-                )?;
+                write!(f, "\n{}", IndentAdapterFmt::new(source).indent("      "))?;
             } else {
                 for (i, source) in sources.iter().enumerate() {
                     write!(
                         f,
                         "\n{i:>4}: {}",
-                        IndentAdapterFmt::new(source).indent_first_line(false).indent("      ")
+                        IndentAdapterFmt::new(source)
+                            .indent_first_line(false)
+                            .indent("      ")
                     )?;
                 }
             }
