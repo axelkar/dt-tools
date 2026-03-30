@@ -1,26 +1,27 @@
 # Devicetree tools
 
-> 🚧 NOTE: `dt-tools` is very experimental and is currently ongoing a rewrite!
+> 🚧 NOTE: `dt-tools` is experimental
 
 `dt-tools` helps you to write, debug and read Devicetree files more efficiently with advanced tooling!
 
 * [IDE integration](#lsp)
 * Linting
 * Devicetree binding validation
-* Preprocessor features, with some restrictions:
-  + Macros can only substitute references (`&`-syntax), name definitions (of nodes, properties and labels), property values, cell values and items (like nodes and properties)
-  + Macros must be parseable on their own. This is not allowed:
+* Preprocessor features with some restrictions:
+  + Macros can only substitute references (`&`-syntax), name definitions of nodes, properties and labels, property values, cell values, nodes and properties.
+  + Macros must be individually parseable. This is not allowed:
     ```dts
     #define SPECIAL_SYNTAX ) + (
+    #define SUM1 1 + 2
+    #define SUM2 (1 + 2)
 
     / {
       prop = (1 SPECIAL_SYNTAX 2);
+      equal = (SUM1 * 2), (SUM2 * 2); // The C preprocessor would not evaluate these to the same value
     };
     ```
-  + `#include` directives can only be used outside of nodes (note that this may change)
-  + Conditionals can only wrap nodoes, properties and other preprocessor directives
-    - 🚧 Currently fully unimplemented
-    - Can only check for definition, equality or ordering
+  + `#include` directives can only be used outside of nodes (🚧 note that this may change)
+  + Conditionals can only wrap nodes, properties and other preprocessor directives
 * Extensive unit and integration tests written in Rust
 * Possibly in the future:
   + Comparing DTS or DTB files
@@ -30,7 +31,7 @@
 
 * [`dt-parser`](crates/dt-parser) implements an error-resistant parser inspired by rust-analyzer
 * [`dt-analyzer`](crates/dt-analyzer) is a source file analyzer
-* [`dt-lsp`](crates/dt-lsp) is a [language server](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide#why-language-server) for devicetree
+* [`dt-lsp`](crates/dt-lsp) is a [language server](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide#why-language-server). It basically adds IDE support.
 * [`dt-lint`](crates/dt-lint) is a linter for DTS
 * [`dt-binding-matcher`](crates/dt-binding-matcher) is a crate supposed to validate and match devicetree binding YAMLs
 
