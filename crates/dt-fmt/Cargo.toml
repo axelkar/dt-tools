@@ -1,5 +1,5 @@
 [package]
-name = "dt-fmt"
+name = "dt-tools-fmt"
 edition = "2024"
 description = "Devicetree formatter"
 keywords = ["devicetree"]
@@ -13,7 +13,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-dt-parser.workspace = true
+dt-tools-parser.workspace = true
 
 [lints]
 workspace = true

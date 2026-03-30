@@ -3,11 +3,11 @@
 use std::borrow::Cow;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use dt_analyzer::macros::MacroDefinition;
-use dt_diagnostic::{
+use dt_tools_analyzer::macros::MacroDefinition;
+use dt_tools_diagnostic::{
     Diagnostic, DiagnosticCollector, MultiSpan, OffsetDiagnosticCollector, Severity,
 };
-use dt_parser::{
+use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken},
     lexer::TokenKind,
@@ -248,7 +248,7 @@ fn pp_cond_directive_eval(
         return Some(true);
     }
 
-    let parse = dt_parser::parser::Entrypoint::PreprocessorConditional.parse(&condition);
+    let parse = dt_tools_parser::parser::Entrypoint::PreprocessorConditional.parse(&condition);
 
     let offset_diag = OffsetDiagnosticCollector {
         inner: diag,
@@ -386,7 +386,8 @@ fn handle_toplevel_item<'db>(
                 return;
             };
 
-            let path = match dt_analyzer::string::interpret_escaped_string(string_tok.text()) {
+            let path = match dt_tools_analyzer::string::interpret_escaped_string(string_tok.text())
+            {
                 Ok(path) => path,
                 Err(err) => {
                     diag.emit(Diagnostic::new(

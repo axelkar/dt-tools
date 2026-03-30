@@ -3,7 +3,7 @@ use crate::{
     salsa::{db::BaseDb, includes::document_deps},
     uri_to_path,
 };
-use dt_parser::{
+use dt_tools_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
     lexer::TokenKind,
@@ -149,7 +149,7 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
                 kind: MarkupKind::Markdown,
                 value: markdown,
             }),
-            range: span.and_then(|span: &dt_parser::TextRange| {
+            range: span.and_then(|span: &dt_tools_parser::TextRange| {
                 // TODO: proper Span type with file IDs and more
                 Some(Range::new(
                     offset_to_position(span.start, rope)?,

@@ -1,4 +1,4 @@
-use dt_diagnostic::SpanLabel;
+use dt_tools_diagnostic::SpanLabel;
 use itertools::Itertools;
 use std::borrow::Cow;
 use tracing::debug;

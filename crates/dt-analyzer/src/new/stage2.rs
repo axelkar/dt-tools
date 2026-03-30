@@ -6,8 +6,8 @@
 
 use std::borrow::Cow;
 
-use dt_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, SpanLabel};
-use dt_parser::{
+use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, SpanLabel};
+use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken, HasMacroInvocation, HasName},
     match_ast,

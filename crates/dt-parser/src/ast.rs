@@ -5,12 +5,12 @@
 //! To get an AST item, use [`AstNode::cast()`] with a [`Arc<RedNode>`] as follows:
 //!
 //! ```
-//! use dt_parser::cst::RedNode;
-//! use dt_parser::ast::{self, AstNode as _};
+//! use dt_tools_parser::cst::RedNode;
+//! use dt_tools_parser::ast::{self, AstNode as _};
 //!
 //! let red_node: Arc<RedNode>;
 //! # use std::sync::Arc;
-//! # use dt_parser::{TextRange, cst::{GreenNode, GreenToken, GreenItem, NodeKind},
+//! # use dt_tools_parser::{TextRange, cst::{GreenNode, GreenToken, GreenItem, NodeKind},
 //! lexer::TokenKind};
 //! # let green_node = Arc::new(GreenNode {
 //! #     kind: NodeKind::DtNode,
@@ -18,19 +18,19 @@
 //! #     children: vec! [
 //! #         GreenItem::Token(Arc::new(GreenToken {
 //! #             kind: TokenKind::Name,
-//! #             text: dt_parser::cst::TokenText::Static("foo"),
+//! #             text: dt_tools_parser::cst::TokenText::Static("foo"),
 //! #         })),
 //! #         GreenItem::Token(Arc::new(GreenToken {
 //! #             kind: TokenKind::LCurly,
-//! #             text: dt_parser::cst::TokenText::Static("{"),
+//! #             text: dt_tools_parser::cst::TokenText::Static("{"),
 //! #         })),
 //! #         GreenItem::Token(Arc::new(GreenToken {
 //! #             kind: TokenKind::LCurly,
-//! #             text: dt_parser::cst::TokenText::Static("}"),
+//! #             text: dt_tools_parser::cst::TokenText::Static("}"),
 //! #         })),
 //! #         GreenItem::Token(Arc::new(GreenToken {
 //! #             kind: TokenKind::LCurly,
-//! #             text: dt_parser::cst::TokenText::Static(";"),
+//! #             text: dt_tools_parser::cst::TokenText::Static(";"),
 //! #         })),
 //! #     ]
 //! # });
@@ -38,7 +38,7 @@
 //! let ast = ast::DtNode::cast(red_node).unwrap();
 //!
 //! // Use Has- traits
-//! use dt_parser::ast::HasName;
+//! use dt_tools_parser::ast::HasName;
 //! assert!(ast.name().is_some())
 //! ```
 use std::borrow::Cow;
@@ -145,10 +145,10 @@ macro_rules! define_ast_node {
 /// # Example:
 ///
 /// ```
-/// # use dt_parser::{match_ast, ast, cst::RedNode};
+/// # use dt_tools_parser::{match_ast, ast, cst::RedNode};
 /// # use std::sync::Arc;
 /// let node: Arc<RedNode>;
-/// # use dt_parser::cst::{GreenNode, NodeKind};
+/// # use dt_tools_parser::cst::{GreenNode, NodeKind};
 /// # node = RedNode::new(Arc::new(GreenNode { kind: NodeKind::SourceFile, width: 0, children: Vec::new() }));
 /// # let _ =
 /// match_ast! {
@@ -271,8 +271,8 @@ impl DtProperty {
     /// # Example
     ///
     /// ```
-    /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst::RedNode;
+    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile};
+    /// use dt_tools_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { a = <1 2 3> <4>; };";
@@ -303,8 +303,8 @@ impl DtProperty {
     /// # Example
     ///
     /// ```
-    /// use dt_parser::ast::{DtNode, AstNode, SourceFile, HasName};
-    /// use dt_parser::cst::RedNode;
+    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile, HasName};
+    /// use dt_tools_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { my_prop@unit_address = <1>; };";
@@ -480,8 +480,8 @@ impl DtNode {
     /// # Example
     ///
     /// ```
-    /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst::RedNode;
+    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile};
+    /// use dt_tools_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { a = <0>; b; };";
@@ -503,8 +503,8 @@ impl DtNode {
     /// # Example
     ///
     /// ```
-    /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst::RedNode;
+    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile};
+    /// use dt_tools_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { a = <0>; b { c = <1>; }; d {}; };";
@@ -526,8 +526,8 @@ impl DtNode {
     /// # Example
     ///
     /// ```
-    /// use dt_parser::ast::{DtNode, AstNode, SourceFile, HasName};
-    /// use dt_parser::cst::RedNode;
+    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile, HasName};
+    /// use dt_tools_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { my_node@unit_address { foo = <1>; }; };";
@@ -553,8 +553,8 @@ impl DtNode {
     /// # Example
     ///
     /// ```
-    /// use dt_parser::ast::{DtNode, AstNode, SourceFile, HasName};
-    /// use dt_parser::cst::RedNode;
+    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile, HasName};
+    /// use dt_tools_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "/ { my_node@unit_address { foo = <1>; }; };";
@@ -594,8 +594,8 @@ impl DtNode {
     /// # Example
     ///
     /// ```
-    /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst::RedNode;
+    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile};
+    /// use dt_tools_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "&a { b { .. }; };";
@@ -628,8 +628,8 @@ impl DtNode {
     /// </div>
     ///
     /// ```
-    /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst::RedNode;
+    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile};
+    /// use dt_tools_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "&a { b { c { .. }; }; };";
@@ -651,8 +651,8 @@ impl DtNode {
     /// # Example
     ///
     /// ```
-    /// use dt_parser::ast::{DtNode, AstNode, SourceFile};
-    /// use dt_parser::cst::RedNode;
+    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile};
+    /// use dt_tools_parser::cst::RedNode;
     /// use std::sync::Arc;
     ///
     /// let src = "&a { b { c { d { .. }; }; }; };";
@@ -724,7 +724,7 @@ impl Name {
     }
 }
 
-// FIXME: dirty unimplemented hack for dt_lsp::hover
+// FIXME: dirty unimplemented hack for dt_tools_lsp::hover
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NameRef {
     syntax: Arc<RedNode>,

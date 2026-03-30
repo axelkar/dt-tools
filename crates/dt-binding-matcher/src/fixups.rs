@@ -13,7 +13,7 @@
 //!     items:
 //!       - const: "foo,bar"
 //! ```
-//! A similar fixup is applied when converting the raw [values](dt_analyzer::CustomValue) to JSON.
+//! A similar fixup is applied when converting the raw [values](dt_tools_analyzer::CustomValue) to JSON.
 
 use serde_yaml::{Mapping, Value};
 

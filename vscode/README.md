@@ -39,16 +39,16 @@ with the `Extensions: Install from VSIX` command within VS Code.
 
 ## Requirements
 
-By default the extension will look for `dt-lsp` in the PATH, but here's how you
+By default the extension will look for `dt-tools-lsp` in the PATH, but here's how you
 get the development version:
 
-1. Build `dt-lsp` to get its executable. Here's how you build and use the debug version.
+1. Build `dt-tools-lsp` to get its executable. Here's how you build and use the debug version.
    ```console
-   ~/dev/dt-tools $ cargo build -p dt-lsp
+   ~/dev/dt-tools $ cargo build -p dt-tools-lsp
    ```
 2. Make the extension find it by configuring the `Dt-tools-lsp › Server: Path`
    setting to the path of the executable, which may be for example
-   `/home/axel/dev/dt-tools/target/debug/dt-lsp`
+   `/home/axel/dev/dt-tools/target/debug/dt-tools-lsp`
 
 ## License
 

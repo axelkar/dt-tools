@@ -1,4 +1,4 @@
-use dt_analyzer::macros::MacroDefinition;
+use dt_tools_analyzer::macros::MacroDefinition;
 use rustc_hash::FxHashMap;
 
 use crate::salsa::db::BaseDb;

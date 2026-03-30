@@ -13,7 +13,7 @@ use clap::{
 };
 use tracing_subscriber::filter::LevelFilter;
 
-use dt_workspace::{
+use dt_tools_workspace::{
     Workspace, WorkspacePathFindResult,
     config::{
         CombinedConfig, cli_config::CliConfig, env_config::EnvConfig, toml_config::TomlConfig,
@@ -81,7 +81,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let cwd = Utf8PathBuf::from_path_buf(Path::new(".").canonicalize()?)
         .map_err(|_| "Current directory should be UTF-8")?;
-    let res = dt_workspace::Workspace::find_workspace_dir(&cwd);
+    let res = dt_tools_workspace::Workspace::find_workspace_dir(&cwd);
     let workspace_dir = res.workspace_dir();
 
     let toml_config = match &res {
@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(TomlConfig::load(toml_file_path))
         }
         WorkspacePathFindResult::LinuxMarker { .. } => {
-            Some(Ok(dt_workspace::linux_default_config(workspace_dir)))
+            Some(Ok(dt_tools_workspace::linux_default_config(workspace_dir)))
         }
         WorkspacePathFindResult::Fallback { .. } => None,
     };

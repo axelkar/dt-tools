@@ -1,4 +1,4 @@
-// This file showcases the many recoverable syntax errors dt-parser supports
+// This file showcases the many recoverable syntax errors dt-tools-parser supports
 /dts-v1/;
 
 #include

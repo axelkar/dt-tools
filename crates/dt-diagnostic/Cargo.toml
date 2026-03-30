@@ -1,5 +1,5 @@
 [package]
-name = "dt-diagnostic"
+name = "dt-tools-diagnostic"
 edition = "2024"
 description = "dt-tools diagnostic library"
 keywords = ["devicetree"]
@@ -18,7 +18,7 @@ codespan-reporting = { workspace = true, optional = true }
 [features]
 ## Enables implementation of DiagnosticCollector for parking_lot::Mutex<Vec<Diagnostic>>
 parking_lot = ["dep:parking_lot"]
-## Enables conversion from dt_diagnostic's diagnostic to codespan_reporting's diagnostic type
+## Enables conversion from dt_tools_diagnostic's diagnostic to codespan_reporting's diagnostic type
 codespan-reporting = ["dep:codespan-reporting"]
 
 [lints]

@@ -1,6 +1,6 @@
 //! Parses the file at argv 1 and prints the analyzed data
 
-use dt_analyzer::new::outline::AnalyzedToplevel;
+use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use owo_colors::{OwoColorize as _, colors::xterm::Gray};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Should have a path as an argument");
     let text = std::fs::read_to_string(&path)?;
 
-    let parse = dt_parser::parser::parse(&text);
+    let parse = dt_tools_parser::parser::parse(&text);
     eprintln!("{}", "Parsed!".green());
 
     if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut new_diagnostics = Vec::new();
     let diag = std::sync::Mutex::new(&mut new_diagnostics);
 
-    let outline = dt_analyzer::new::outline::analyze_file(&file, &text, &diag);
+    let outline = dt_tools_analyzer::new::outline::analyze_file(&file, &text, &diag);
     println!(
         "{}={:#?}",
         "macro defs".cyan(),
@@ -40,11 +40,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let includes = &[]; // TODO
-    let analyzed2 = dt_analyzer::new::stage2::compute(&outline, includes, &diag);
+    let analyzed2 = dt_tools_analyzer::new::stage2::compute(&outline, includes, &diag);
     println!("{}={:#?}", "analyzed2".cyan(), analyzed2);
 
     if !new_diagnostics.is_empty() {
-        dt_diagnostic::codespan_reporting::print_diagnostics_single_file(
+        dt_tools_diagnostic::codespan_reporting::print_diagnostics_single_file(
             &path,
             &text,
             new_diagnostics,

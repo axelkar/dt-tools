@@ -12,7 +12,7 @@ use crate::TextRange;
 /// # Example
 ///
 /// ```
-/// use dt_parser::lexer::{lex, TokenKind, LexError};
+/// use dt_tools_parser::lexer::{lex, TokenKind, LexError};
 /// let tokens = lex("example 1\"");
 ///
 /// assert_eq!(tokens[0].kind, Ok(TokenKind::Ident));
@@ -283,7 +283,7 @@ pub enum TokenKind {
 impl TokenKind {
     /// Returns the static text of the token kind, if applicable.
     /// ```
-    /// use dt_parser::lexer::TokenKind;
+    /// use dt_tools_parser::lexer::TokenKind;
     /// assert_eq!(TokenKind::Comma.static_text(), Some(","));
     /// assert_eq!(TokenKind::Ident.static_text(), None);
     /// ```

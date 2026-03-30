@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
-use dt_analyzer::new::outline::AnalyzedToplevel;
-use dt_diagnostic::{Diagnostic, Severity};
-use dt_parser::TextRange;
+use dt_tools_analyzer::new::outline::AnalyzedToplevel;
+use dt_tools_diagnostic::{Diagnostic, Severity};
+use dt_tools_parser::TextRange;
 
 use crate::salsa::db::BaseDb;
 

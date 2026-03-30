@@ -64,7 +64,7 @@ impl Iterator for InterpretEscapedString<'_> {
 /// # Example
 ///
 /// ```
-/// use dt_analyzer::string::{interpret_escaped_string, StringParseError};
+/// use dt_tools_analyzer::string::{interpret_escaped_string, StringParseError};
 ///
 /// assert_eq!(interpret_escaped_string(r#""\\a\a""#), Ok("\\a\x07".into()));
 /// assert_eq!(interpret_escaped_string(r#""\""#), Err(StringParseError::EscapeAtEndOfString));
@@ -90,7 +90,7 @@ pub fn interpret_escaped_string(s: &str) -> Result<String, StringParseError> {
 /// # Example
 ///
 /// ```
-/// use dt_analyzer::string::{interpret_escaped_char, StringParseError};
+/// use dt_tools_analyzer::string::{interpret_escaped_char, StringParseError};
 ///
 /// assert_eq!(interpret_escaped_char(r"'\a'"), Ok('\x07'));
 /// assert_eq!(interpret_escaped_char("'a'"), Ok('a'));

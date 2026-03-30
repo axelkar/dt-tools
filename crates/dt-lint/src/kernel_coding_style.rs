@@ -1,5 +1,5 @@
-use dt_diagnostic::Severity;
-use dt_parser::ast::{self, HasLabel as _};
+use dt_tools_diagnostic::Severity;
+use dt_tools_parser::ast::{self, HasLabel as _};
 
 use crate::{EarlyLintPass, LintId};
 

@@ -1,5 +1,5 @@
 [package]
-name = "dt-cli"
+name = "dt-tools-cli"
 edition = "2024"
 description = "Devicetree CLI"
 keywords = ["devicetree"]
@@ -15,12 +15,12 @@ license.workspace = true
 [dependencies]
 clap = { version = "4.5.4", features = ["derive", "cargo"] }
 tracing-subscriber.workspace = true
-dt-parser.workspace = true
-dt-lint.workspace = true
-dt-analyzer.workspace = true
-dt-workspace = { workspace = true, features = ["cli"] }
+dt-tools-parser.workspace = true
+dt-tools-lint.workspace = true
+dt-tools-analyzer.workspace = true
+dt-tools-workspace = { workspace = true, features = ["cli"] }
 codespan-reporting.workspace = true
-dt-diagnostic = { workspace = true, features = ["codespan-reporting"] }
+dt-tools-diagnostic = { workspace = true, features = ["codespan-reporting"] }
 camino.workspace = true
 
 [lints]

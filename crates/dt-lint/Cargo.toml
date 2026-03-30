@@ -1,5 +1,5 @@
 [package]
-name = "dt-lint"
+name = "dt-tools-lint"
 edition = "2024"
 description = "Devicetree linter"
 keywords = ["devicetree"]
@@ -13,8 +13,8 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-dt-parser.workspace = true
-dt-diagnostic.workspace = true
+dt-tools-parser.workspace = true
+dt-tools-diagnostic.workspace = true
 tracing.workspace = true
 
 [lints]

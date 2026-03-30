@@ -1,13 +1,13 @@
 //! # Devicetree analyzer
 //!
-//! A crate for analyzing [CST nodes](dt_parser::cst::RedNode) produced by [`dt_parser`] to property values.
+//! A crate for analyzing [CST nodes](dt_tools_parser::cst::RedNode) produced by [`dt_tools_parser`] to property values.
 //!
 //! # Example
 //!
 //! ```
 //! use std::collections::HashMap;
-//! use dt_analyzer::{analyze_cst, PropDefinition, Value};
-//! use dt_parser::{ast::{self, AstNode}, cst::RedNode};
+//! use dt_tools_analyzer::{analyze_cst, PropDefinition, Value};
+//! use dt_tools_parser::{ast::{self, AstNode}, cst::RedNode};
 //! use std::sync::Arc;
 //!
 //! let text = "
@@ -39,7 +39,7 @@
 
 use std::{borrow::Cow, collections::HashMap};
 
-use dt_parser::ast::{self, AstNode, AstToken as _, HasLabel as _, HasName as _};
+use dt_tools_parser::ast::{self, AstNode, AstToken as _, HasLabel as _, HasName as _};
 pub use prop::{
     CustomValue, CustomValueCellItem, DefinitionTree, DefinitionTreeNode, PhandleTarget,
     PropDefinition, Value, ValueFromAstError, analyze_node,
@@ -75,7 +75,7 @@ pub struct Label {
 ///
 /// See [crate root](crate).
 pub fn analyze_cst(file: &ast::SourceFile, src: &str) -> Option<FileDefinition> {
-    let root_node = file.nodes().find(dt_parser::ast::DtNode::is_root)?;
+    let root_node = file.nodes().find(dt_tools_parser::ast::DtNode::is_root)?;
     let extensions = file.nodes().filter(ast::DtNode::is_extension);
     // TODO: check includes for extension labels?
     let labels = {

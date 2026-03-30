@@ -1,5 +1,5 @@
 [package]
-name = "dt-binding-matcher"
+name = "dt-tools-binding-matcher"
 edition = "2024"
 description = "Devicetree binding matcher"
 keywords = ["devicetree"]
@@ -14,14 +14,14 @@ license.workspace = true
 [dependencies]
 serde_json.workspace = true
 serde_yaml.workspace = true
-dt-analyzer.workspace = true
+dt-tools-analyzer.workspace = true
 anyhow = { version = "1.0.71", features = ["backtrace"] }
 fluent-uri.workspace = true
 boon = "0.6.1"
 fs-err.workspace = true
 
 [dev-dependencies]
-dt-parser.workspace = true
+dt-tools-parser.workspace = true
 
 [lints]
 workspace = true

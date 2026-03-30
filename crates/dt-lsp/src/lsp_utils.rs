@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use camino::Utf8Path;
-use dt_parser::TextRange;
+use dt_tools_parser::TextRange;
 use fluent_uri::component::Scheme;
 use ropey::Rope;
 use tower_lsp_server::ls_types::{self, Position, Range, Uri};
@@ -54,10 +54,10 @@ pub fn path_to_uri(path: &Utf8Path) -> Option<Uri> {
     Uri::from_file_path(path)
 }
 
-/// Converts a [`dt_diagnostic::Diagnostic`] to one or more [`ls_types::Diagnostic`]s.
+/// Converts a [`dt_tools_diagnostic::Diagnostic`] to one or more [`ls_types::Diagnostic`]s.
 #[expect(clippy::ref_option, reason = "Fixes borrow checker issues")]
-pub fn dt_diagnostic_to_lsp<'a>(
-    diagnostic: &'a dt_diagnostic::Diagnostic,
+pub fn dt_tools_diagnostic_to_lsp<'a>(
+    diagnostic: &'a dt_tools_diagnostic::Diagnostic,
     rope: &'a Rope,
     source: &'a Option<String>,
     uri: &'a Uri,
@@ -70,8 +70,8 @@ pub fn dt_diagnostic_to_lsp<'a>(
         .map(|(i, span)| ls_types::Diagnostic {
             range: range_to_lsp(*span, rope).expect("range should be in the rope"),
             severity: Some(match diagnostic.severity {
-                dt_diagnostic::Severity::Warn => ls_types::DiagnosticSeverity::WARNING,
-                dt_diagnostic::Severity::Error => ls_types::DiagnosticSeverity::ERROR,
+                dt_tools_diagnostic::Severity::Warn => ls_types::DiagnosticSeverity::WARNING,
+                dt_tools_diagnostic::Severity::Error => ls_types::DiagnosticSeverity::ERROR,
             }),
             source: source.clone(),
             message: diagnostic.msg.clone().into_owned(),

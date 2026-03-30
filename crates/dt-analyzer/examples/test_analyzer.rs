@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Should have a path as an argument");
     let text = std::fs::read_to_string(path)?;
 
-    let parse = dt_parser::parser::parse(&text);
+    let parse = dt_tools_parser::parser::parse(&text);
     eprintln!("{}", "Parsed!".green());
 
     if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let file = parse.source_file();
 
-    let Some(def) = dt_analyzer::analyze_cst(&file, &text) else {
+    let Some(def) = dt_tools_analyzer::analyze_cst(&file, &text) else {
         eprintln!("analyze_cst returned None");
         std::process::exit(1);
     };

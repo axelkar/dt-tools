@@ -1,5 +1,5 @@
 [package]
-name = "dt-lsp"
+name = "dt-tools-lsp"
 edition = "2024"
 description = "Devicetree language server"
 keywords = ["devicetree"]
@@ -18,9 +18,9 @@ ropey = "1.6.1"
 tokio = { version = "1.36.0", features = ["fs", "rt-multi-thread", "macros", "io-std", "net", "io-util"] }
 tower-lsp-server.workspace = true
 fluent-uri.workspace = true
-dt-parser.workspace = true
-dt-analyzer.workspace = true
-dt-lint.workspace = true
+dt-tools-parser.workspace = true
+dt-tools-analyzer.workspace = true
+dt-tools-lint.workspace = true
 parking_lot.workspace = true
 itertools.workspace = true
 tracing.workspace = true
@@ -28,10 +28,10 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 rayon.workspace = true
 triomphe = "0.1.15"
 rustc-hash.workspace = true
-dt-diagnostic = { workspace = true, features = ["parking_lot"] }
+dt-tools-diagnostic = { workspace = true, features = ["parking_lot"] }
 salsa.workspace = true
 camino.workspace = true
-dt-workspace.workspace = true
+dt-tools-workspace.workspace = true
 
 [lints]
 workspace = true

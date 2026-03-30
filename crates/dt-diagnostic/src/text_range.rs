@@ -29,7 +29,7 @@ impl TextRange {
     /// # Example
     ///
     /// ```
-    /// use dt_diagnostic::text_range::TextRange;
+    /// use dt_tools_diagnostic::text_range::TextRange;
     ///
     /// let span = TextRange { start: 4, end: 7 };
     /// assert_eq!(span.length(), 3);
@@ -48,7 +48,7 @@ impl TextRange {
     /// # Example
     ///
     /// ```
-    /// use dt_diagnostic::text_range::TextRange;
+    /// use dt_tools_diagnostic::text_range::TextRange;
     ///
     /// let span = TextRange { start: 4, end: 7 };
     /// assert_eq!(span.offset(2), TextRange { start: 6, end: 9 });
@@ -67,7 +67,7 @@ impl TextRange {
     /// # Example
     ///
     /// ```
-    /// use dt_diagnostic::text_range::TextRange;
+    /// use dt_tools_diagnostic::text_range::TextRange;
     ///
     /// let span = TextRange { start: 4, end: 7 };
     /// assert_eq!(span.offset_wrapping_signed(-2), TextRange { start: 2, end: 5 });
@@ -89,7 +89,7 @@ impl TextRange {
     /// # Example
     ///
     /// ```
-    /// use dt_diagnostic::text_range::TextRange;
+    /// use dt_tools_diagnostic::text_range::TextRange;
     ///
     /// let source = "foo bar baz";
     ///
@@ -111,7 +111,7 @@ impl TextRange {
     /// # Example
     ///
     /// ```
-    /// use dt_diagnostic::text_range::TextRange;
+    /// use dt_tools_diagnostic::text_range::TextRange;
     ///
     /// let span = TextRange { start: 4, end: 7 };
     /// assert_eq!(span.byte_range(), 4..7);

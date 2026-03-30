@@ -1,5 +1,5 @@
-use dt_diagnostic::Severity;
-use dt_parser::{
+use dt_tools_diagnostic::Severity;
+use dt_tools_parser::{
     ast::{self, AstNode, AstNodeOrToken, HasLabel as _},
     cst::NodeKind,
     lexer::TokenKind,

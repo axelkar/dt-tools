@@ -11,11 +11,11 @@ repository = "https://github.com/axelkar/dt-tools"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-dt-parser.path = "./crates/dt-parser"
-dt-analyzer.path = "./crates/dt-analyzer"
-dt-lint.path = "./crates/dt-lint"
-dt-diagnostic.path = "./crates/dt-diagnostic"
-dt-workspace.path = "./crates/dt-workspace"
+dt-tools-parser.path = "./crates/dt-parser"
+dt-tools-analyzer.path = "./crates/dt-analyzer"
+dt-tools-lint.path = "./crates/dt-lint"
+dt-tools-diagnostic.path = "./crates/dt-diagnostic"
+dt-tools-workspace.path = "./crates/dt-workspace"
 tracing = "0.1.40"
 #dashmap = "7.0.0-rc2" # experimental version for entry_ref support
 # https://github.com/xacrimon/dashmap/pull/367

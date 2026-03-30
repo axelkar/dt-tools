@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-pub use dt_diagnostic::text_range::TextRange;
+pub use dt_tools_diagnostic::text_range::TextRange;
 
 pub mod ast;
 pub mod cst;

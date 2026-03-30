@@ -1,7 +1,7 @@
 use std::{collections::HashSet, path::Path};
 
 use anyhow::Context;
-use dt_analyzer::DefinitionTreeNode;
+use dt_tools_analyzer::DefinitionTreeNode;
 use serde_yaml::{Mapping, Value};
 
 mod fixups;
@@ -144,7 +144,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use dt_parser::ast;
+    use dt_tools_parser::ast;
 
     fn compile_example(example: &str, binding_schema: &BindingSchema) {
         // Hack for examples that already have root nodes like simple-framebuffer.yaml
@@ -163,7 +163,7 @@ mod tests {
 
         let file = parse.source_file();
 
-        let def = dt_analyzer::analyze_cst(&file, example).unwrap();
+        let def = dt_tools_analyzer::analyze_cst(&file, example).unwrap();
         eprintln!(
             "parsed from\n```dts\n{}\n```\njson = {}",
             example,

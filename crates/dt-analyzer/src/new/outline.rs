@@ -7,8 +7,8 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use dt_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
-use dt_parser::{
+use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
+use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken, HasLabel, HasName, SourceFile},
     lexer::TokenKind,

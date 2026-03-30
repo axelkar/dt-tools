@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
-use dt_analyzer::{macros::substitute_macro_ast, string::interpret_escaped_char};
-use dt_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
-use dt_parser::{
+use dt_tools_analyzer::{macros::substitute_macro_ast, string::interpret_escaped_char};
+use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
+use dt_tools_parser::{
     ast::{self, AstNode},
     lexer::TokenKind,
 };
@@ -57,7 +57,7 @@ pub fn eval(
             // TODO: error handling
             let (trmaps, s) = substitute_macro_ast(Some(&macro_invocation), def).ok()?;
 
-            let parse = dt_parser::parser::Entrypoint::PreprocessorConditional.parse(&s);
+            let parse = dt_tools_parser::parser::Entrypoint::PreprocessorConditional.parse(&s);
 
             if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
                 diag.emit(Diagnostic::new(
@@ -109,13 +109,13 @@ pub fn eval(
 
             let op = iter
                 .by_ref()
-                .filter_map(dt_parser::cst::TreeItem::into_token)
+                .filter_map(dt_tools_parser::cst::TreeItem::into_token)
                 .find(|tok| !tok.green.kind.is_trivia())?;
 
             let mhs = if op.green.kind == TokenKind::QuestionMark {
                 let mhs = iter.find_map(|child| ast::Expr::cast(child.as_node()?.clone()))?;
                 iter.by_ref()
-                    .filter_map(dt_parser::cst::TreeItem::into_token)
+                    .filter_map(dt_tools_parser::cst::TreeItem::into_token)
                     .find(|tok| tok.green.kind == TokenKind::Colon)?;
                 Some(mhs)
             } else {
@@ -163,8 +163,8 @@ pub fn eval(
 
 #[cfg(test)]
 mod tests {
-    use dt_analyzer::macros::MacroDefinition;
-    use dt_parser::{ast::AstNode, parser::Entrypoint};
+    use dt_tools_analyzer::macros::MacroDefinition;
+    use dt_tools_parser::{ast::AstNode, parser::Entrypoint};
 
     use crate::salsa::macros::env::MacroEnvMut;
 
@@ -172,8 +172,8 @@ mod tests {
         let db = crate::salsa::db::BaseDatabase::default();
 
         let parse = Entrypoint::PreprocessorConditional.parse(input);
-        let ast =
-            dt_parser::ast::Expr::cast(parse.red_node().child_nodes().next().unwrap()).unwrap();
+        let ast = dt_tools_parser::ast::Expr::cast(parse.red_node().child_nodes().next().unwrap())
+            .unwrap();
 
         let mut diagnostics = Vec::new();
         let diag = parking_lot::Mutex::new(&mut diagnostics);

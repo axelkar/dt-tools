@@ -46,8 +46,8 @@
         "dt-tools-lsp.server.path": {
           "type": "string",
           "scope": "machine-overridable",
-          "default": "dt-lsp",
-          "description": "Path to dt-lsp executable."
+          "default": "dt-tools-lsp",
+          "description": "Path to dt-tools-lsp executable."
         },
         "dt-tools-lsp.server.extraEnv": {
           "type": [
@@ -61,7 +61,7 @@
             ]
           },
           "default": null,
-          "markdownDescription": "Extra environment variables that will be passed to the dt-lsp executable. Useful for passing e.g. `RUST_BACKTRACE=1` for debugging."
+          "markdownDescription": "Extra environment variables that will be passed to the dt-tools-lsp executable. Useful for passing e.g. `RUST_BACKTRACE=1` for debugging."
         },
         "dt-tools-lsp.trace.server": {
           "scope": "window",

@@ -345,15 +345,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9bda8e21c04aca2ae33ffc2fd8c23134f3cac46db123ba97bd9d3f3b8a4a85e1"
 
 [[package]]
-name = "dt-analyzer"
+name = "dt-tools-analyzer"
 version = "0.1.0"
 dependencies = [
  "camino",
  "codespan-reporting",
  "derive_more",
  "displaydoc",
- "dt-diagnostic",
- "dt-parser",
+ "dt-tools-diagnostic",
+ "dt-tools-parser",
  "either",
  "enum-as-inner",
  "expect-test",
@@ -369,13 +369,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "dt-binding-matcher"
+name = "dt-tools-binding-matcher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "boon",
- "dt-analyzer",
- "dt-parser",
+ "dt-tools-analyzer",
+ "dt-tools-parser",
  "fluent-uri 0.4.1",
  "fs-err",
  "serde_json",
@@ -383,22 +383,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "dt-cli"
+name = "dt-tools-cli"
 version = "0.1.0"
 dependencies = [
  "camino",
  "clap",
  "codespan-reporting",
- "dt-analyzer",
- "dt-diagnostic",
- "dt-lint",
- "dt-parser",
- "dt-workspace",
+ "dt-tools-analyzer",
+ "dt-tools-diagnostic",
+ "dt-tools-lint",
+ "dt-tools-parser",
+ "dt-tools-workspace",
  "tracing-subscriber",
 ]
 
 [[package]]
-name = "dt-diagnostic"
+name = "dt-tools-diagnostic"
 version = "0.1.0"
 dependencies = [
  "codespan-reporting",
@@ -406,32 +406,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "dt-fmt"
+name = "dt-tools-fmt"
 version = "0.1.0"
 dependencies = [
- "dt-parser",
+ "dt-tools-parser",
 ]
 
 [[package]]
-name = "dt-lint"
+name = "dt-tools-lint"
 version = "0.1.0"
 dependencies = [
- "dt-diagnostic",
- "dt-parser",
+ "dt-tools-diagnostic",
+ "dt-tools-parser",
  "tracing",
 ]
 
 [[package]]
-name = "dt-lsp"
+name = "dt-tools-lsp"
 version = "0.1.0"
 dependencies = [
  "camino",
  "dashmap 7.0.0-rc2",
- "dt-analyzer",
- "dt-diagnostic",
- "dt-lint",
- "dt-parser",
- "dt-workspace",
+ "dt-tools-analyzer",
+ "dt-tools-diagnostic",
+ "dt-tools-lint",
+ "dt-tools-parser",
+ "dt-tools-workspace",
  "fluent-uri 0.4.1",
  "itertools",
  "parking_lot",
@@ -447,13 +447,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "dt-parser"
+name = "dt-tools-parser"
 version = "0.1.0"
 dependencies = [
  "constcat",
  "displaydoc",
  "drop_bomb",
- "dt-diagnostic",
+ "dt-tools-diagnostic",
  "either",
  "enum-as-inner",
  "expect-test",
@@ -470,7 +470,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dt-workspace"
+name = "dt-tools-workspace"
 version = "0.1.0"
 dependencies = [
  "camino",

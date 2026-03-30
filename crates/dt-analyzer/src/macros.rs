@@ -5,7 +5,7 @@
 
 use std::{iter::Peekable, str::Chars};
 
-use dt_parser::{TextRange, ast, parser::Entrypoint};
+use dt_tools_parser::{TextRange, ast, parser::Entrypoint};
 
 use crate::new::outline::subslice_offset;
 
@@ -389,7 +389,7 @@ impl MacroDefinition {
     /// # Example
     ///
     /// ```
-    /// use dt_analyzer::macros::{MacroDefinition, MacroDefinitionParseError};
+    /// use dt_tools_analyzer::macros::{MacroDefinition, MacroDefinitionParseError};
     ///
     /// assert_eq!(MacroDefinition::parse("#define"), Err(MacroDefinitionParseError::MissingName));
     /// ```

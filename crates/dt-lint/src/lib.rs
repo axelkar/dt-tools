@@ -4,8 +4,8 @@
 //!
 //! [1]: https://www.devicetree.org/
 
-use dt_diagnostic::{Diagnostic, DiagnosticMessage, MultiSpan, Severity};
-use dt_parser::ast::{self, HasLabel};
+use dt_tools_diagnostic::{Diagnostic, DiagnosticMessage, MultiSpan, Severity};
+use dt_tools_parser::ast::{self, HasLabel};
 
 mod dtc_style;
 mod kernel_coding_style;

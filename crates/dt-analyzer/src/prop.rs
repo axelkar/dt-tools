@@ -1,6 +1,6 @@
 use std::{num::ParseIntError, sync::Arc};
 
-use dt_parser::{
+use dt_tools_parser::{
     ast::{self, AstToken, DtNode, HasName},
     cst::RedToken,
 };
@@ -438,7 +438,7 @@ impl CustomValueCellItem {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 /// A phandle's target
 ///
-/// TODO: figure out how to error in dt-lsp when labels are used before declaration
+/// TODO: figure out how to error in dt-tools-lsp when labels are used before declaration
 pub enum PhandleTarget {
     /// e.g. `&{/soc/uart}` -> `Path("/soc/uart")`
     Path(String),

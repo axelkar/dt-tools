@@ -1,8 +1,8 @@
-use dt_parser::ast::SourceFile;
+use dt_tools_parser::ast::SourceFile;
 
 struct PanickingDiagnosticCollector;
-impl dt_diagnostic::DiagnosticCollector for PanickingDiagnosticCollector {
-    fn emit(&self, diag: dt_diagnostic::Diagnostic) {
+impl dt_tools_diagnostic::DiagnosticCollector for PanickingDiagnosticCollector {
+    fn emit(&self, diag: dt_tools_diagnostic::Diagnostic) {
         panic!("Diagnostic emitted: {diag:#?}");
     }
 }

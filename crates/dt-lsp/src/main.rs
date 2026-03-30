@@ -1,9 +1,9 @@
 use ::salsa::Setter;
 use camino::{Utf8Path, Utf8PathBuf};
-use dt_workspace::WorkspacePathFindResult;
-use dt_workspace::config::CombinedConfig;
-use dt_workspace::config::env_config::EnvConfig;
-use dt_workspace::config::toml_config::TomlConfig;
+use dt_tools_workspace::WorkspacePathFindResult;
+use dt_tools_workspace::config::CombinedConfig;
+use dt_tools_workspace::config::env_config::EnvConfig;
+use dt_tools_workspace::config::toml_config::TomlConfig;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::{net::TcpListener, sync::Mutex};
 use tower_lsp_server::ls_types::{
@@ -51,7 +51,7 @@ pub struct Session {
     resolved_client_capabilities: parking_lot::Mutex<Arc<ResolvedClientCapabilities>>,
 
     workspace_folders: Mutex<Vec<WorkspaceFolder>>,
-    dt_workspace: parking_lot::Mutex<Option<dt_workspace::Workspace>>,
+    dt_tools_workspace: parking_lot::Mutex<Option<dt_tools_workspace::Workspace>>,
     /// The file where evaluation will start from
     ///
     /// Files not (recursively) included in this file must not be analyzed
@@ -82,9 +82,9 @@ impl Session {
         let folders = self.workspace_folders.lock().await;
         // TODO: actually support multiple workspace folders
         let folder = folders.first();
-        let dt_workspace = folder.and_then(|folder| {
+        let dt_tools_workspace = folder.and_then(|folder| {
             let path = uri_to_path(&folder.uri).expect("Invalid document URI");
-            let res = dt_workspace::Workspace::find_workspace_dir(&path);
+            let res = dt_tools_workspace::Workspace::find_workspace_dir(&path);
             let workspace_dir = res.workspace_dir();
 
             let toml_config = match &res {
@@ -92,7 +92,7 @@ impl Session {
                     Some(TomlConfig::load(toml_file_path))
                 }
                 WorkspacePathFindResult::LinuxMarker { .. } => {
-                    Some(Ok(dt_workspace::linux_default_config(workspace_dir)))
+                    Some(Ok(dt_tools_workspace::linux_default_config(workspace_dir)))
                 }
                 WorkspacePathFindResult::Fallback { .. } => None,
             };
@@ -109,7 +109,7 @@ impl Session {
                 None => None,
             };
 
-            Some(dt_workspace::Workspace {
+            Some(dt_tools_workspace::Workspace {
                 config: CombinedConfig::merge_no_cli(
                     EnvConfig::from_env()
                         .inspect_err(|err| {
@@ -124,7 +124,7 @@ impl Session {
                 path: workspace_dir.to_path_buf(),
             })
         });
-        info!(?dt_workspace, "Updated workspace");
+        info!(?dt_tools_workspace, "Updated workspace");
 
         let db = &mut *self.db.lock();
 
@@ -135,13 +135,13 @@ impl Session {
 
         crate::salsa::includes::IncludeDirs::new(
             db,
-            dt_workspace
+            dt_tools_workspace
                 .as_ref()
-                .map(|dt_workspace| dt_workspace.config.include_dirs.clone())
+                .map(|dt_tools_workspace| dt_tools_workspace.config.include_dirs.clone())
                 .unwrap_or_default(),
         );
 
-        *self.dt_workspace.lock() = dt_workspace;
+        *self.dt_tools_workspace.lock() = dt_tools_workspace;
     }
 }
 
@@ -178,7 +178,7 @@ impl LanguageServer for Backend {
         }
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
-                name: "dt-lsp".to_owned(),
+                name: "dt-tools-lsp".to_owned(),
                 version: Some(env!("CARGO_PKG_VERSION").to_owned()),
             }),
             capabilities: ServerCapabilities {
@@ -349,14 +349,14 @@ impl Backend {
                     continue;
                 };
 
-                // TODO: add a source field to dt-diagnostic::Diagnostic or something
+                // TODO: add a source field to dt-tools-diagnostic::Diagnostic or something
                 // could be like "dt-tools(lint {})"
                 let source = Some("dt-tools".to_owned());
 
                 diagnostics
                     .iter()
                     .flat_map(|diagnostic| {
-                        lsp_utils::dt_diagnostic_to_lsp(diagnostic, rope, &source, &uri)
+                        lsp_utils::dt_tools_diagnostic_to_lsp(diagnostic, rope, &source, &uri)
                     })
                     .collect::<Vec<_>>()
             };
@@ -378,7 +378,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             open_docs: FxDashMap::default(),
             resolved_client_capabilities: parking_lot::Mutex::default(),
             workspace_folders: Mutex::new(Vec::new()),
-            dt_workspace: parking_lot::Mutex::default(),
+            dt_tools_workspace: parking_lot::Mutex::default(),
             main_file: parking_lot::Mutex::new(None),
             db: parking_lot::Mutex::new(BaseDatabase::default()),
         }),
@@ -390,8 +390,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(debug_assertions)]
     let tracing_env_filter = tracing_env_filter
-        .add_directive("dt_lsp=trace".parse()?)
-        .add_directive("dt_parser=trace".parse()?);
+        .add_directive("dt_tools_lsp=trace".parse()?)
+        .add_directive("dt_tools_parser=trace".parse()?);
 
     if first_arg == Some("tcp".to_owned()) {
         tracing_subscriber::fmt()

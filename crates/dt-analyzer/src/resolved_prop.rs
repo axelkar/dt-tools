@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dt_parser::{
+use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken, DtPhandle, HasMacroInvocation, HasName},
     parser::Entrypoint,
@@ -257,7 +257,7 @@ pub enum PhandleTarget {
 
 #[cfg(test)]
 mod tests {
-    use dt_parser::ast;
+    use dt_tools_parser::ast;
 
     #[track_caller]
     fn parse_value(value_src: &str) -> ast::PropValue {

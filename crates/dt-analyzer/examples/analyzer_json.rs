@@ -2,7 +2,7 @@
 //!
 //! Use `--assert` in argv[2] to `pretty_assertions::assert_eq`
 
-use dt_parser::ast::SourceFile;
+use dt_tools_parser::ast::SourceFile;
 use owo_colors::{OwoColorize as _, colors::xterm::Gray};
 use std::process::Command;
 use std::time::Instant;
@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = parse.source_file();
 
     let start = Instant::now();
-    let Some(def) = dt_analyzer::analyze_cst(&file, &text) else {
+    let Some(def) = dt_tools_analyzer::analyze_cst(&file, &text) else {
         eprintln!("analyze_cst returned None");
         std::process::exit(1);
     };

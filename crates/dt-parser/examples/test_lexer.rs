@@ -1,6 +1,6 @@
 // See https://github.com/maciejhirsz/logos/issues/399
 
-use dt_parser::lexer;
+use dt_tools_parser::lexer;
 use owo_colors::{OwoColorize as _, colors::xterm::Gray};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

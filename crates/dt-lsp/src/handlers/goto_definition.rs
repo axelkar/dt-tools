@@ -4,7 +4,7 @@ use crate::{
     salsa::{db::BaseDb, includes::document_deps},
     uri_to_path,
 };
-use dt_parser::{
+use dt_tools_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
     lexer::TokenKind,

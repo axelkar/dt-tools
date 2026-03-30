@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use dt_analyzer::new::outline::AnalyzedToplevel;
-use dt_diagnostic::{Diagnostic, MultiSpan, Severity};
+use dt_tools_analyzer::new::outline::AnalyzedToplevel;
+use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity};
 
 pub mod db;
 mod expr_eval;
@@ -14,7 +14,7 @@ pub mod preprocessor;
 pub struct Parse<'db> {
     #[returns(ref)]
     #[no_eq]
-    pub parse: dt_parser::parser::Parse<'static>,
+    pub parse: dt_tools_parser::parser::Parse<'static>,
 }
 
 // `no_eq`: Always changes when `file.contents` changes
@@ -36,7 +36,7 @@ pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
     }
 
     let contents: &str = file.contents(db);
-    let parse = dt_parser::parser::parse(contents).into_static();
+    let parse = dt_tools_parser::parser::parse(contents).into_static();
     Some(Parse::new(db, parse))
 }
 
@@ -51,7 +51,7 @@ pub struct Outline<'db> {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Computes an outline composed of [`dt_analyzer::new::outline::AnalyzedToplevel`]s.
+/// Computes an outline composed of [`dt_tools_analyzer::new::outline::AnalyzedToplevel`]s.
 ///
 /// Returns `None` if the file doesn't exist.
 #[salsa::tracked]
@@ -62,7 +62,8 @@ pub fn outline(db: &dyn db::BaseDb, file: file::File) -> Option<Outline<'_>> {
     let mut diagnostics = Vec::new();
     let diag = parking_lot::Mutex::new(&mut diagnostics);
 
-    let toplevels = dt_analyzer::new::outline::analyze_file(&file_ast, file.contents(db), &diag);
+    let toplevels =
+        dt_tools_analyzer::new::outline::analyze_file(&file_ast, file.contents(db), &diag);
 
     tag_diagnostics(&mut diagnostics, concat!(module_path!(), "::outline"));
 
@@ -89,7 +90,7 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
 
     if !file.is_readable_file(db) {
         return vec![Diagnostic::new(
-            dt_parser::TextRange { start: 0, end: 0 },
+            dt_tools_parser::TextRange { start: 0, end: 0 },
             Cow::Borrowed("File does not exist"),
             Severity::Error,
         )];
@@ -128,7 +129,8 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
 
         // FIXME: main file detection
         let is_main_file = true;
-        for mut lint in dt_lint::default_lint(&parse.source_file(), file.contents(db), is_main_file)
+        for mut lint in
+            dt_tools_lint::default_lint(&parse.source_file(), file.contents(db), is_main_file)
         {
             tag_diagnostic(&mut lint.diagnostic, &format!("dt-tools(lint {})", lint.id));
             diagnostics.push(lint.diagnostic);
