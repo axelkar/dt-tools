@@ -472,7 +472,6 @@ fn handle_toplevel_item<'db>(
                 };
 
                 let name_clone = parsed.name.clone();
-                let existed = env.get_macro(db, &name_clone).is_some();
                 env.own_map.insert(parsed.name.clone(), Some(parsed));
 
                 PpEvalFileResultToplevelInner::MacroDefinition { name: name_clone }
