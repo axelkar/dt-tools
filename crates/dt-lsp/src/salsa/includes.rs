@@ -60,7 +60,7 @@ pub fn document_deps(db: &dyn BaseDb, file: super::file::File) -> Result<Documen
                 Cow::Borrowed("Couldn't find file to include"),
                 Severity::Error,
             ));
-        };
+        }
     }
 
     super::tag_diagnostics(&mut diagnostics, concat!(module_path!(), "::document_deps"));

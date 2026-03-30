@@ -6,11 +6,10 @@
 use std::sync::Arc;
 
 use crate::{
-    ast,
+    TextRange, ast,
     cst::{GreenNode, NodeKind, RedNode},
     grammar,
     lexer::TokenKind,
-    TextRange,
 };
 
 use self::event::Event;
@@ -340,8 +339,10 @@ impl<'t, 'input> Parser<'t, 'input> {
                     end: tr.end,
                 })
         } else if let [Expected::Kind(TokenKind::Semicolon | TokenKind::Comma)]
-        | [Expected::Kind(TokenKind::Comma), Expected::Kind(TokenKind::Semicolon)] =
-            self.expected.as_slice()
+        | [
+            Expected::Kind(TokenKind::Comma),
+            Expected::Kind(TokenKind::Semicolon),
+        ] = self.expected.as_slice()
         {
             // TODO: don't hardcode it here and make it explicit in the grammar
             // Display the error at the start of the token after the previous non-trivia token
@@ -511,7 +512,7 @@ pub mod visualizer {
 
 #[cfg(test)]
 mod tests {
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
 
     use super::sink::Sink;
     use crate::{cst::NodeKind, lexer::Lexer};

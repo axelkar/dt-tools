@@ -1,6 +1,6 @@
 [package]
 name = "dt-lint"
-edition = "2021"
+edition = "2024"
 description = "Devicetree linter"
 keywords = ["devicetree"]
 categories = ["development-tools"]

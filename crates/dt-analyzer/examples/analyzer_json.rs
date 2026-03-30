@@ -3,7 +3,7 @@
 //! Use `--assert` in argv[2] to `pretty_assertions::assert_eq`
 
 use dt_parser::ast::SourceFile;
-use owo_colors::{colors::xterm::Gray, OwoColorize as _};
+use owo_colors::{OwoColorize as _, colors::xterm::Gray};
 use std::process::Command;
 use std::time::Instant;
 

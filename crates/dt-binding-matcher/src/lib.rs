@@ -57,23 +57,23 @@ impl BindingSchema {
         compiler.use_loader(Box::new(loader::DtJsonSchemaLoader));
         compiler
             .add_resource("dt-tools:main", main_json)
-            .map_err(|err| anyhow::anyhow!("{:#} {}", err, err))
+            .map_err(|err| anyhow::anyhow!("{err:#} {err}"))
             .context("Failed to add JSON schema resource dt-tools:main")?;
         compiler
             .add_resource("dt-tools:select", select_json)
-            .map_err(|err| anyhow::anyhow!("{:#} {}", err, err))
+            .map_err(|err| anyhow::anyhow!("{err:#} {err}"))
             .context("Failed to add JSON schema resource dt-tools:main")?;
 
         let mut schemas = boon::Schemas::new();
 
         let main_schema_index = compiler
             .compile("dt-tools:main", &mut schemas)
-            .map_err(|err| anyhow::anyhow!("{:#} {}", err, err))
+            .map_err(|err| anyhow::anyhow!("{err:#} {err}"))
             .context("Failed to compile JSON schema location dt-tools:main")?;
 
         let select_schema_index = compiler
             .compile("dt-tools:select", &mut schemas)
-            .map_err(|err| anyhow::anyhow!("{:#} {}", err, err))
+            .map_err(|err| anyhow::anyhow!("{err:#} {err}"))
             .context("Failed to compile JSON schema location dt-tools:main")?;
 
         Ok(Self {
@@ -90,15 +90,15 @@ impl BindingSchema {
 pub fn get_compatible_items(map: &Mapping) -> HashSet<String> {
     // TODO: resolve/handle $ref properties? this is currently really lazy
     let mut list = HashSet::new();
-    if let Some(properties) = map.get("properties").and_then(Value::as_mapping) {
-        if let Some(compatible) = properties.get("compatible").and_then(Value::as_mapping) {
-            if let Some(item) = compatible.get("const").and_then(Value::as_str) {
+    if let Some(properties) = map.get("properties").and_then(Value::as_mapping)
+        && let Some(compatible) = properties.get("compatible").and_then(Value::as_mapping)
+    {
+        if let Some(item) = compatible.get("const").and_then(Value::as_str) {
+            list.insert(item.to_owned());
+        }
+        if let Some(items) = compatible.get("enum").and_then(Value::as_sequence) {
+            for item in items.iter().filter_map(Value::as_str) {
                 list.insert(item.to_owned());
-            }
-            if let Some(items) = compatible.get("enum").and_then(Value::as_sequence) {
-                for item in items.iter().filter_map(Value::as_str) {
-                    list.insert(item.to_owned());
-                }
             }
         }
     }

@@ -1,9 +1,9 @@
 use ::salsa::Setter;
 use camino::{Utf8Path, Utf8PathBuf};
+use dt_workspace::WorkspacePathFindResult;
+use dt_workspace::config::CombinedConfig;
 use dt_workspace::config::env_config::EnvConfig;
 use dt_workspace::config::toml_config::TomlConfig;
-use dt_workspace::config::CombinedConfig;
-use dt_workspace::WorkspacePathFindResult;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::{net::TcpListener, sync::Mutex};
 use tower_lsp_server::ls_types::{
@@ -221,6 +221,7 @@ impl LanguageServer for Backend {
                 //diagnostic_provider: (),
                 ..Default::default()
             },
+            offset_encoding: None,
         })
     }
 

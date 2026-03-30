@@ -1,6 +1,6 @@
 use crate::{
-    lexer::{Token, TokenKind},
     TextRange,
+    lexer::{Token, TokenKind},
 };
 
 const PARSER_STEP_LIMIT: u32 = 1_000;

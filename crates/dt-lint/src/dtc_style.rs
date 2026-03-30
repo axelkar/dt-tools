@@ -22,22 +22,22 @@ pub struct DtcStyle;
 
 impl EarlyLintPass for DtcStyle {
     fn check_document(&mut self, cx: &mut crate::EarlyContext<'_>, file: &ast::SourceFile) {
-        if cx.is_main_file {
-            if let Some(first) = file.items().next() {
-                let is_v1_directive = first.clone().into_directive().ok().is_some_and(|dir| {
-                    dir.syntax()
-                        .child_tokens()
-                        .any(|tok| tok.green.kind == TokenKind::V1Directive)
-                });
+        if cx.is_main_file
+            && let Some(first) = file.items().next()
+        {
+            let is_v1_directive = first.clone().into_directive().ok().is_some_and(|dir| {
+                dir.syntax()
+                    .child_tokens()
+                    .any(|tok| tok.green.kind == TokenKind::V1Directive)
+            });
 
-                if !is_v1_directive {
-                    cx.add_lint_from_cst(
-                        LintId::DtcStyle,
-                        "First item must be `/dts-v1/;` directive",
-                        Severity::Error,
-                        first.syntax().text_range(),
-                    );
-                }
+            if !is_v1_directive {
+                cx.add_lint_from_cst(
+                    LintId::DtcStyle,
+                    "First item must be `/dts-v1/;` directive",
+                    Severity::Error,
+                    first.syntax().text_range(),
+                );
             }
         }
 
@@ -77,17 +77,16 @@ impl EarlyLintPass for DtcStyle {
             self.check_node(cx, &node);
         }
 
-        if let Some(last_prop) = last_prop {
-            if let Some(first_node) = node.subnodes().next() {
-                if last_prop.syntax().text_range().end > first_node.syntax().text_range().start {
-                    cx.add_lint_from_cst(
-                        LintId::DtcStyle,
-                        "Properties must not be defined after nodes",
-                        Severity::Error,
-                        last_prop.syntax().text_range(),
-                    );
-                }
-            }
+        if let Some(last_prop) = last_prop
+            && let Some(first_node) = node.subnodes().next()
+            && last_prop.syntax().text_range().end > first_node.syntax().text_range().start
+        {
+            cx.add_lint_from_cst(
+                LintId::DtcStyle,
+                "Properties must not be defined after nodes",
+                Severity::Error,
+                last_prop.syntax().text_range(),
+            );
         }
     }
     fn check_property(&mut self, cx: &mut crate::EarlyContext<'_>, property: &ast::DtProperty) {

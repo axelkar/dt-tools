@@ -3,7 +3,7 @@
 use std::{
     mem,
     path::Path,
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
     time::Duration,
 };
 

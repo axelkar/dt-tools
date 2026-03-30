@@ -5,19 +5,19 @@ use std::{
 
 use camino::Utf8PathBuf;
 use clap::{
-    builder::{
-        styling::{AnsiColor, Style},
-        Styles,
-    },
     Parser, Subcommand,
+    builder::{
+        Styles,
+        styling::{AnsiColor, Style},
+    },
 };
 use tracing_subscriber::filter::LevelFilter;
 
 use dt_workspace::{
-    config::{
-        cli_config::CliConfig, env_config::EnvConfig, toml_config::TomlConfig, CombinedConfig,
-    },
     Workspace, WorkspacePathFindResult,
+    config::{
+        CombinedConfig, cli_config::CliConfig, env_config::EnvConfig, toml_config::TomlConfig,
+    },
 };
 
 fn styles() -> Styles {

@@ -8,9 +8,9 @@ use dt_diagnostic::{
     Diagnostic, DiagnosticCollector, MultiSpan, OffsetDiagnosticCollector, Severity,
 };
 use dt_parser::{
+    TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken},
     lexer::TokenKind,
-    TextRange,
 };
 use rustc_hash::FxHashMap;
 
@@ -266,10 +266,10 @@ fn pp_cond_directive_eval(
         }
 
         for error in &parse.errors {
-            if let Some(earliest_lex_error_range) = earliest_lex_error_range {
-                if error.primary_span.start >= earliest_lex_error_range.start {
-                    break;
-                }
+            if let Some(earliest_lex_error_range) = earliest_lex_error_range
+                && error.primary_span.start >= earliest_lex_error_range.start
+            {
+                break;
             }
 
             let mut diagnostic = Diagnostic {
@@ -355,6 +355,7 @@ pub fn preprocessor_eval_file<'db>(
     ))
 }
 
+#[expect(clippy::too_many_lines, reason = "hard to make this shorter")]
 fn handle_toplevel_item<'db>(
     db: &'db dyn BaseDb,
     env: &mut MacroEnvMut<'db>,

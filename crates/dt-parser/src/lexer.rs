@@ -677,7 +677,7 @@ fn lex_char(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use expect_test::{expect, expect_file, Expect, ExpectFile};
+    use expect_test::{Expect, ExpectFile, expect, expect_file};
     use pretty_assertions::assert_eq;
 
     #[track_caller]

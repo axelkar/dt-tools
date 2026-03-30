@@ -84,12 +84,12 @@ pub fn eval(
             {
                 // TODO: error handling
                 let src: &str = number.text();
-                let val = src.parse().ok().or_else(|| {
+
+                src.parse().ok().or_else(|| {
                     src.strip_prefix("0x")
                         .or_else(|| src.strip_prefix("0X"))
                         .and_then(|src| i64::from_str_radix(src, 16).ok())
-                });
-                val
+                })
             } else if let Some(char) = literal_expr
                 .syntax()
                 .child_tokens()

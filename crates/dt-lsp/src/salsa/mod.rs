@@ -108,10 +108,10 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
         }
 
         for error in &parse.errors {
-            if let Some(earliest_lex_error_range) = earliest_lex_error_range {
-                if error.primary_span.start >= earliest_lex_error_range.start {
-                    break;
-                }
+            if let Some(earliest_lex_error_range) = earliest_lex_error_range
+                && error.primary_span.start >= earliest_lex_error_range.start
+            {
+                break;
             }
 
             let mut diagnostic = Diagnostic {

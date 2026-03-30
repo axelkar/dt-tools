@@ -6,9 +6,9 @@ use tracing::debug;
 use super::{Marker, Parser};
 
 use crate::{
+    TextRange,
     cst::NodeKind,
     lexer::{LexError, TokenKind},
-    TextRange,
 };
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]

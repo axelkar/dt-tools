@@ -8,16 +8,16 @@ use std::borrow::Cow;
 
 use dt_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, SpanLabel};
 use dt_parser::{
+    TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken, HasMacroInvocation, HasName},
     match_ast,
     parser::Entrypoint,
-    TextRange,
 };
 use enum_as_inner::EnumAsInner;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    macros::{substitute_macro_ast, MacroDefinition},
+    macros::{MacroDefinition, substitute_macro_ast},
     resolved_prop::Value,
 };
 

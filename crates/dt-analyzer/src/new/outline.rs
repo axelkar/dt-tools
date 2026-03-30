@@ -9,9 +9,9 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use dt_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
 use dt_parser::{
+    TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken, HasLabel, HasName, SourceFile},
     lexer::TokenKind,
-    TextRange,
 };
 use either::Either;
 use enum_as_inner::EnumAsInner;
@@ -147,17 +147,17 @@ impl AnalyzedInclude {
             _ => return Err(PPIncludeParseError::UnexpectedCharacter),
         };
 
-        if !rest.is_empty() {
-            if let Some(offset) = subslice_offset(input, rest) {
-                diag.emit(Diagnostic::new(
-                    TextRange {
-                        start: text_range.start + offset,
-                        end: text_range.end,
-                    },
-                    Cow::Borrowed("Unexpected characters after include string"),
-                    Severity::Warn,
-                ));
-            }
+        if !rest.is_empty()
+            && let Some(offset) = subslice_offset(input, rest)
+        {
+            diag.emit(Diagnostic::new(
+                TextRange {
+                    start: text_range.start + offset,
+                    end: text_range.end,
+                },
+                Cow::Borrowed("Unexpected characters after include string"),
+                Severity::Warn,
+            ));
         }
 
         Ok(Self {
@@ -241,16 +241,16 @@ pub(crate) fn gather_labels<'input>(
     src: &'input str,
     on_label: &mut impl FnMut(&'input str, LabelDef),
 ) {
-    if let Some(label) = ast.label() {
-        if let Some(name) = label.name() {
-            on_label(
-                name.syntax().text_from_source(src),
-                LabelDef {
-                    node_ast: ast.clone(),
-                    label_ast: label,
-                },
-            );
-        }
+    if let Some(label) = ast.label()
+        && let Some(name) = label.name()
+    {
+        on_label(
+            name.syntax().text_from_source(src),
+            LabelDef {
+                node_ast: ast.clone(),
+                label_ast: label,
+            },
+        );
     }
 
     for ast in ast.subnodes() {

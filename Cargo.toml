@@ -38,7 +38,7 @@ fs-err = "3.1.0"
 salsa = "0.26.0"
 camino = "1.2.1" # UTF-8 paths
 tower-lsp-server = "0.23.0"
-fluent-uri = "0.3.2" # Old version for ls-types and tower-lsp-server
+fluent-uri = "0.4.1"
 codespan-reporting = "0.13.1"
 expect-test = "1.5.1"
 

@@ -1,9 +1,10 @@
 use std::{iter::Peekable, str::Chars};
 
-#[derive(thiserror::Error, Debug, displaydoc::Display)]
+#[derive(thiserror::Error, Debug, displaydoc::Display, PartialEq, Eq)]
 pub enum StringParseError {
     /// escape at end of string
     EscapeAtEndOfString,
+
     /// hex escape with no valid digits
     HexNoDigits,
 
@@ -12,6 +13,9 @@ pub enum StringParseError {
 
     /// When parsing a char literal, there was no char.
     CharMissingChar,
+
+    /// missing literal delimiter
+    MissingDelimiter,
 }
 
 struct InterpretEscapedString<'a> {
@@ -55,20 +59,54 @@ impl Iterator for InterpretEscapedString<'_> {
     }
 }
 
+/// Interprets an escaped string literal in a C-like language.
+///
+/// # Example
+///
+/// ```
+/// use dt_analyzer::string::{interpret_escaped_string, StringParseError};
+///
+/// assert_eq!(interpret_escaped_string(r#""\\a\a""#), Ok("\\a\x07".into()));
+/// assert_eq!(interpret_escaped_string(r#""\""#), Err(StringParseError::EscapeAtEndOfString));
+/// ```
+///
+/// # Errors
+///
+/// May return a [`StringParseError`] if the input is invalid.
 pub fn interpret_escaped_string(s: &str) -> Result<String, StringParseError> {
-    debug_assert!(s.starts_with('"'));
-    debug_assert!(s.ends_with('"'));
-    let s = s.get(1..(s.len() - 1)).expect("lexer safe");
+    let s = s
+        .strip_prefix('"')
+        .ok_or(StringParseError::MissingDelimiter)?
+        .strip_suffix('"')
+        .ok_or(StringParseError::MissingDelimiter)?;
     (InterpretEscapedString {
         s: s.chars().peekable(),
     })
     .collect()
 }
 
+/// Interprets an escaped character literal in a C-like language.
+///
+/// # Example
+///
+/// ```
+/// use dt_analyzer::string::{interpret_escaped_char, StringParseError};
+///
+/// assert_eq!(interpret_escaped_char(r"'\a'"), Ok('\x07'));
+/// assert_eq!(interpret_escaped_char("'a'"), Ok('a'));
+/// assert_eq!(interpret_escaped_char("'aa'"), Err(StringParseError::CharTooManyChars));
+/// assert_eq!(interpret_escaped_char(r"'\'"), Err(StringParseError::EscapeAtEndOfString));
+/// ```
+///
+/// # Errors
+///
+/// May return a [`StringParseError`] if the input is invalid.
 pub fn interpret_escaped_char(s: &str) -> Result<char, StringParseError> {
-    debug_assert!(s.starts_with('\''));
-    debug_assert!(s.ends_with('\''));
-    let s = s.get(1..(s.len() - 1)).expect("lexer safe");
+    let s = s
+        .strip_prefix('\'')
+        .ok_or(StringParseError::MissingDelimiter)?
+        .strip_suffix('\'')
+        .ok_or(StringParseError::MissingDelimiter)?;
     let mut iter = InterpretEscapedString {
         s: s.chars().peekable(),
     };

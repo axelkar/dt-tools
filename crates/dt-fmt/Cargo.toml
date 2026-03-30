@@ -1,6 +1,6 @@
 [package]
 name = "dt-fmt"
-edition = "2021"
+edition = "2024"
 description = "Devicetree formatter"
 keywords = ["devicetree"]
 categories = ["development-tools"]

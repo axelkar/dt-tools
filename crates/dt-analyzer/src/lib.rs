@@ -41,8 +41,8 @@ use std::{borrow::Cow, collections::HashMap};
 
 use dt_parser::ast::{self, AstNode, AstToken as _, HasLabel as _, HasName as _};
 pub use prop::{
-    analyze_node, CustomValue, CustomValueCellItem, DefinitionTree, DefinitionTreeNode,
-    PhandleTarget, PropDefinition, Value, ValueFromAstError,
+    CustomValue, CustomValueCellItem, DefinitionTree, DefinitionTreeNode, PhandleTarget,
+    PropDefinition, Value, ValueFromAstError, analyze_node,
 };
 pub use string::StringParseError;
 

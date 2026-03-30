@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use fluent_uri::Uri;
 use serde_json::Value;
 use std::path::PathBuf;

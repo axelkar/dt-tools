@@ -163,9 +163,9 @@ macro_rules! define_ast_node {
 #[macro_export]
 macro_rules! match_ast {
     (match $node:ident { $($tt:tt)* }) => { $crate::match_ast!(match ($node) { $($tt)* }) };
-    (match ($node:expr) {
-        $( $( $path:ident )::+ ($it:pat) => $res:expr, )*
-        _ => $catch_all:expr $(,)?
+    (match ($node:expr_2021) {
+        $( $( $path:ident )::+ ($it:pat) => $res:expr_2021, )*
+        _ => $catch_all:expr_2021 $(,)?
     }) => {{
         use $crate::ast::AstNode;
         $( if let Some($it) = $($path::)+cast($node.clone()) { $res } else )*
@@ -681,7 +681,7 @@ impl DtNode {
     /// Returns an iterator over this node's path.
     ///
     /// This skips any nodes with the name "/".
-    pub fn path<'i>(&self, src: &'i str) -> impl Iterator<Item = Cow<'i, str>> {
+    pub fn path<'i>(&self, src: &'i str) -> impl Iterator<Item = Cow<'i, str>> + use<'i> {
         self.syntax
             .parent_ancestors()
             .filter_map(DtNode::cast)
@@ -894,6 +894,7 @@ impl ParenExpr {
 }
 impl PrefixExpr {
     /// Returns the token kind of the operation.
+    #[must_use]
     pub fn op(&self) -> Option<TokenKind> {
         self.syntax
             .green

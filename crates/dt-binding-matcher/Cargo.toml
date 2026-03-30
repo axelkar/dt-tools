@@ -1,6 +1,6 @@
 [package]
 name = "dt-binding-matcher"
-edition = "2021"
+edition = "2024"
 description = "Devicetree binding matcher"
 keywords = ["devicetree"]
 

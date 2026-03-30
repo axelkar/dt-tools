@@ -1,6 +1,6 @@
 //! Parses the file at argv 1 and prints the CST
 
-use owo_colors::{colors::xterm::Gray, OwoColorize as _};
+use owo_colors::{OwoColorize as _, colors::xterm::Gray};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
 

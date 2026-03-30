@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use dt_parser::{
+    TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken, DtPhandle, HasMacroInvocation, HasName},
     parser::Entrypoint,
-    TextRange,
 };
 
-use crate::macros::{substitute_macro_ast, MacroDefinition};
+use crate::macros::{MacroDefinition, substitute_macro_ast};
 
 #[derive(thiserror::Error, Debug, displaydoc::Display)]
 pub enum ValueFromAstError {
@@ -217,7 +217,7 @@ fn reference_eval(
                     Ok(PhandleTarget::Path(ident.to_owned()))
                 } else {
                     Ok(PhandleTarget::Label(ident.to_owned()))
-                }
+                };
             }
         }
     };

@@ -12,8 +12,8 @@
 
 use std::{fmt, sync::Arc};
 
-use crate::lexer::TokenKind;
 use crate::TextRange;
+use crate::lexer::TokenKind;
 
 /// The kind of a CST node
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -111,8 +111,8 @@ impl GreenNode {
 
         for child in &self.children {
             match child {
-                GreenItem::Node(ref node) => node.print_tree_rec(level + 1, offset, out)?,
-                GreenItem::Token(ref token) => writeln!(
+                GreenItem::Node(node) => node.print_tree_rec(level + 1, offset, out)?,
+                GreenItem::Token(token) => writeln!(
                     out,
                     "{}{:?}@{}..{} {:?}",
                     INDENT.repeat(level + 1),
@@ -273,7 +273,7 @@ impl RedToken {
     }
 
     /// Iterator over all the ancestors of this token excluding itself.
-    pub fn parent_ancestors(&self) -> impl Iterator<Item = Arc<RedNode>> {
+    pub fn parent_ancestors(&self) -> impl Iterator<Item = Arc<RedNode>> + use<> {
         std::iter::successors(Some(self.parent.clone()), |node| node.parent.clone())
     }
 }
@@ -409,7 +409,7 @@ impl RedNode {
     }
 
     /// Iterator over all the ancestors of this node excluding itself.
-    pub fn parent_ancestors(&self) -> impl Iterator<Item = Arc<RedNode>> {
+    pub fn parent_ancestors(&self) -> impl Iterator<Item = Arc<RedNode>> + use<> {
         std::iter::successors(self.parent.clone(), |node| node.parent.clone())
     }
 }

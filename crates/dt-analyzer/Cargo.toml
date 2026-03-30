@@ -1,6 +1,6 @@
 [package]
 name = "dt-analyzer"
-edition = "2021"
+edition = "2024"
 description = "Devicetree analyzer"
 keywords = ["devicetree"]
 

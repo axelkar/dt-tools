@@ -614,9 +614,9 @@ pub(super) fn entry_name(p: &mut Parser) {
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::{parse, Entrypoint};
+    use crate::parser::{Entrypoint, parse};
 
-    use expect_test::{expect, expect_file, Expect, ExpectFile};
+    use expect_test::{Expect, ExpectFile, expect, expect_file};
 
     #[track_caller]
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]

@@ -74,16 +74,16 @@ fn single_to_array(map: &mut Mapping) {
 
 fn walk_properties(map: &mut Mapping, prop_name: &str) {
     for cond in ["allOf", "oneOf", "anyOf"] {
-        if let Some(cond) = map.get_mut(cond) {
-            if let Some(cond) = cond.as_mapping_mut() {
-                fixup_vals(cond, prop_name);
-            }
+        if let Some(cond) = map.get_mut(cond)
+            && let Some(cond) = cond.as_mapping_mut()
+        {
+            fixup_vals(cond, prop_name);
         }
     }
-    if let Some(then) = map.get_mut("then") {
-        if let Some(then) = then.as_mapping_mut() {
-            fixup_vals(then, prop_name);
-        }
+    if let Some(then) = map.get_mut("then")
+        && let Some(then) = then.as_mapping_mut()
+    {
+        fixup_vals(then, prop_name);
     }
     fixup_vals(map, prop_name);
 }

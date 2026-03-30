@@ -1,6 +1,6 @@
 [package]
 name = "dt-parser"
-edition = "2021"
+edition = "2024"
 description = "Error-resilient Devicetree parser"
 keywords = ["devicetree"]
 categories = ["parser-implementations"]

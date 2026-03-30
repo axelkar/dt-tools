@@ -9,7 +9,7 @@ use crate::{
     lexer::{Token, TokenKind},
 };
 
-use super::{event::Event, Parse, ParseError, WrappedLexError};
+use super::{Parse, ParseError, WrappedLexError, event::Event};
 
 pub(crate) struct Sink<'t, 'input> {
     /// The incoming tokens for trivia handling.

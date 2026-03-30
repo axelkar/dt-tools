@@ -1,6 +1,6 @@
 [package]
 name = "dt-cli"
-edition = "2021"
+edition = "2024"
 description = "Devicetree CLI"
 keywords = ["devicetree"]
 categories = ["compilers", "development-tools", "command-line-utilities"]

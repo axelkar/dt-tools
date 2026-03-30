@@ -3,7 +3,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use salsa::Durability;
 
-use crate::{salsa::db::BaseDb, FxDashMap};
+use crate::{FxDashMap, salsa::db::BaseDb};
 
 /// The main database input.
 #[salsa::input(debug)]

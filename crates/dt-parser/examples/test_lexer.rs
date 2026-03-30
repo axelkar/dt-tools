@@ -1,7 +1,7 @@
 // See https://github.com/maciejhirsz/logos/issues/399
 
 use dt_parser::lexer;
-use owo_colors::{colors::xterm::Gray, OwoColorize as _};
+use owo_colors::{OwoColorize as _, colors::xterm::Gray};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args()

@@ -5,7 +5,7 @@
 
 use std::{iter::Peekable, str::Chars};
 
-use dt_parser::{ast, parser::Entrypoint, TextRange};
+use dt_parser::{TextRange, ast, parser::Entrypoint};
 
 use crate::new::outline::subslice_offset;
 
@@ -148,6 +148,8 @@ impl Parser<'_, '_> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
 pub enum MacroDefinitionParseError {
+    /// Lex error; the lexer should have caught this.
+    LexError,
     /// Missing name
     MissingName,
     /// '#' not followed by a macro parameter
@@ -173,7 +175,7 @@ impl MacroDefinitionParseError {
             | Self::ConcatAtStart { text_range }
             | Self::ConcatAtEnd { text_range }
             | Self::InvalidBackslash { text_range } => Some(*text_range),
-            Self::MissingName => None,
+            Self::LexError | Self::MissingName => None,
         }
     }
 }
@@ -309,12 +311,12 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
                         Some(tok) => {
                             return Err(MacroDefinitionParseError::ConcatInvalidToken {
                                 text_range: tok.text_range,
-                            })
+                            });
                         }
                         None => {
                             return Err(MacroDefinitionParseError::ConcatAtStart {
                                 text_range: concat_text_range,
-                            })
+                            });
                         }
                     }
 
@@ -369,6 +371,7 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
     Ok(())
 }
 
+/// Parsed macro definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MacroDefinition {
     /// Macro name
@@ -381,21 +384,32 @@ pub struct MacroDefinition {
     dont_prescan_indices: Vec<usize>,
 }
 impl MacroDefinition {
+    /// Parses a macro definition from its source code.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_analyzer::macros::{MacroDefinition, MacroDefinitionParseError};
+    ///
+    /// assert_eq!(MacroDefinition::parse("#define"), Err(MacroDefinitionParseError::MissingName));
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`MacroDefinitionParseError`] is returned if the input cannot be parsed into a macro definition.
     pub fn parse(input: &str) -> Result<Self, MacroDefinitionParseError> {
-        debug_assert!(input.starts_with('#'));
         let s = input
-            .get(1..)
-            .expect("lexer safe")
+            .strip_prefix('#')
+            .ok_or(MacroDefinitionParseError::LexError)?
             .trim_start_matches([' ', '\t']);
 
-        debug_assert!(s.starts_with("define"));
         let s = s
             .get("define".len()..)
-            .expect("lexer safe")
+            .ok_or(MacroDefinitionParseError::LexError)?
             .trim_start_matches([' ', '\t']);
 
         let mut iter = s.chars().peekable();
-        let mut offset = subslice_offset(input, s).unwrap();
+        let mut offset = subslice_offset(input, s).ok_or(MacroDefinitionParseError::LexError)?;
 
         let mut macro_name = String::new();
 
@@ -651,6 +665,11 @@ impl TextRangeMapTo {
 ///
 /// If the `ast` parameter is set to `None`, it is assumed that it's an object-like macro and not
 /// a function-like macro.
+///
+/// # Errors
+///
+/// Returns an error if the number of arguments given doesn't match the number of parameters in the
+/// macro definition.
 pub fn substitute_macro_ast(
     ast: Option<&ast::MacroInvocation>,
     def: &MacroDefinition,
@@ -741,7 +760,7 @@ mod tests {
     use std::fmt::Write;
 
     use super::*;
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
     use pretty_assertions::assert_eq;
 
     #[test]

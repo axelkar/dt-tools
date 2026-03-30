@@ -1,6 +1,6 @@
 [package]
 name = "dt-diagnostic"
-edition = "2021"
+edition = "2024"
 description = "dt-tools diagnostic library"
 keywords = ["devicetree"]
 

@@ -1,6 +1,6 @@
 use drop_bomb::DropBomb;
 
-use super::{event::Event, Parser};
+use super::{Parser, event::Event};
 use crate::cst::NodeKind;
 
 pub struct Marker {

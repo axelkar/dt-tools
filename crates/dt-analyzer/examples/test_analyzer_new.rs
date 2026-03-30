@@ -1,7 +1,7 @@
 //! Parses the file at argv 1 and prints the analyzed data
 
 use dt_analyzer::new::outline::AnalyzedToplevel;
-use owo_colors::{colors::xterm::Gray, OwoColorize as _};
+use owo_colors::{OwoColorize as _, colors::xterm::Gray};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args()
