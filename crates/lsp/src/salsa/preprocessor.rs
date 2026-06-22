@@ -647,7 +647,6 @@ fn process_dt_node<'db>(
             env.own_label_map
                 .insert(label_text.clone(), Some(node_path.clone()));
             labels.push(label_text);
-            dbg!(&env.own_label_map);
         }
     }
 
@@ -726,7 +725,6 @@ fn emit_delete_directive<'db>(
                         if is_overlay {
                             // TODO: handle unresolved delete-node!
                         } else {
-                            dbg!(&env.own_label_map);
                             diag.emit(Diagnostic::new(
                                 text_range,
                                 Cow::Owned(format!("Label not found: {name}")),
