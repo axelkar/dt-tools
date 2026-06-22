@@ -7,7 +7,7 @@ use std::{
 
 use owo_colors::{OwoColorize, colors::xterm::Gray};
 
-const BIN: &str = "dt-tools-lsp";
+const PACKAGE: &str = "dt-tools-lsp";
 
 fn main() -> std::io::Result<()> {
     let bind_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9257);
@@ -33,13 +33,14 @@ fn run_child(
     program_args: &[String],
 ) -> std::io::Result<()> {
     println!(
-        "    {} {BIN} {}",
+        "    {} {PACKAGE} {} {}",
         "Building".cyan().bold(),
-        "(silent)".fg::<Gray>()
+        "(silent)".fg::<Gray>(),
+        format_args!("(extra: {cargo_args:?})").fg::<Gray>()
     );
 
     let mut build_child = Command::new("cargo")
-        .args(["build", "--message-format=json", "--bin", BIN])
+        .args(["build", "--message-format=json", "-p", PACKAGE])
         .args(cargo_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

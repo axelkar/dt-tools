@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
-use dt_tools_parser::{TextRange, ast::AstNode};
+use dt_tools_parser::TextRange;
 
 use crate::salsa::{macros::env::InternedKey, preprocessor::PpEvalFileResult};
 
@@ -253,26 +253,16 @@ pub fn compute_diagnostics<'db>(
     }
     */
 
-    // Detect /plugin/; in the root file.
-    let is_overlay = parse_file(db, root_file).is_some_and(|p| {
-        p.parse(db).source_file().directives().any(|dir| {
-            dir.syntax()
-                .child_tokens()
-                .any(|tok| tok.green.kind == dt_tools_parser::lexer::TokenKind::PluginDirective)
-        })
-    });
+    let mut processed_files =
+        if let Some(result) = preprocessor::preprocessor_eval_root_file(db, root_file) {
+            diagnostics.extend_from_slice(result.diagnostics(db));
 
-    let mut processed_files = if let Some(result) =
-        preprocessor::preprocessor_eval_file(db, root_file, None, is_overlay)
-    {
-        diagnostics.extend_from_slice(result.diagnostics(db));
+            diagnostics.extend_from_slice(&check_mir_post(db, result));
 
-        diagnostics.extend_from_slice(&check_mir_post(db, result));
-
-        result.processed_files(db).clone()
-    } else {
-        Vec::new()
-    };
+            result.processed_files(db).clone()
+        } else {
+            Vec::new()
+        };
 
     processed_files.push(root_file);
 

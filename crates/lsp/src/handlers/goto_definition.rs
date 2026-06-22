@@ -1,6 +1,5 @@
 use crate::{
     lsp_utils::position_to_offset,
-    path_to_uri,
     salsa::{db::BaseDb, includes::document_deps},
     uri_to_path,
 };
@@ -45,9 +44,8 @@ pub async fn goto_definition(
         .iter()
         .find(|(text_range, _)| text_range.byte_range().contains(&offset))
     {
-        let uri = path_to_uri(file.path(db)).expect("Resolved included path should be absolute");
         return Some(GotoDefinitionResponse::Scalar(Location::new(
-            uri,
+            file.uri(db),
             Range {
                 start: Position::new(0, 0),
                 end: Position::new(0, 0),

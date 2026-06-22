@@ -235,11 +235,18 @@ mod tests {
         let diag = parking_lot::Mutex::new(&mut diagnostics);
         let file = db
             .get_files()
-            .add_virtual(&db, "/main.dts".into(), "".to_owned());
+            .add_virtual(&db, "/main.dts".into(), String::new());
 
-        super::eval(&db, env, ast, &diag, &mut |text_range| {
+        let num = super::eval(&db, env, ast, &diag, &mut |text_range| {
             text_range.within_file(file)
-        })
+        });
+
+        assert!(
+            diagnostics.is_empty(),
+            "There should be no diagnostics: {diagnostics:#?}"
+        );
+
+        num
     }
 
     #[test]

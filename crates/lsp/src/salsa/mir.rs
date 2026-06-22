@@ -131,6 +131,25 @@ pub enum MirValue {
     /// Phandle reference (`&label` or `&{/path}`).
     Phandle(MirPhandleTarget),
 }
+impl fmt::Display for MirValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MirValue::String(val) => fmt::Debug::fmt(val, f),
+            MirValue::CellList(val) => {
+                f.write_str("<")?;
+                for (i, cell) in val.iter().enumerate() {
+                    if i != 0 {
+                        f.write_str(" ")?;
+                    }
+                    cell.fmt(f)?;
+                }
+                f.write_str(">")
+            }
+            MirValue::Bytestring(val) => todo!(),
+            MirValue::Phandle(val) => val.fmt(f),
+        }
+    }
+}
 
 /// Single cell inside a cell list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +158,14 @@ pub enum MirCell {
     U32(u32),
     /// Phandle reference.
     Phandle(MirPhandleTarget),
+}
+impl fmt::Display for MirCell {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MirCell::U32(val) => val.fmt(f),
+            MirCell::Phandle(val) => val.fmt(f),
+        }
+    }
 }
 
 /// Symbolic phandle target reference. MIR does not resolve these to numeric phandle values.

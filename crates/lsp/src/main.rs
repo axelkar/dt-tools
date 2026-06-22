@@ -21,8 +21,9 @@ use triomphe::Arc;
 
 use crate::capabilities::ResolvedClientCapabilities;
 use crate::err_report::Report;
-use crate::lsp_utils::{path_to_uri, uri_to_path};
+use crate::lsp_utils::uri_to_path;
 use crate::salsa::db::{BaseDatabase, BaseDb};
+use crate::salsa::includes::IncludeDirs;
 
 mod capabilities;
 mod err_report;
@@ -63,6 +64,15 @@ pub struct Session {
 }
 
 impl Session {
+    pub fn root_file(&self) -> Option<crate::salsa::file::File> {
+        let root_uri = self.root_file.lock().clone()?;
+        let root_path = uri_to_path(&root_uri);
+
+        let db = &mut *self.db.lock();
+
+        Some(db.get_files().get_file(db, root_path.as_ref()?))
+    }
+
     pub fn set_file_contents_from_lsp(&self, path: &Utf8Path, contents: String, version: i32) {
         debug!(version, ?path, "set file contents from LSP");
 
@@ -138,10 +148,10 @@ impl Session {
             .map(|dt_tools_workspace| dt_tools_workspace.config.include_dirs.clone())
             .unwrap_or_default();
 
-        if let Some(include_dirs) = crate::salsa::includes::IncludeDirs::try_get(db) {
+        if let Some(include_dirs) = IncludeDirs::try_get(db) {
             include_dirs.set_include_dirs(db).to(new_include_dirs);
         } else {
-            crate::salsa::includes::IncludeDirs::new(db, new_include_dirs);
+            IncludeDirs::new(db, new_include_dirs);
         }
 
         *self.dt_tools_workspace.lock() = dt_tools_workspace;
@@ -326,6 +336,7 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "file closed!")
             .await;
     }
+
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
@@ -334,7 +345,7 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        Ok(handlers::hover::hover(self, params).await)
+        Ok(handlers::hover::hover(self, params))
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
@@ -375,7 +386,7 @@ impl Backend {
                     let path = file.path(db);
 
                     (
-                        path_to_uri(path).expect("should exist"),
+                        file.uri(db),
                         self.session.open_docs.get(path).map(|entry| entry.version),
                         diagnostics
                             .iter()

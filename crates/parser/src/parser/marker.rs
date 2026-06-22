@@ -17,7 +17,6 @@ impl Marker {
         #[cfg(feature = "grammar-tracing")]
         debug!(pos, "start node");
 
-
         Self {
             pos,
             bomb: if cfg!(debug_assertions) {

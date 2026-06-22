@@ -63,7 +63,7 @@ pub fn span_to_location(
     span: &Span<File>,
 ) -> ls_types::Location {
     ls_types::Location {
-        uri: path_to_uri(span.file.path(db)).expect("should be absolute"),
+        uri: span.file.uri(db),
         range: range_to_lsp(
             span.text_range,
             crate::salsa::rope(db, span.file)

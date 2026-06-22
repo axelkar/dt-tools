@@ -12,7 +12,7 @@ use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
 use dt_tools_parser::{
     TextRange,
     ast::{
-        self, AstNode, AstNodeOrToken, AstToken, HasDtPhandle, HasLabel, HasMacroInvocation,
+        self, AstNode, AstNodeOrToken, AstToken, HasDtPhandle, HasLabels, HasMacroInvocation,
         HasName, HasUnitAddress,
     },
     cst::RedNode,
@@ -53,21 +53,25 @@ pub struct PpEvalFileResult<'db> {
 
     #[tracked]
     #[returns(ref)]
+    pub includes: Vec<(File, Span<File>)>,
+
+    #[tracked]
+    #[returns(ref)]
     pub mir: Mir,
 
     /// Whether this file is part of a plugin/overlay (`/plugin/;`).
     pub is_overlay: bool,
 }
 
-/// Lists possible file paths under `parent_path` or `include_dirs`, depending on [`relative`](Self::relative).
+/// Lists possible file paths under `parent_dir_path` or `include_dirs`, depending on [`relative`](Self::relative).
 pub fn possible_include_paths_utf8<'a, P: AsRef<Utf8Path>>(
     relative: bool,
     path: &'a str,
-    parent_path: &'a Utf8Path,
+    parent_dir_path: &'a Utf8Path,
     include_dirs: &'a [P],
 ) -> impl Iterator<Item = Utf8PathBuf> + use<'a, P> {
     relative
-        .then_some(parent_path)
+        .then_some(parent_dir_path)
         .into_iter()
         .chain(include_dirs.iter().map(AsRef::as_ref))
         .map(move |base_path| base_path.join(path))
@@ -266,6 +270,22 @@ fn pp_cond_directive_eval(
     Some(val != 0)
 }
 
+pub fn preprocessor_eval_root_file(
+    db: &dyn BaseDb,
+    root_file: File,
+) -> Option<PpEvalFileResult<'_>> {
+    // Detect /plugin/; in the root file.
+    let is_overlay = crate::salsa::parse_file(db, root_file).is_some_and(|p| {
+        p.parse(db).source_file().directives().any(|dir| {
+            dir.syntax()
+                .child_tokens()
+                .any(|tok| tok.green.kind == TokenKind::PluginDirective)
+        })
+    });
+
+    preprocessor_eval_file(db, root_file, None, is_overlay)
+}
+
 // TODO: rename this function as it actually returns MIR and does everything in "one pass"
 /// Walks toplevel items of a file, evaluating necessary preprocessor directives and macros.
 ///
@@ -301,25 +321,30 @@ pub fn preprocessor_eval_file<'db>(
     let diag = parking_lot::Mutex::new(&mut diagnostics);
 
     // Path of the current file's parent directory.
-    let parent_path = file.path(db).parent()?;
+    let parent_dir_path = file.path(db).parent()?;
     let include_dirs = IncludeDirs::get(db).include_dirs(db);
 
-    let mut files = Vec::new();
+    let mut processed_files = Vec::new();
+    let mut includes = Vec::new();
     let mut mir = Mir::default();
+    let mut ctx = IntraFileCtx {
+        db,
+        file,
+        env: &mut env,
+        diag: &diag,
+        mir: &mut mir,
+        is_overlay,
+    };
 
     // TODO: split into phases with includes and after includes.
 
     for item in file_ast.items() {
         handle_toplevel_item(
-            db,
-            file,
-            &mut env,
-            &diag,
-            parent_path,
+            &mut ctx,
+            parent_dir_path,
             include_dirs,
-            &mut files,
-            &mut mir,
-            is_overlay,
+            &mut processed_files,
+            &mut includes,
             item,
         );
     }
@@ -333,68 +358,67 @@ pub fn preprocessor_eval_file<'db>(
         db,
         env.into_immut(db),
         diagnostics,
-        files,
+        processed_files,
+        includes,
         mir,
         is_overlay,
     ))
 }
 
-#[expect(clippy::too_many_lines, reason = "hard to make this shorter")]
-fn handle_toplevel_item<'db>(
+struct IntraFileCtx<'a, 'db, D: DiagnosticCollector<File>> {
     db: &'db dyn BaseDb,
     file: File,
-    env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
-    parent_path: &Utf8Path,
+    env: &'a mut TrackedMapEnvMut<'db>,
+    diag: &'a D,
+    mir: &'a mut Mir,
+    is_overlay: bool,
+}
+
+#[expect(clippy::too_many_lines, reason = "hard to make this shorter")]
+fn handle_toplevel_item(
+    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    parent_dir_path: &Utf8Path,
     include_dirs: &[Utf8PathBuf],
     processed_files: &mut Vec<File>,
-    mir: &mut Mir,
-    is_overlay: bool,
+    includes: &mut Vec<(File, Span<File>)>,
     item: ast::ToplevelItem,
 ) {
-    let files = db.get_files();
+    let files = ctx.db.get_files();
 
     let text_range = item.syntax_item().text_range();
 
     match item {
         ast::ToplevelItem::Node(dt_node) => {
-            process_dt_node(db, file, env, diag, mir, is_overlay, "", &dt_node);
+            process_dt_node(ctx, "", &dt_node);
         }
         ast::ToplevelItem::Directive(dir) => {
             handle_directive(
-                db,
-                file,
-                env,
-                diag,
+                ctx,
                 processed_files,
-                mir,
-                is_overlay,
+                includes,
                 "",
                 &dir,
                 include_dirs,
-                parent_path,
+                parent_dir_path,
                 files,
             );
         }
         ast::ToplevelItem::PreprocessorConditional(preprocessor_conditional) => {
             let Some((_dir, branch)) =
                 preprocessor_conditional.branches().find(|(dir, _branch)| {
-                    pp_cond_directive_eval(db, env, file, dir, &diag).is_some_and(|val| val)
+                    pp_cond_directive_eval(ctx.db, ctx.env, ctx.file, dir, &ctx.diag)
+                        .is_some_and(|val| val)
                 })
             else {
                 return;
             };
             for item in branch.items() {
                 handle_toplevel_item(
-                    db,
-                    file,
-                    env,
-                    diag,
-                    parent_path,
+                    ctx,
+                    parent_dir_path,
                     include_dirs,
                     processed_files,
-                    mir,
-                    is_overlay,
+                    includes,
                     item,
                 );
             }
@@ -402,22 +426,22 @@ fn handle_toplevel_item<'db>(
         ast::ToplevelItem::PreprocessorDirective(dir) => match dir.kind() {
             TokenKind::PragmaDirective => {
                 // TODO: implement #pragma
-                diag.emit(Diagnostic::new(
-                    text_range.within_file(file),
+                ctx.diag.emit(Diagnostic::new(
+                    text_range.within_file(ctx.file),
                     Cow::Borrowed("`#pragma` is unimplemented"),
                     Severity::Error,
                 ));
             }
             TokenKind::DefineDirective => match MacroDefinition::parse(dir.syntax().text()) {
-                Ok(parsed) => env.insert_macro(parsed),
+                Ok(parsed) => ctx.env.insert_macro(parsed),
                 Err(err) => {
-                    diag.emit(Diagnostic::new(
+                    ctx.diag.emit(Diagnostic::new(
                         if let Some(local_range) = err.text_range() {
                             local_range.offset(text_range.start)
                         } else {
                             text_range
                         }
-                        .within_file(file),
+                        .within_file(ctx.file),
                         Cow::Owned(err.to_string()),
                         Severity::Error,
                     ));
@@ -427,33 +451,38 @@ fn handle_toplevel_item<'db>(
                 let input = dir.syntax().text();
                 let (args, args_text_range) = get_pp_directive_args(input, "undef", text_range);
                 if args.contains(' ') {
-                    diag.emit(Diagnostic::new(
-                        args_text_range.within_file(file),
+                    ctx.diag.emit(Diagnostic::new(
+                        args_text_range.within_file(ctx.file),
                         Cow::Borrowed("Arguments to `#undef` should be just a macro name"),
                         Severity::Error,
                     ));
                 } else {
-                    env.own_macro_map.insert(args, None);
+                    ctx.env.own_macro_map.insert(args, None);
                 }
             }
             TokenKind::IncludeDirective => {
                 // TODO: real evaluation and macro substitution
                 let input = dir.syntax().text();
-                let Some((relative, include_path)) =
-                    get_pp_directive_arg_string(input, "include", text_range, &diag, &mut |tr| {
-                        tr.within_file(file)
-                    })
-                else {
+                let Some((relative, include_path)) = get_pp_directive_arg_string(
+                    input,
+                    "include",
+                    text_range,
+                    &ctx.diag,
+                    &mut |tr| tr.within_file(ctx.file),
+                ) else {
                     return;
                 };
 
-                let Some(include_file) =
-                    possible_include_paths_utf8(relative, &include_path, parent_path, include_dirs)
-                        .map(|path| files.get_file(db, &path))
-                        .find(|file| file.is_readable_file(db))
-                else {
-                    diag.emit(Diagnostic::new(
-                        text_range.within_file(file),
+                let Some(include_file) = possible_include_paths_utf8(
+                    relative,
+                    &include_path,
+                    parent_dir_path,
+                    include_dirs,
+                )
+                .map(|path| files.get_file(ctx.db, &path))
+                .find(|file| file.is_readable_file(ctx.db)) else {
+                    ctx.diag.emit(Diagnostic::new(
+                        text_range.within_file(ctx.file),
                         Cow::Owned(format!("Couldn't find file to include: {include_path}")),
                         Severity::Error,
                     ));
@@ -461,36 +490,38 @@ fn handle_toplevel_item<'db>(
                 };
 
                 processed_files.push(include_file);
+                includes.push((include_file, text_range.within_file(ctx.file)));
 
                 let result = preprocessor_eval_file(
-                    db,
+                    ctx.db,
                     include_file,
-                    Some(std::mem::take(env).into_immut(db)),
-                    is_overlay,
+                    Some(std::mem::take(ctx.env).into_immut(ctx.db)),
+                    ctx.is_overlay,
                 )
                 .expect("The file should exist, its existence is confirmed above");
 
-                *env = result.env_after(db).to_mut();
-                mir.merge(result.mir(db));
+                *ctx.env = result.env_after(ctx.db).to_mut();
+                ctx.mir.merge(result.mir(ctx.db));
                 result
-                    .diagnostics(db)
+                    .diagnostics(ctx.db)
                     .iter()
-                    .for_each(|diagnostic| diag.emit(diagnostic.clone()));
-                processed_files.extend_from_slice(result.processed_files(db));
+                    .for_each(|diagnostic| ctx.diag.emit(diagnostic.clone()));
+                processed_files.extend_from_slice(result.processed_files(ctx.db));
+                includes.extend_from_slice(result.includes(ctx.db));
 
                 // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
-                env.flatten_ancestors(db);
+                ctx.env.flatten_ancestors(ctx.db);
             }
             TokenKind::ErrorDirective => {
                 let input = dir.syntax().text();
                 let (args, _args_text_range) = get_pp_directive_args(input, "error", text_range);
 
                 // TODO: remove debug thing?
-                diag.emit(Diagnostic::new(
-                    text_range.within_file(file),
+                ctx.diag.emit(Diagnostic::new(
+                    text_range.within_file(ctx.file),
                     Cow::Owned(format!(
                         "`#error`: {args:?}, defined {args:?}={}",
-                        env.get_macro(db, &args).is_some()
+                        ctx.env.get_macro(ctx.db, &args).is_some()
                     )),
                     Severity::Error,
                 ));
@@ -501,18 +532,14 @@ fn handle_toplevel_item<'db>(
 }
 
 /// Handle a DTS directive: `/include/`, `/delete-node/`, `/delete-property/`.
-fn handle_directive<'db>(
-    db: &'db dyn BaseDb,
-    file: File,
-    env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
+fn handle_directive(
+    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
     processed_files: &mut Vec<File>,
-    mir: &mut Mir,
-    is_overlay: bool,
+    includes: &mut Vec<(File, Span<File>)>,
     path_prefix: &str,
     dir: &ast::Directive,
     include_dirs: &[Utf8PathBuf],
-    parent_path: &Utf8Path,
+    parent_dir_path: &Utf8Path,
     files: &crate::salsa::file::Files,
 ) {
     let tokens: Vec<_> = dir.syntax().child_tokens().collect();
@@ -534,8 +561,8 @@ fn handle_directive<'db>(
             match dt_tools_analyzer::string::interpret_escaped_string(string_tok.text()) {
                 Ok(path) => path,
                 Err(err) => {
-                    diag.emit(Diagnostic::new(
-                        string_tok.text_range().within_file(file),
+                    ctx.diag.emit(Diagnostic::new(
+                        string_tok.text_range().within_file(ctx.file),
                         Cow::Owned(format!("Failed to parse string: {err}")),
                         Severity::Error,
                     ));
@@ -544,12 +571,12 @@ fn handle_directive<'db>(
             };
 
         let Some(include_file) =
-            possible_include_paths_utf8(true, &include_path, parent_path, include_dirs)
-                .map(|path| files.get_file(db, &path))
-                .find(|f| f.is_readable_file(db))
+            possible_include_paths_utf8(true, &include_path, parent_dir_path, include_dirs)
+                .map(|path| files.get_file(ctx.db, &path))
+                .find(|f| f.is_readable_file(ctx.db))
         else {
-            diag.emit(Diagnostic::new(
-                text_range.within_file(file),
+            ctx.diag.emit(Diagnostic::new(
+                text_range.within_file(ctx.file),
                 Cow::Owned(format!("Couldn't find file to include: {include_path}")),
                 Severity::Error,
             ));
@@ -557,27 +584,29 @@ fn handle_directive<'db>(
         };
 
         processed_files.push(include_file);
+        includes.push((include_file, text_range.within_file(ctx.file)));
 
         let result = preprocessor_eval_file(
-            db,
+            ctx.db,
             include_file,
-            Some(std::mem::take(env).into_immut(db)),
-            is_overlay,
+            Some(std::mem::take(ctx.env).into_immut(ctx.db)),
+            ctx.is_overlay,
         )
         .expect("file exists");
 
-        *env = result.env_after(db).to_mut();
-        mir.merge(result.mir(db));
+        *ctx.env = result.env_after(ctx.db).to_mut();
+        ctx.mir.merge(result.mir(ctx.db));
         result
-            .diagnostics(db)
+            .diagnostics(ctx.db)
             .iter()
-            .for_each(|diagnostic| diag.emit(diagnostic.clone()));
-        processed_files.extend_from_slice(result.processed_files(db));
+            .for_each(|diagnostic| ctx.diag.emit(diagnostic.clone()));
+        processed_files.extend_from_slice(result.processed_files(ctx.db));
+        includes.extend_from_slice(result.includes(ctx.db));
 
         // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
-        env.flatten_ancestors(db);
+        ctx.env.flatten_ancestors(ctx.db);
     } else {
-        emit_delete_directive(db, file, env, diag, mir, is_overlay, path_prefix, dir);
+        emit_delete_directive(ctx, path_prefix, dir);
     }
 }
 
@@ -636,47 +665,69 @@ fn get_name_and_unit_addr<'db, Ast: HasName + HasMacroInvocation + HasUnitAddres
 }
 
 /// Process an [`ast::DtNode`] and its subtree into flat [`MirDefinition`]s.
-fn process_dt_node<'db>(
-    db: &'db dyn BaseDb,
-    file: File,
-    env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
-    mir: &mut Mir,
-    is_overlay: bool,
+fn process_dt_node(
+    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
     path_prefix: &str,
     dt_node: &ast::DtNode,
 ) {
     let provenance = MirProvenance {
-        file,
+        file: ctx.file,
         text_range: dt_node.syntax().text_range(),
     };
 
     // Handle extensions: &label { } or &{/path} { }
     if let Some(phandle) = dt_node.extension_name() {
-        let Some(target) = convert_phandle(db, env, diag, &mut |tr| tr.within_file(file), &phandle)
-        else {
+        let Some(target) = convert_phandle(
+            ctx.db,
+            ctx.env,
+            ctx.diag,
+            &mut |tr| tr.within_file(ctx.file),
+            &phandle,
+        ) else {
             return;
         };
 
         let target_path = match &target {
-            MirPhandleTarget::Label(name) => {
-                env.get_label(db, name).map(std::borrow::ToOwned::to_owned)
-            }
+            MirPhandleTarget::Label(name) => ctx
+                .env
+                .get_label(ctx.db, name)
+                .map(std::borrow::ToOwned::to_owned),
             MirPhandleTarget::Path(path) => Some(path.clone()),
         };
         if let Some(ref target_path) = target_path {
-            process_dt_node_body(db, file, env, diag, mir, is_overlay, target_path, dt_node);
-        } else if is_overlay {
+            let labels = collect_labels(ctx, dt_node, target_path);
+
+            // Emit the node definition.
+            ctx.mir.definitions.push(MirDefinition {
+                path: target_path.clone(),
+                value: MirDefinitionValue::Node(MirNodeData { labels }),
+                provenance,
+            });
+
+            process_dt_node_body(ctx, target_path, dt_node);
+        } else if ctx.is_overlay {
             // Overlay; we can leave the extension unresolved
             let mut body_mir = Mir::default();
-            process_dt_node_body(db, file, env, diag, &mut body_mir, is_overlay, "", dt_node);
+            process_dt_node_body(
+                &mut IntraFileCtx {
+                    db: ctx.db,
+                    file: ctx.file,
+                    env: ctx.env,
+                    diag: ctx.diag,
+                    mir: &mut body_mir,
+                    is_overlay: ctx.is_overlay,
+                },
+                "",
+                dt_node,
+            );
 
             // Propagate any nested unresolved extensions.
-            mir.unresolved_extensions
+            ctx.mir
+                .unresolved_extensions
                 .extend(body_mir.unresolved_extensions);
 
             if let MirPhandleTarget::Label(label) = target {
-                mir.unresolved_extensions.push(UnresolvedExtension {
+                ctx.mir.unresolved_extensions.push(UnresolvedExtension {
                     label,
                     body: body_mir.definitions,
                     provenance: provenance.clone(),
@@ -688,10 +739,21 @@ fn process_dt_node<'db>(
 
             // Process so diagnostics are emitted
             let mut body_mir = Mir::default();
-            process_dt_node_body(db, file, env, diag, &mut body_mir, is_overlay, "", dt_node);
+            process_dt_node_body(
+                &mut IntraFileCtx {
+                    db: ctx.db,
+                    file: ctx.file,
+                    env: ctx.env,
+                    diag: ctx.diag,
+                    mir: &mut body_mir,
+                    is_overlay: ctx.is_overlay,
+                },
+                "",
+                dt_node,
+            );
 
-            diag.emit(Diagnostic::new(
-                phandle.syntax().text_range().within_file(file),
+            ctx.diag.emit(Diagnostic::new(
+                phandle.syntax().text_range().within_file(ctx.file),
                 Cow::Owned(format!("Label not found: {target}")),
                 Severity::Error,
             ));
@@ -699,66 +761,93 @@ fn process_dt_node<'db>(
         return;
     }
 
-    let name = get_name_and_unit_addr(db, env, diag, &mut |tr| tr.within_file(file), dt_node)
-        .or_else(|| {
-            // Root node
-            dt_node
-                .syntax()
-                .child_tokens()
-                .any(|tok| tok.green.kind == TokenKind::Slash)
-                .then(String::new)
-        });
+    let name = get_name_and_unit_addr(
+        ctx.db,
+        ctx.env,
+        ctx.diag,
+        &mut |tr| tr.within_file(ctx.file),
+        dt_node,
+    )
+    .or_else(|| {
+        // Root node
+        dt_node
+            .syntax()
+            .child_tokens()
+            .any(|tok| tok.green.kind == TokenKind::Slash)
+            .then(String::new)
+    });
 
     if let Some(name) = name {
         // Build the node's full path.
         let node_path = build_path(path_prefix, &name);
 
-        // Collect labels defined on this node.
-        let mut labels: Vec<String> = Vec::new();
-        if let Some(label_ast) = dt_node.label()
-            && let Some(label_name) =
-                resolve_name_or_macro(db, env, diag, &mut |tr| tr.within_file(file), &label_ast)
-        {
-            // Check for duplicate labels (DTC: no duplicates globally).
-            if env.get_label(db, &label_name).is_some() {
-                // TODO: MultiSpan & cross-file diagnostics
-                diag.emit(Diagnostic::new(
-                    label_ast.syntax().text_range().within_file(file),
-                    Cow::Owned(format!("Duplicate label `{label_name}`")),
-                    Severity::Error,
-                ));
-            } else {
-                env.own_label_map
-                    .insert(label_name.clone(), Some(node_path.clone()));
-                labels.push(label_name);
-            }
-        }
+        let labels = collect_labels(ctx, dt_node, &node_path);
 
         // Emit the node definition.
-        mir.definitions.push(MirDefinition {
+        ctx.mir.definitions.push(MirDefinition {
             path: node_path.clone(),
             value: MirDefinitionValue::Node(MirNodeData { labels }),
             provenance,
         });
 
         // Process the node body: subnodes and properties.
-        process_dt_node_body(db, file, env, diag, mir, is_overlay, &node_path, dt_node);
+        process_dt_node_body(ctx, &node_path, dt_node);
     } else {
-        // Process so diagnostics are emitted
+        // Name is missing, but process so diagnostics are emitted
         let mut body_mir = Mir::default();
-        process_dt_node_body(db, file, env, diag, &mut body_mir, is_overlay, "", dt_node);
+        process_dt_node_body(
+            &mut IntraFileCtx {
+                db: ctx.db,
+                file: ctx.file,
+                env: ctx.env,
+                diag: ctx.diag,
+                mir: &mut body_mir,
+                is_overlay: ctx.is_overlay,
+            },
+            "",
+            dt_node,
+        );
     }
 }
 
+// Collect labels defined on an [`ast::DtNode`].
+fn collect_labels(
+    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    dt_node: &ast::DtNode,
+    node_path: &str,
+) -> Vec<String> {
+    let mut labels: Vec<String> = Vec::new();
+    for label_ast in dt_node.labels() {
+        if let Some(label_name) = resolve_name_or_macro(
+            ctx.db,
+            ctx.env,
+            ctx.diag,
+            &mut |tr| tr.within_file(ctx.file),
+            &label_ast,
+        ) {
+            // Check for duplicate labels (DTC: no duplicates globally).
+            if ctx.env.get_label(ctx.db, &label_name).is_some() {
+                // TODO: MultiSpan & cross-file diagnostics
+                ctx.diag.emit(Diagnostic::new(
+                    label_ast.syntax().text_range().within_file(ctx.file),
+                    Cow::Owned(format!("Duplicate label `{label_name}`")),
+                    Severity::Error,
+                ));
+            } else {
+                ctx.env
+                    .own_label_map
+                    .insert(label_name.clone(), Some(node_path.to_owned()));
+                labels.push(label_name);
+            }
+        }
+    }
+    labels
+}
+
 /// Process the body of an [`ast::DtNode`]: subnodes and properties.
-fn process_dt_node_body<'db>(
-    db: &'db dyn BaseDb,
-    file: File,
-    env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
-    mir: &mut Mir,
-    is_overlay: bool,
-    parent_path: &str,
+fn process_dt_node_body(
+    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
     // TODO: preprocessor conditionals in nodes
@@ -766,28 +855,23 @@ fn process_dt_node_body<'db>(
     for item in dt_node.node_items() {
         match item {
             ast::NodeItem::DtProperty(prop) => {
-                if let Some(def) = process_dt_property(db, file, env, diag, parent_path, &prop) {
-                    mir.definitions.push(def);
+                if let Some(def) = process_dt_property(ctx, parent_node_path, &prop) {
+                    ctx.mir.definitions.push(def);
                 }
             }
             ast::NodeItem::DtNode(subnode) => {
-                process_dt_node(db, file, env, diag, mir, is_overlay, parent_path, &subnode);
+                process_dt_node(ctx, parent_node_path, &subnode);
             }
             ast::NodeItem::Directive(dir) => {
-                emit_delete_directive(db, file, env, diag, mir, is_overlay, parent_path, &dir);
+                emit_delete_directive(ctx, parent_node_path, &dir);
             }
         }
     }
 }
 
 /// Emit [`MirDefinitionValue::DeletedNode`] or [`MirDefinitionValue::DeletedProperty`] from a directive.
-fn emit_delete_directive<'db>(
-    db: &'db dyn BaseDb,
-    file: File,
-    env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
-    mir: &mut Mir,
-    is_overlay: bool,
+fn emit_delete_directive(
+    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
     path_prefix: &str,
     dir: &ast::Directive,
 ) {
@@ -795,29 +879,36 @@ fn emit_delete_directive<'db>(
     let Some(args) = dir.arguments() else { return };
 
     let text_range = dir.syntax().text_range();
-    let provenance = MirProvenance { file, text_range };
+    let provenance = MirProvenance {
+        file: ctx.file,
+        text_range,
+    };
 
     if kind == Some(TokenKind::DeleteNodeDirective) {
         let target_path = if let Some(name_tok) = args.name() {
             build_path(path_prefix, name_tok.syntax().text().as_str())
         } else if let Some(phandle) = args.dt_phandle() {
-            let Some(target) =
-                convert_phandle(db, env, diag, &mut |tr| tr.within_file(file), &phandle)
-            else {
+            let Some(target) = convert_phandle(
+                ctx.db,
+                ctx.env,
+                ctx.diag,
+                &mut |tr| tr.within_file(ctx.file),
+                &phandle,
+            ) else {
                 return;
             };
 
             match &target {
                 MirPhandleTarget::Label(name) => {
-                    if let Some(path) = env.get_label(db, name) {
+                    if let Some(path) = ctx.env.get_label(ctx.db, name) {
                         path.to_owned()
                     } else {
                         // Couldn't resolve it.
-                        if is_overlay {
+                        if ctx.is_overlay {
                             // TODO: handle unresolved delete-node!
                         } else {
-                            diag.emit(Diagnostic::new(
-                                text_range.within_file(file),
+                            ctx.diag.emit(Diagnostic::new(
+                                text_range.within_file(ctx.file),
                                 Cow::Owned(format!("Label not found: {name}")),
                                 Severity::Error,
                             ));
@@ -831,7 +922,7 @@ fn emit_delete_directive<'db>(
             return;
         };
 
-        mir.definitions.push(MirDefinition {
+        ctx.mir.definitions.push(MirDefinition {
             path: target_path,
             value: MirDefinitionValue::DeletedNode,
             provenance,
@@ -841,7 +932,7 @@ fn emit_delete_directive<'db>(
     {
         let target_path = build_path(path_prefix, name_tok.syntax().text().as_str());
 
-        mir.definitions.push(MirDefinition {
+        ctx.mir.definitions.push(MirDefinition {
             path: target_path,
             value: MirDefinitionValue::DeletedProperty,
             provenance,
@@ -852,28 +943,38 @@ fn emit_delete_directive<'db>(
 /// Convert a [`ast::DtProperty`] into a [`MirDefinition`], if valid.
 ///
 /// Returns `None` if the property has no name or can't be processed.
-fn process_dt_property<'db>(
-    db: &'db dyn BaseDb,
-    file: File,
-    env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
-    parent_path: &str,
+fn process_dt_property(
+    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    parent_node_path: &str,
     prop: &ast::DtProperty,
 ) -> Option<MirDefinition> {
     let mut values = Vec::new();
     for value_ast in prop.values() {
-        if let Some(value) =
-            convert_prop_value(db, env, diag, &mut |tr| tr.within_file(file), &value_ast)
-        {
+        if let Some(value) = convert_prop_value(
+            ctx.db,
+            ctx.env,
+            ctx.diag,
+            &mut |tr| tr.within_file(ctx.file),
+            &value_ast,
+        ) {
             values.push(value);
         }
     }
 
-    let name = get_name_and_unit_addr(db, env, diag, &mut |tr| tr.within_file(file), prop)?;
-    let path = build_path(parent_path, &name);
+    let name = get_name_and_unit_addr(
+        ctx.db,
+        ctx.env,
+        ctx.diag,
+        &mut |tr| tr.within_file(ctx.file),
+        prop,
+    )?;
+    let path = build_path(parent_node_path, &name);
 
     let text_range = prop.syntax().text_range();
-    let provenance = MirProvenance { file, text_range };
+    let provenance = MirProvenance {
+        file: ctx.file,
+        text_range,
+    };
 
     Some(MirDefinition {
         path,
@@ -1152,18 +1253,10 @@ mod tests {
                 .add_virtual(&db, Utf8PathBuf::from(path), contents.to_owned());
         }
 
-        let is_overlay = crate::salsa::parse_file(&db, root_file).is_some_and(|p| {
-            p.parse(&db).source_file().directives().any(|dir| {
-                dir.syntax()
-                    .child_tokens()
-                    .any(|tok| tok.green.kind == dt_tools_parser::lexer::TokenKind::PluginDirective)
-            })
-        });
-
         let (diags, _included_files) = crate::salsa::compute_diagnostics(&db, root_file);
 
-        let result = preprocessor_eval_file(&db, root_file, None, is_overlay)
-            .expect("Should be a readable file");
+        let result =
+            preprocessor_eval_root_file(&db, root_file).expect("Should be a readable file");
         let mir = result.mir(&db);
 
         let mut out = mir.fmt_for_test(&db);
@@ -1252,6 +1345,7 @@ mod tests {
             expect![[r#"
                 node   / /main.dts 11..31
                 node labels=[LBL] /node /main.dts 15..28
+                node   /node /main.dts 32..53
                 property = CellList([U32(1)]) /node/prop /main.dts 39..50
             "#]],
         );
