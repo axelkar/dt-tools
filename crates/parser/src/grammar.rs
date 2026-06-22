@@ -46,6 +46,8 @@ pub(crate) use vis;
 ///
 /// e.g. `FOO(bar, 1234)`
 fn macro_invocation(m: Marker, p: &mut Parser) -> CompletedMarker {
+    let _span = tracy_client::span!("grammar::macro_invocation");
+
     assert!(p.eat(TokenKind::Ident));
     if p.at_immediate(TokenKind::LParen) {
         p.bump();
@@ -130,6 +132,8 @@ fn reference(p: &mut Parser) {
 ///
 /// `AT_EOF`: whether a successful end of cells is determined by a `>` or end-of-file
 pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
+    let _span = tracy_client::span!("grammar::cells");
+
     loop {
         p.add_expected(Expected::Cell);
         if p.silent_at_set(&[TokenKind::Number, TokenKind::Char]) {
@@ -170,6 +174,8 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
 ///
 /// [spec]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
 fn dt_expr(p: &mut Parser) {
+    let _span = tracy_client::span!("grammar::dt_expr");
+
     let m = p.start();
 
     assert!(p.eat(TokenKind::LParen));
@@ -238,6 +244,8 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
         TokenKind::Ampersand,
     ];
 
+    let _span = tracy_client::span!("grammar::propvalues");
+
     while !p.at_end() {
         p.add_expected(Expected::Value);
         if p.silent_at(TokenKind::String) {
@@ -274,6 +282,8 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
 ///
 /// - Form: `= "foo", <1>;` | `;`.
 fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
+    let _span = tracy_client::span!("grammar::dt_property");
+
     vis!(begin);
     if p.eat(TokenKind::Semicolon) {
         return m.complete(p, NodeKind::DtProperty);
@@ -303,6 +313,8 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
 /// - Form: `{ foo = "bar"; baz {}; };`.
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn dt_node_body(p: &mut Parser, m: Marker) {
+    let _span = tracy_client::span!("grammar::dt_node_body");
+
     vis!(begin);
     #[cfg(feature = "grammar-tracing")]
     debug!("dt_node_body start");
@@ -343,6 +355,8 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 #[expect(clippy::too_many_lines, reason = "no good way to make this shorter")]
 fn item(p: &mut Parser) {
+    let _span = tracy_client::span!("grammar::item");
+
     vis!(begin);
     #[cfg(feature = "grammar-tracing")]
     debug!("item start");
@@ -597,6 +611,8 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
             item(p);
         }
     }
+
+    let _span = tracy_client::span!("grammar::entry_sourcefile");
 
     while !p.at_end() {
         toplevel_item(p);

@@ -32,6 +32,7 @@ dt-tools-diagnostic = { workspace = true, features = ["parking_lot"] }
 salsa.workspace = true
 camino.workspace = true
 dt-tools-workspace.workspace = true
+profiling = { version = "1.0.18", features = ["profile-with-tracy"] }
 
 [dev-dependencies]
 expect-test.workspace = true

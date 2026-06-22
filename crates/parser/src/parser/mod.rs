@@ -9,7 +9,7 @@ use crate::{
     TextRange, ast,
     cst::{GreenNode, NodeKind, RedNode},
     grammar,
-    lexer::TokenKind,
+    lexer::{Lexer, TokenKind},
 };
 
 use self::event::Event;
@@ -109,9 +109,14 @@ impl Entrypoint {
     /// Parses the input according to the entrypoint.
     #[must_use]
     pub fn parse(self, input: &str) -> Parse<'_> {
+        let span = tracy_client::span!("parser::parse");
+        span.emit_text(&format!("Entrypoint: {self:?}"));
+
         // TODO: typesafe Entrypoint -> correct AST struct
-        use super::lexer::Lexer;
-        let tokens: Vec<_> = Lexer::new(input).collect();
+        let tokens: Vec<_> = {
+            let _span = tracy_client::span!("parser::parse::lex");
+            Lexer::new(input).collect()
+        };
 
         #[cfg(feature = "visualize")]
         visualizer::Event::Init {
@@ -130,7 +135,9 @@ impl Entrypoint {
         let mut parser = Parser::new(source);
         let p = &mut parser;
 
-        let root_kind = match self {
+        let root_kind = {
+        let _span = tracy_client::span!("parser::grammar");
+            match self {
             Self::SourceFile => {
                 grammar::entry_sourcefile(p);
                 NodeKind::SourceFile
@@ -155,7 +162,7 @@ impl Entrypoint {
                 grammar::expr::entry_preprocessor_conditional(p);
                 NodeKind::EntryPreprocessorConditional
             }
-        };
+        } };
 
         // Add all tokens to CST and error
         if !p.at_end() {
@@ -235,6 +242,8 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Returns true if `kind` is the current token's kind.
     pub fn at(&mut self, kind: TokenKind) -> bool {
+        let _span = tracy_client::span!("parser::Parser::at");
+
         self.expected.push(Expected::Kind(kind));
         self.peek() == Some(kind)
     }
@@ -249,6 +258,8 @@ impl<'t, 'input> Parser<'t, 'input> {
     ///
     /// Basically a combination of [`Parser::at`] and [`Parser::bump`]
     pub fn eat(&mut self, kind: TokenKind) -> bool {
+        let _span = tracy_client::span!("parser::Parser::eat");
+
         if self.at(kind) {
             self.bump();
             true
@@ -268,6 +279,8 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Returns true if the current token's kind is in `set`.
     pub fn at_set(&mut self, set: &[TokenKind]) -> bool {
+        let _span = tracy_client::span!("parser::Parser::at_set");
+
         self.expected.reserve(set.len());
         for kind in set {
             self.expected.push(Expected::Kind(*kind));
@@ -279,6 +292,8 @@ impl<'t, 'input> Parser<'t, 'input> {
     ///
     /// - This doesn't add `set` to `expected_kinds`.
     pub fn silent_at_set(&mut self, set: &[TokenKind]) -> bool {
+        let _span = tracy_client::span!("parser::Parser::silent_at_set");
+
         self.peek().is_some_and(|k| set.contains(&k))
     }
 
@@ -401,6 +416,8 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     #[inline]
     fn bump_name_generic(&mut self, set: &[TokenKind]) {
+        let _span = tracy_client::span!("parser::Parser::bump_name_generic");
+
         #[cfg(feature = "grammar-tracing")]
         tracing::info!("bump_name_generic");
 
@@ -453,6 +470,8 @@ impl<'t, 'input> Parser<'t, 'input> {
     ///
     /// This equals the result of any previous `peek_*` calls
     pub fn bump(&mut self) {
+        let _span = tracy_client::span!("parser::Parser::bump");
+
         self.expected.clear();
 
         #[cfg(feature = "grammar-tracing")]

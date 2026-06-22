@@ -39,7 +39,10 @@ impl<'db> TrackedMapEnv<'db> {
     /// referring to [`TrackedMapEnv::own_map`].
     #[salsa::tracked(returns(as_ref))]
     pub fn get_macro(self, db: &'db dyn BaseDb, name: InternedKey<'db>) -> Option<MacroDefinition> {
-        tracing::debug!(
+        let span = profiling::tracy_client::span!("TrackedMapEnv::get_macro");
+        span.emit_text(name.text(db));
+
+        tracing::trace!(
             name = name.text(db),
             self = ?self.0,
             self.parent = ?self.parent(db).map(|parent| parent.0),
@@ -57,7 +60,10 @@ impl<'db> TrackedMapEnv<'db> {
     /// See [`Self::get_macro`] for details about Salsa integration.
     #[salsa::tracked(returns(as_ref))]
     pub fn get_label(self, db: &'db dyn BaseDb, name: InternedKey<'db>) -> Option<String> {
-        tracing::debug!(
+        let span = profiling::tracy_client::span!("TrackedMapEnv::get_label");
+        span.emit_text(name.text(db));
+
+        tracing::trace!(
             name = name.text(db),
             self = ?self.0,
             self.parent = ?self.parent(db).map(|parent| parent.0),
@@ -118,6 +124,9 @@ impl<'db> TrackedMapEnvMut<'db> {
 
     // Gets a macro by name
     pub fn get_macro(&self, db: &'db dyn BaseDb, name: &str) -> Option<&MacroDefinition> {
+        let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_macro");
+        span.emit_text(name);
+
         self.own_macro_map
             .get(name)
             .map(Option::as_ref)
@@ -133,6 +142,9 @@ impl<'db> TrackedMapEnvMut<'db> {
 
     // Gets a label by name
     pub fn get_label(&self, db: &'db dyn BaseDb, name: &str) -> Option<&str> {
+        let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_label");
+        span.emit_text(name);
+
         self.own_label_map
             .get(name)
             .map(Option::as_ref)
@@ -154,6 +166,8 @@ impl<'db> TrackedMapEnvMut<'db> {
 
     /// Flatten ancestors to `self`, removing any indirection.
     pub fn flatten_ancestors(&mut self, db: &'db dyn BaseDb) {
+        let _span = profiling::tracy_client::span!("TrackedMapEnvMut::flatten_ancestors");
+
         let mut macro_map = FxHashMap::default();
         let mut label_map = FxHashMap::default();
 

@@ -306,6 +306,9 @@ pub fn preprocessor_eval_file<'db>(
     parent_env: Option<TrackedMapEnv<'db>>,
     is_overlay: bool,
 ) -> Option<PpEvalFileResult<'db>> {
+    let span = profiling::tracy_client::span!("lsp::salsa::preprocessor::preprocessor_eval_file");
+    span.emit_text(file.path(db).as_str());
+
     let mut env = TrackedMapEnvMut::from_parent(parent_env);
 
     let parse = super::parse_file(db, file)?;
@@ -319,6 +322,8 @@ pub fn preprocessor_eval_file<'db>(
     let include_dirs = IncludeDirs::get(db).include_dirs(db);
 
     let mut mir = Mir::default();
+
+    // TODO: split into phases with includes and after includes.
 
     for item in file_ast.items() {
         handle_toplevel_item(
@@ -472,6 +477,10 @@ fn handle_toplevel_item<'db>(
                 .expect("The file should exist, its existence is confirmed above");
                 *env = result.env_after(db).to_mut();
                 mir.merge(result.mir(db));
+
+
+                // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
+                env.flatten_ancestors(db);
             }
             TokenKind::ErrorDirective => {
                 let input = dir.syntax().text();
@@ -489,9 +498,6 @@ fn handle_toplevel_item<'db>(
             _ => {}
         },
     }
-
-    // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
-    env.flatten_ancestors(db);
 }
 
 /// Handle a DTS directive: `/include/`, `/delete-node/`, `/delete-property/`.
@@ -555,6 +561,9 @@ fn handle_directive<'db>(
         .expect("file exists");
         *env = result.env_after(db).to_mut();
         mir.merge(result.mir(db));
+
+        // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
+        env.flatten_ancestors(db);
     } else {
         emit_delete_directive(db, file, env, diag, mir, is_overlay, path_prefix, dir);
     }

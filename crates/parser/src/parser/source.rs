@@ -129,6 +129,7 @@ impl<'t, 'input> Source<'t, 'input> {
 
     /// Returns the last token's range if it exists. The token may be trivia.
     pub(crate) fn last_token_range(&self) -> Option<TextRange> {
+        #[cfg(feature = "grammar-tracing")]
         tracing::debug!(last_token = ?self.tokens.last());
         Some(self.tokens.last()?.text_range)
     }
@@ -171,10 +172,17 @@ impl<'t, 'input> Source<'t, 'input> {
     }
 
     pub(super) fn skip_trivia(&mut self) {
-        while self.peek_kind_immediate().is_some_and(TokenKind::is_trivia) {
+        let _span = tracy_client::span!("parser::Source::skip_trivia");
+
+        while self
+            .tokens
+            .get(self.cursor)
+            .is_some_and(|tok| tok.kind.is_ok_and(TokenKind::is_trivia))
+        {
             self.cursor += 1;
             self.steps = 0;
         }
+        self.steps += 1;
 
         #[cfg(feature = "visualize")]
         super::visualizer::Event::SkippedTrivia {
@@ -191,7 +199,10 @@ impl<'t, 'input> Source<'t, 'input> {
     /// Doesn't skip trivia.
     ///
     /// Returns None on EOF.
+    #[inline]
     pub(super) fn peek_kind_immediate(&mut self) -> Option<TokenKind> {
+        let _span = tracy_client::span!("parser::Source::peek_kind_immediate");
+
         assert!(self.steps < PARSER_STEP_LIMIT, "the parser seems stuck");
         self.steps += 1;
 

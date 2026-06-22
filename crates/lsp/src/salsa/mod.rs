@@ -33,6 +33,9 @@ pub fn rope(db: &dyn db::BaseDb, file: file::File) -> Option<ropey::Rope> {
 /// Returns `None` if the file doesn't exist.
 #[salsa::tracked(no_eq)]
 pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
+    let span = profiling::tracy_client::span!("lsp::salsa::parse_file");
+    span.emit_text(file.path(db).as_str());
+
     if !file.is_readable_file(db) {
         return None;
     }
@@ -88,6 +91,9 @@ fn tag_diagnostic(diagnostic: &mut Diagnostic, tag: &str) {
 
 #[salsa::tracked(returns(ref))]
 pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) -> Vec<Diagnostic> {
+    let span = profiling::tracy_client::span!("lsp::salsa::compute_file_diagnostics");
+    span.emit_text(file.path(db).as_str());
+
     let mut diagnostics = Vec::new();
 
     if !file.is_readable_file(db) {

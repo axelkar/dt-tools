@@ -18,6 +18,8 @@ pub struct Mir {
 impl Mir {
     /// Merge another `Mir` into this one (e.g., from an included file).
     pub fn merge(&mut self, other: &Self) {
+        let _span = profiling::tracy_client::span!("lsp::salsa::Mir::merge");
+
         self.definitions.extend(other.definitions.iter().cloned());
         self.unresolved_extensions
             .extend(other.unresolved_extensions.iter().cloned());

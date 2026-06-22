@@ -384,14 +384,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
     });
 
+    // Set up profiling
+    profiling::tracy_client::Client::start();
+    profiling::register_thread!("Main Thread");
+
     let tracing_env_filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy();
+        .from_env_lossy()
+        // Too noisy logging at info level
+        .add_directive("salsa::function::execute=warn".parse()?);
 
     #[cfg(debug_assertions)]
     let tracing_env_filter = tracing_env_filter
-        .add_directive("dt_tools_lsp=trace".parse()?)
-        .add_directive("dt_tools_parser=trace".parse()?);
+        .add_directive("dt_tools_lsp=debug".parse()?)
+        .add_directive("dt_tools_parser=debug".parse()?);
 
     if first_arg == Some("tcp".to_owned()) {
         tracing_subscriber::fmt()

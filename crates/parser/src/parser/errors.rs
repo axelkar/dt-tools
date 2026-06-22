@@ -1,7 +1,6 @@
 use dt_tools_diagnostic::SpanLabel;
 use itertools::Itertools;
 use std::borrow::Cow;
-use tracing::debug;
 
 use super::{Marker, Parser};
 
@@ -226,7 +225,8 @@ impl ErrorBuilder<'_, '_, '_, MessageFilled> {
             });
         }
 
-        debug!(?primary_span, message = %self.msg.0, expected = ?self.p.expected);
+        #[cfg(feature = "grammar-tracing")]
+        tracing::debug!(?primary_span, message = %self.msg.0, expected = ?self.p.expected);
 
         self.p.emit_parse_error(ParseError {
             message: self.msg.0,
