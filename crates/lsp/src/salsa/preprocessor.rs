@@ -612,7 +612,7 @@ fn process_dt_node<'db>(
         } else {
             diag.emit(Diagnostic::new(
                 text_range,
-                Cow::Owned(format!("Label not found: {target:?}")),
+                Cow::Owned(format!("Label not found: {target}")),
                 Severity::Error,
             ));
         }
@@ -708,6 +708,7 @@ fn emit_delete_directive<'db>(
         .iter()
         .any(|tok| tok.green.kind == TokenKind::DeleteNodeDirective)
     {
+        // TODO: handle /delete-node/ &{/foo/bar} ?
         if let Some(name_tok) = tokens.iter().find(|tok| tok.green.kind == TokenKind::Name) {
             let name = name_tok.text().to_string();
             let is_label = tokens
@@ -1047,31 +1048,235 @@ fn convert_phandle<'db>(
     reason = "expect-test auto update adds r#"
 )]
 mod tests {
-    use camino::Utf8Path;
-
     use crate::salsa::db::BaseDb;
+    use expect_test::{Expect, expect};
 
     use super::*;
 
-    #[test]
-    fn mir_basic_node() {
+    /// Run the preprocessor on virtual files and snapshot MIR + diagnostics.
+    ///
+    /// The main file is named "/main.dts".
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn check_mir(main_file_contents: &str, other_files: &[(&str, &str)], expect: Expect) {
         let db = crate::salsa::db::BaseDatabase::default();
         IncludeDirs::new(&db, vec![]);
 
-        let file_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/basic.dts");
-        let file = db.get_files().get_file(&db, &file_path);
+        let main_file = db.get_files().add_virtual(
+            &db,
+            Utf8PathBuf::from("/main.dts"),
+            main_file_contents.to_owned(),
+        );
 
-        let result =
-            preprocessor_eval_file(&db, file, None, false).expect("Should be a readable file");
+        for &(path, contents) in other_files {
+            db.get_files()
+                .add_virtual(&db, Utf8PathBuf::from(path), contents.to_owned());
+        }
+
+        let is_overlay = crate::salsa::parse_file(&db, main_file).is_some_and(|p| {
+            p.parse(&db).source_file().directives().any(|dir| {
+                dir.syntax()
+                    .child_tokens()
+                    .any(|tok| tok.green.kind == dt_tools_parser::lexer::TokenKind::PluginDirective)
+            })
+        });
+
+        let result = preprocessor_eval_file(&db, main_file, None, is_overlay)
+            .expect("Should be a readable file");
         let mir = result.mir(&db);
+        let diags = result.diagnostics(&db);
 
-        expect_test::expect![[r#"
-            node   / 11..63
-            node   /baz 32..60
-            property =  /baz/a/b 79..87
-            property =  /baz/qux 42..55
-            property =  /foo 17..29
-        "#]]
-        .assert_eq(&mir.fmt_for_test());
+        let mut out = mir.fmt_for_test(&db);
+        if !diags.is_empty() {
+            out.push_str("\n--- errors ---\n");
+            for d in diags {
+                use std::fmt::Write;
+                let range = d
+                    .span
+                    .primary_spans
+                    .first()
+                    .expect("Should have at least one primary span");
+                let _ = writeln!(out, "{:?} {range}: {}", d.severity, d.msg);
+            }
+        }
+        expect.assert_eq(&out);
+    }
+
+    #[test]
+    fn mir_empty_root() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ {};
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..16
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_properties() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo = "bar"; baz = <1 2 3>; qux = [ab cd]; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..60
+                property = CellList([U32(1), U32(2), U32(3)]) /baz /main.dts 28..42
+                property = String("bar") /foo /main.dts 15..27
+                property = Bytestring([171, 205]) /qux /main.dts 43..57
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_label() {
+        check_mir(
+            r#"
+/dts-v1/;
+LBL: node {};
+"#,
+            &[],
+            expect![[r#"
+                node labels=[LBL] /node /main.dts 11..24
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_extension() {
+        check_mir(
+            r#"
+/dts-v1/;
+LBL: node {};
+&LBL { prop = <1>; };
+"#,
+            &[],
+            expect![[r#"
+                node labels=[LBL] /node /main.dts 11..24
+                property = CellList([U32(1)]) /node/prop /main.dts 32..43
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_extension_unresolved() {
+        check_mir(
+            r#"
+/dts-v1/;
+/plugin/;
+&UNKNOWN { prop = <1>; };
+"#,
+            &[],
+            expect![[r#"
+                --- unresolved ---
+                  label=UNKNOWN (1 definitions)
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_include_preprocessor() {
+        check_mir(
+            r#"
+/dts-v1/;
+#include "inc.dtsi"
+/ { main_prop = <1>; };
+"#,
+            &[("/inc.dtsi", r#"/ { inc_prop = <2>; };"#)],
+            expect![[r#"
+                node   / /inc.dtsi 0..22
+                node   / /main.dts 31..54
+                property = CellList([U32(2)]) /inc_prop /inc.dtsi 4..19
+                property = CellList([U32(1)]) /main_prop /main.dts 35..51
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_delete_node() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo {}; /delete-node/ foo; };
+"#,
+            &[],
+            expect![[r#"
+            node   /
+            delete-node  /foo
+            node   /foo
+        "#]],
+        );
+    }
+
+    #[test]
+    fn mir_delete_property() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo = <1>; /delete-property/ foo; };
+"#,
+            &[],
+            expect![[r#"
+            node   /
+            delete-property  /foo
+            property =  /foo
+        "#]],
+        );
+    }
+
+    #[test]
+    fn mir_conditional_ifdef() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define FLAG
+#ifdef FLAG
+/ { yes = <1>; };
+#else
+/ { no = <2>; };
+#endif
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 36..53
+                property = CellList([U32(1)]) /yes /main.dts 40..50
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_macro_in_property() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define VAL 42
+/ { prop = <VAL>; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 25..45
+                property = CellList([U32(42)]) /prop /main.dts 29..42
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_undefined_label_error() {
+        check_mir(
+            r#"
+/dts-v1/;
+&BOGUS { };
+"#,
+            &[],
+            expect![[r#"
+
+                --- errors ---
+                Error 10..21: Label not found: &BOGUS [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
+            "#]],
+        );
     }
 }

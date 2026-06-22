@@ -54,6 +54,21 @@ impl Files {
                 .new(db)
         })
     }
+
+    /// Insert an in-memory file into the VFS, for testing.
+    ///
+    /// # Panics
+    ///
+    /// The path must be absolute.
+    pub fn add_virtual(&self, db: &dyn BaseDb, path: Utf8PathBuf, contents: String) -> File {
+        assert!(path.is_absolute());
+
+        let file = File::builder(path.clone(), contents, true)
+            .path_durability(Durability::HIGH)
+            .new(db);
+        self.by_path.insert(path, file);
+        file
+    }
 }
 
 // SAFETY: uhh?? DashMap probably maybe please shouldn't die?

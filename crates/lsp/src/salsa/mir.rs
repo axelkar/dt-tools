@@ -2,9 +2,11 @@
 //!
 //! Uses a flat list of definitions keyed by full path. Tree assembly and merging happens at the end.
 
+use std::fmt;
+
 use dt_tools_parser::TextRange;
 
-use crate::salsa::file::File;
+use crate::salsa::{db::BaseDb, file::File};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Mir {
@@ -23,7 +25,7 @@ impl Mir {
 
     /// Format for snapshot testing.
     #[must_use]
-    pub fn fmt_for_test(&self) -> String {
+    pub(crate) fn fmt_for_test(&self, db: &dyn BaseDb) -> String {
         use std::fmt::Write;
 
         let mut defs: Vec<_> = self.definitions.iter().collect();
@@ -47,7 +49,14 @@ impl Mir {
                 MirDefinitionValue::DeletedNode => "delete-node".to_owned(),
                 MirDefinitionValue::DeletedProperty => "delete-property".to_owned(),
             };
-            let _ = writeln!(out, "{:6} {} {}", kind, def.path, def.provenance.text_range);
+            let _ = writeln!(
+                out,
+                "{:6} {} {} {}",
+                kind,
+                def.path,
+                def.provenance.file.path(db),
+                def.provenance.text_range
+            );
         }
         if !self.unresolved_extensions.is_empty() {
             out.push_str("--- unresolved ---\n");
@@ -136,6 +145,14 @@ pub enum MirPhandleTarget {
     Label(String),
     /// Absolute path reference like `&{/soc/uart}`.
     Path(String),
+}
+impl fmt::Display for MirPhandleTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Label(s) => write!(f, "&{s}"),
+            Self::Path(s) => write!(f, "&{{{s}}}"),
+        }
+    }
 }
 
 /// Extension node (`&label { ... }`) that couldn't be resolved because the label hasn't been
