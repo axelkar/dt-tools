@@ -403,6 +403,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (stream, _) = listener.accept().await.unwrap();
         let (read, write) = tokio::io::split(stream);
         Server::new(read, write, socket).serve(service).await;
+    } else if first_arg == Some("stdio-ansi".to_owned()) {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_env_filter)
+            .with_writer(std::io::stderr) // stdout is used for LSP
+            .with_ansi(true)
+            .init();
+
+        info!("Using stdio");
+        let read = tokio::io::stdin();
+        let write = tokio::io::stdout();
+        Server::new(read, write, socket).serve(service).await;
     } else {
         tracing_subscriber::fmt()
             .with_env_filter(tracing_env_filter)

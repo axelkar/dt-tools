@@ -1,0 +1,15 @@
+[package]
+name = "dt-tools-lsp-auto-runner"
+edition = "2024"
+version.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+owo-colors.workspace = true
+
+[lints]
+workspace = true
