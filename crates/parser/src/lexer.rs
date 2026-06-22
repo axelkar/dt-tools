@@ -149,8 +149,7 @@ pub enum TokenKind {
     #[regex(r#"#( |\t)*error[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
     ErrorDirective,
 
-    // TODO: bits directive
-    // TODO: plugin directive
+    // TODO: implement bits and memreserve directives
     #[token("/bits/")]
     BitsDirective,
 
@@ -338,6 +337,22 @@ impl TokenKind {
         matches!(
             self,
             TokenKind::Whitespace | TokenKind::LineComment | TokenKind::BlockComment
+        )
+    }
+
+    /// Returns true for DTS directive token kinds.
+    #[inline]
+    #[must_use]
+    pub fn is_dts_directive(self) -> bool {
+        matches!(
+            self,
+            TokenKind::BitsDirective
+                | TokenKind::DtIncludeDirective
+                | TokenKind::MemreserveDirective
+                | TokenKind::DeleteNodeDirective
+                | TokenKind::DeletePropertyDirective
+                | TokenKind::V1Directive
+                | TokenKind::PluginDirective
         )
     }
 

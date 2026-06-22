@@ -246,6 +246,14 @@ pub trait HasMacroInvocation: AstNode {
     }
 }
 
+/// Trait for [`AstNode`]s with [`DtPhandle`]s
+pub trait HasDtPhandle: AstNode {
+    /// Returns the first [`DtPhandle`] if it exists.
+    fn dt_phandle(&self) -> Option<DtPhandle> {
+        self.syntax().child_nodes().find_map(DtPhandle::cast)
+    }
+}
+
 define_ast_node! {
     /// A [Devicetree][1] source file, which contains [`ToplevelItem`]s.
     ///
@@ -297,6 +305,11 @@ define_ast_node! {
     // TODO: directive parameters
     Directive: Directive;
 
+    /// Node wrapping a DTS directive's arguments.
+    ///
+    /// Kind: [`NodeKind::DirectiveArguments`]
+    DirectiveArguments: DirectiveArguments;
+
     /// A [Devicetree property][1].
     ///
     /// Kind: [`NodeKind::DtProperty`]
@@ -304,6 +317,27 @@ define_ast_node! {
     /// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
     DtProperty: DtProperty;
 }
+
+impl Directive {
+    /// Returns the kind of the first token with [`TokenKind::is_dts_directive`] if one exists.
+    #[must_use]
+    pub fn kind(&self) -> Option<TokenKind> {
+        self.syntax()
+            .green
+            .child_tokens()
+            .map(|tok| tok.kind)
+            .find(|kind| kind.is_dts_directive())
+    }
+
+    /// Returns the first [`DirectiveArguments`] if it exists.
+    pub fn arguments(&self) -> Option<DirectiveArguments> {
+        self.syntax()
+            .child_nodes()
+            .find_map(DirectiveArguments::cast)
+    }
+}
+impl HasName for DirectiveArguments {}
+impl HasDtPhandle for DirectiveArguments {}
 
 impl DtProperty {
     /// Returns an iterator over direct [`PropValue`] children.
@@ -545,6 +579,11 @@ impl DtNode {
     /// Returns an iterator over direct [`Directive`] children.
     pub fn directives(&self) -> impl Iterator<Item = Directive> + '_ {
         self.syntax.child_nodes().filter_map(Directive::cast)
+    }
+
+    /// Returns an iterator over direct [`NodeItem`] children.
+    pub fn node_items(&self) -> impl Iterator<Item = NodeItem> + '_ {
+        self.syntax.child_nodes().filter_map(NodeItem::cast)
     }
 
     /// Returns an iterator over direct [`DtNode`] children.
@@ -972,6 +1011,31 @@ impl AstNode for Expr {
             Self::MacroInvocation(it) => it.syntax(),
             Self::LiteralExpr(it) => it.syntax(),
             Self::InfixExpr(it) => it.syntax(),
+        }
+    }
+}
+
+/// Item inside a [`DtNode`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
+pub enum NodeItem {
+    DtProperty(DtProperty),
+    DtNode(DtNode),
+    Directive(Directive),
+}
+impl AstNode for NodeItem {
+    fn cast(syntax: Arc<RedNode>) -> Option<Self> {
+        match syntax.green.kind {
+            NodeKind::DtProperty => Some(Self::DtProperty(DtProperty { syntax })),
+            NodeKind::DtNode => Some(Self::DtNode(DtNode { syntax })),
+            NodeKind::Directive => Some(Self::Directive(Directive { syntax })),
+            _ => None,
+        }
+    }
+    fn syntax(&self) -> &Arc<RedNode> {
+        match self {
+            Self::DtProperty(it) => it.syntax(),
+            Self::DtNode(it) => it.syntax(),
+            Self::Directive(it) => it.syntax(),
         }
     }
 }

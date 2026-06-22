@@ -13,7 +13,10 @@ use dt_tools_diagnostic::{
 };
 use dt_tools_parser::{
     TextRange,
-    ast::{self, AstNode, AstNodeOrToken, AstToken, HasLabel, HasMacroInvocation, HasName},
+    ast::{
+        self, AstNode, AstNodeOrToken, AstToken, HasDtPhandle, HasLabel, HasMacroInvocation,
+        HasName,
+    },
     lexer::TokenKind,
     parser::Entrypoint,
 };
@@ -644,6 +647,7 @@ fn process_dt_node<'db>(
             env.own_label_map
                 .insert(label_text.clone(), Some(node_path.clone()));
             labels.push(label_text);
+            dbg!(&env.own_label_map);
         }
     }
 
@@ -671,20 +675,19 @@ fn process_dt_node_body<'db>(
 ) {
     // TODO: preprocessor conditionals in nodes
 
-    // Handle directives (e.g. /delete-node/, /delete-property/) in the body.
-    for dir in dt_node.directives() {
-        emit_delete_directive(db, file, env, diag, mir, is_overlay, parent_path, &dir);
-    }
-
-    // Process subnodes recursively.
-    for subnode in dt_node.subnodes() {
-        process_dt_node(db, file, env, diag, mir, is_overlay, parent_path, &subnode);
-    }
-
-    // Process properties.
-    for prop in dt_node.properties() {
-        if let Some(def) = process_dt_property(db, file, env, diag, parent_path, &prop) {
-            mir.definitions.push(def);
+    for item in dt_node.node_items() {
+        match item {
+            ast::NodeItem::DtProperty(prop) => {
+                if let Some(def) = process_dt_property(db, file, env, diag, parent_path, &prop) {
+                    mir.definitions.push(def);
+                }
+            }
+            ast::NodeItem::DtNode(subnode) => {
+                process_dt_node(db, file, env, diag, mir, is_overlay, parent_path, &subnode);
+            }
+            ast::NodeItem::Directive(dir) => {
+                emit_delete_directive(db, file, env, diag, mir, is_overlay, parent_path, &dir);
+            }
         }
     }
 }
@@ -700,46 +703,57 @@ fn emit_delete_directive<'db>(
     path_prefix: &str,
     dir: &ast::Directive,
 ) {
-    let tokens: Vec<_> = dir.syntax().child_tokens().collect();
+    let kind = dir.kind();
+    let Some(args) = dir.arguments() else { return };
+
     let text_range = dir.syntax().text_range();
     let provenance = MirProvenance { file, text_range };
 
-    if tokens
-        .iter()
-        .any(|tok| tok.green.kind == TokenKind::DeleteNodeDirective)
-    {
-        // TODO: handle /delete-node/ &{/foo/bar} ?
-        if let Some(name_tok) = tokens.iter().find(|tok| tok.green.kind == TokenKind::Name) {
-            let name = name_tok.text().to_string();
-            let is_label = tokens
-                .iter()
-                .any(|tok| tok.green.kind == TokenKind::Ampersand);
-            let target_path = if is_label {
-                env.get_label(db, &name).map(std::borrow::ToOwned::to_owned)
-            } else {
-                Some(build_path(path_prefix, &name))
+    if kind == Some(TokenKind::DeleteNodeDirective) {
+        let target_path = if let Some(name_tok) = args.name() {
+            build_path(path_prefix, name_tok.syntax().text().as_str())
+        } else if let Some(phandle) = args.dt_phandle() {
+            let Some(target) = convert_phandle(db, env, diag, &phandle) else {
+                return;
             };
-            if let Some(target_path) = target_path {
-                mir.definitions.push(MirDefinition {
-                    path: target_path,
-                    value: MirDefinitionValue::DeletedNode,
-                    provenance,
-                });
-            } else if !is_overlay {
-                diag.emit(Diagnostic::new(
-                    text_range,
-                    Cow::Owned(format!("Label not found: {name}")),
-                    Severity::Error,
-                ));
+
+            match &target {
+                MirPhandleTarget::Label(name) => {
+                    if let Some(path) = env.get_label(db, name) {
+                        path.to_owned()
+                    } else {
+                        // Couldn't resolve it.
+                        if is_overlay {
+                            // TODO: handle unresolved delete-node!
+                        } else {
+                            dbg!(&env.own_label_map);
+                            diag.emit(Diagnostic::new(
+                                text_range,
+                                Cow::Owned(format!("Label not found: {name}")),
+                                Severity::Error,
+                            ));
+                        }
+                        return;
+                    }
+                }
+                MirPhandleTarget::Path(path) => path.clone(),
             }
-        }
-    } else if tokens
-        .iter()
-        .any(|tok| tok.green.kind == TokenKind::DeletePropertyDirective)
-        && let Some(name_tok) = tokens.iter().find(|tok| tok.green.kind == TokenKind::Name)
-    {
+        } else {
+            return;
+        };
+
         mir.definitions.push(MirDefinition {
-            path: build_path(path_prefix, name_tok.text()),
+            path: target_path,
+            value: MirDefinitionValue::DeletedNode,
+            provenance,
+        });
+    } else if kind == Some(TokenKind::DeletePropertyDirective)
+        && let Some(name_tok) = args.name()
+    {
+        let target_path = build_path(path_prefix, name_tok.syntax().text().as_str());
+
+        mir.definitions.push(MirDefinition {
+            path: target_path,
             value: MirDefinitionValue::DeletedProperty,
             provenance,
         });
@@ -1197,7 +1211,7 @@ LBL: node {};
     }
 
     #[test]
-    fn mir_delete_node() {
+    fn mir_delete_node_by_name() {
         check_mir(
             r#"
 /dts-v1/;
@@ -1205,10 +1219,42 @@ LBL: node {};
 "#,
             &[],
             expect![[r#"
-            node   /
-            delete-node  /foo
-            node   /foo
-        "#]],
+                node   / /main.dts 11..44
+                node   /foo /main.dts 15..22
+                delete-node /foo /main.dts 23..41
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_delete_node_by_label() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo: bar {}; /delete-node/ &foo; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..50
+                node labels=[foo] /bar /main.dts 15..27
+                delete-node /bar /main.dts 28..47
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_delete_node_by_path() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo {}; /delete-node/ &{/foo}; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..48
+                node   /foo /main.dts 15..22
+                delete-node /foo /main.dts 23..45
+            "#]],
         );
     }
 
@@ -1221,10 +1267,10 @@ LBL: node {};
 "#,
             &[],
             expect![[r#"
-            node   /
-            delete-property  /foo
-            property =  /foo
-        "#]],
+                node   / /main.dts 11..51
+                property = CellList([U32(1)]) /foo /main.dts 15..25
+                delete-property /foo /main.dts 26..48
+            "#]],
         );
     }
 
@@ -1258,8 +1304,8 @@ LBL: node {};
 "#,
             &[],
             expect![[r#"
-                node   / /main.dts 25..45
-                property = CellList([U32(42)]) /prop /main.dts 29..42
+                node   / /main.dts 26..46
+                property = CellList([U32(42)]) /prop /main.dts 30..43
             "#]],
         );
     }
@@ -1275,7 +1321,7 @@ LBL: node {};
             expect![[r#"
 
                 --- errors ---
-                Error 10..21: Label not found: &BOGUS [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
+                Error 11..22: Label not found: &BOGUS [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
             "#]],
         );
     }
