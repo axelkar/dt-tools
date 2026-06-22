@@ -136,6 +136,23 @@ impl GreenNode {
     pub fn child_tokens(&self) -> impl Iterator<Item = &Arc<GreenToken>> + '_ {
         self.children.iter().filter_map(GreenItem::as_token)
     }
+
+    /// Computes the text inside this node. Please note that this function is recursive and not
+    /// very efficient.
+    #[must_use]
+    pub fn text(&self) -> String {
+        let mut out = String::new();
+        self.text_out(&mut out);
+        out
+    }
+    fn text_out(&self, out: &mut String) {
+        for child in &self.children {
+            match child {
+                TreeItem::Node(node) => node.text_out(out),
+                TreeItem::Token(token) => out.push_str(token.text.as_str()),
+            }
+        }
+    }
 }
 
 // TODO: benchmark without Static tokens

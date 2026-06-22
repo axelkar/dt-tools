@@ -264,7 +264,7 @@ fn merge_root_node(
                             Ok(value) => Ok(value),
                             Err(err) => {
                                 diag.emit(Diagnostic::new(
-                                    value_ast.syntax().text_range(),
+                                    value_ast.syntax_item().text_range(),
                                     Cow::Owned(err.to_string()),
                                     Severity::Error,
                                 ));

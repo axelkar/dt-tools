@@ -7,13 +7,13 @@ use dt_tools_parser::{
     lexer::TokenKind,
 };
 
-use crate::salsa::{db::BaseDb, macros::env::MacroEnvMut};
+use crate::salsa::{db::BaseDb, macros::env::TrackedMapEnvMut};
 
 // TODO: in preprocessor conditional mode, undefined macros that are used as object-like macros evaluate to zero as defined here: https://gcc.gnu.org/onlinedocs/cpp/If.html
 #[expect(clippy::too_many_lines, reason = "It's pretty enough as is")]
 pub fn eval(
     db: &dyn BaseDb,
-    env: &MacroEnvMut,
+    env: &TrackedMapEnvMut,
     ast: ast::Expr,
     diag: &impl DiagnosticCollector,
 ) -> Option<i64> {
@@ -166,9 +166,9 @@ mod tests {
     use dt_tools_analyzer::macros::MacroDefinition;
     use dt_tools_parser::{ast::AstNode, parser::Entrypoint};
 
-    use crate::salsa::macros::env::MacroEnvMut;
+    use crate::salsa::macros::env::TrackedMapEnvMut;
 
-    fn check(input: &str, env: &MacroEnvMut) -> Option<i64> {
+    fn check(input: &str, env: &TrackedMapEnvMut) -> Option<i64> {
         let db = crate::salsa::db::BaseDatabase::default();
 
         let parse = Entrypoint::PreprocessorConditional.parse(input);
@@ -183,19 +183,19 @@ mod tests {
 
     #[test]
     fn test_literal() {
-        let env = MacroEnvMut::default();
+        let env = TrackedMapEnvMut::default();
         assert_eq!(check("42", &env), Some(42));
     }
 
     #[test]
     fn test_paren() {
-        let env = MacroEnvMut::default();
+        let env = TrackedMapEnvMut::default();
         assert_eq!(check("(1 + 2) * 3", &env), Some(9));
     }
 
     #[test]
     fn test_infix() {
-        let env = MacroEnvMut::default();
+        let env = TrackedMapEnvMut::default();
         assert_eq!(check("21 + 21", &env), Some(42));
         assert_eq!(check("21 * 2", &env), Some(42));
         assert_eq!(check("1 + 2 * 3", &env), Some(7));
@@ -203,23 +203,23 @@ mod tests {
 
     #[test]
     fn test_prefix() {
-        let env = MacroEnvMut::default();
+        let env = TrackedMapEnvMut::default();
         assert_eq!(check("!42", &env), Some(0));
         assert_eq!(check("~42", &env), Some(!42));
     }
 
     #[test]
     fn test_ternary() {
-        let env = MacroEnvMut::default();
+        let env = TrackedMapEnvMut::default();
         assert_eq!(check("1 ? 2 : 3", &env), Some(2));
         assert_eq!(check("0 ? 2 : 3", &env), Some(3));
     }
 
     #[test]
     fn test_prefix_defined() {
-        let mut env = MacroEnvMut::default();
+        let mut env = TrackedMapEnvMut::default();
         let def = MacroDefinition::parse("#define FOO").unwrap();
-        env.own_map.insert(def.name.clone(), Some(def));
+        env.insert_macro(def);
 
         assert_eq!(check("defined FOO", &env), Some(1));
         assert_eq!(check("defined BAR", &env), Some(0));
@@ -229,24 +229,25 @@ mod tests {
 
     #[test]
     fn test_macro() {
-        let mut env = MacroEnvMut::default();
+        let mut env = TrackedMapEnvMut::default();
 
         let def = MacroDefinition::parse("#define FOO BAR").unwrap();
-        env.own_map.insert(def.name.clone(), Some(def));
+        env.insert_macro(def);
 
         let def = MacroDefinition::parse("#define BAR 42").unwrap();
-        env.own_map.insert(def.name.clone(), Some(def));
+        env.insert_macro(def);
 
         assert_eq!(check("FOO", &env), Some(42));
     }
 
+    // TODO: shouldn't ever overflow stack?
     #[test]
     #[ignore = "overflows stack"]
     fn test_macro_self_recursion() {
-        let mut env = MacroEnvMut::default();
+        let mut env = TrackedMapEnvMut::default();
 
         let def = MacroDefinition::parse("#define FOO FOO").unwrap();
-        env.own_map.insert(def.name.clone(), Some(def));
+        env.insert_macro(def);
 
         assert_eq!(check("FOO", &env), Some(42));
     }

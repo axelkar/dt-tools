@@ -1,4 +1,8 @@
 //! Preprocessor macros, conditionals and includes are all tied very much together, which means they must be evaluated in order.
+//!
+//! This module also handles [`ast::DtNode`] processing and MIR emission.
+// TODO: split to multiple modules!
+// TODO: handle recursive macros?
 
 use std::borrow::Cow;
 
@@ -9,55 +13,38 @@ use dt_tools_diagnostic::{
 };
 use dt_tools_parser::{
     TextRange,
-    ast::{self, AstNode, AstNodeOrToken, AstToken},
+    ast::{self, AstNode, AstNodeOrToken, AstToken, HasLabel, HasMacroInvocation, HasName},
     lexer::TokenKind,
+    parser::Entrypoint,
 };
-use rustc_hash::FxHashMap;
 
 use crate::salsa::{
     db::BaseDb,
     includes::IncludeDirs,
-    macros::env::{MacroEnv, MacroEnvMut},
+    macros::env::{TrackedMapEnv, TrackedMapEnvMut},
+    mir::{
+        Mir, MirCell, MirDefinition, MirDefinitionValue, MirNodeData, MirPhandleTarget,
+        MirPropertyData, MirProvenance, MirValue, UnresolvedExtension,
+    },
+    tag_diagnostic,
 };
 
 #[salsa::tracked]
 pub struct PpEvalFileResult<'db> {
+    /// Macro and label environment after processing this file.
     #[tracked]
-    #[returns(ref)]
-    pub toplevels: Vec<PpEvalFileResultToplevel<'db>>,
-
-    #[tracked]
-    pub env_after: MacroEnv<'db>,
+    pub env_after: TrackedMapEnv<'db>,
 
     #[tracked]
     #[returns(ref)]
     pub diagnostics: Vec<Diagnostic>,
-}
 
-#[salsa::tracked]
-pub struct PpEvalFileResultToplevel<'db> {
-    pub text_range: TextRange,
     #[tracked]
-    #[no_eq]
-    pub inner: PpEvalFileResultToplevelInner<'db>,
-    #[tracked]
-    pub env_after: MacroEnv<'db>,
-}
+    #[returns(ref)]
+    pub mir: Mir,
 
-#[derive(Clone)]
-pub enum PpEvalFileResultToplevelInner<'db> {
-    Include {
-        file: crate::salsa::file::File,
-        result: PpEvalFileResult<'db>,
-        /// Whether the include is a preprocessor (`#include`) or a DTS (`/include/`) include.
-        is_preprocessor: bool,
-    },
-    MacroDefinition {
-        /// Fetch the definition from [`PpEvalFileResultToplevel::env_after`].
-        name: String,
-    },
-    Undef,
-    Conditional,
+    /// Whether this file is part of a plugin/overlay (`/plugin/;`).
+    pub is_overlay: bool,
 }
 
 /// Lists possible file paths under `parent_path` or `include_dirs`, depending on [`relative`](Self::relative).
@@ -199,7 +186,7 @@ fn get_pp_directive_arg_string(
 
 fn pp_cond_directive_eval(
     db: &dyn BaseDb,
-    env: &mut MacroEnvMut,
+    env: &mut TrackedMapEnvMut,
     directive: &ast::PreprocessorDirective,
     diag: &impl DiagnosticCollector,
 ) -> Option<bool> {
@@ -293,6 +280,7 @@ fn pp_cond_directive_eval(
     Some(val != 0)
 }
 
+// TODO: rename this function as it actually returns MIR and does everything in "one pass"
 /// Walks toplevel items of a file, evaluating necessary preprocessor directives and macros.
 ///
 /// Returns `None` if the file doesn't exist.
@@ -312,13 +300,10 @@ fn pp_cond_directive_eval(
 pub fn preprocessor_eval_file<'db>(
     db: &'db dyn BaseDb,
     file: super::file::File,
-    parent_env: Option<MacroEnv<'db>>,
+    parent_env: Option<TrackedMapEnv<'db>>,
+    is_overlay: bool,
 ) -> Option<PpEvalFileResult<'db>> {
-    let mut env = MacroEnvMut {
-        parent: parent_env,
-        own_map: FxHashMap::default(),
-    };
-    let mut toplevels = Vec::new();
+    let mut env = TrackedMapEnvMut::from_parent(parent_env);
 
     let parse = super::parse_file(db, file)?;
     let file_ast = parse.parse(db).source_file();
@@ -330,14 +315,18 @@ pub fn preprocessor_eval_file<'db>(
     let parent_path = file.path(db).parent()?;
     let include_dirs = IncludeDirs::get(db).include_dirs(db);
 
+    let mut mir = Mir::default();
+
     for item in file_ast.items() {
         handle_toplevel_item(
             db,
+            file,
             &mut env,
             &diag,
             parent_path,
             include_dirs,
-            &mut toplevels,
+            &mut mir,
+            is_overlay,
             item,
         );
     }
@@ -349,87 +338,47 @@ pub fn preprocessor_eval_file<'db>(
 
     Some(PpEvalFileResult::new(
         db,
-        toplevels,
-        env.into_salsa_tracked_struct(db),
+        env.into_immut(db),
         diagnostics,
+        mir,
+        is_overlay,
     ))
 }
 
 #[expect(clippy::too_many_lines, reason = "hard to make this shorter")]
 fn handle_toplevel_item<'db>(
     db: &'db dyn BaseDb,
-    env: &mut MacroEnvMut<'db>,
+    file: super::file::File,
+    env: &mut TrackedMapEnvMut<'db>,
     diag: &impl DiagnosticCollector,
     parent_path: &Utf8Path,
     include_dirs: &[Utf8PathBuf],
-    toplevels: &mut Vec<PpEvalFileResultToplevel<'db>>,
+    mir: &mut Mir,
+    is_overlay: bool,
     item: ast::ToplevelItem,
 ) {
     let files = db.get_files();
 
-    let text_range = item.syntax().text_range();
+    let text_range = item.syntax_item().text_range();
 
-    let inner: PpEvalFileResultToplevelInner = match item {
+    match item {
         ast::ToplevelItem::Node(dt_node) => {
-            // TODO: recurse!!!
-            return;
+            process_dt_node(db, file, env, diag, mir, is_overlay, "", &dt_node);
         }
         ast::ToplevelItem::Directive(dir) => {
-            let mut iter = dir.syntax().child_tokens();
-
-            // Skip until DtIncludeDirective is found, continue items if it isn't found
-            if !iter.any(|tok| tok.green.kind == TokenKind::DtIncludeDirective) {
-                return;
-            }
-
-            let Some(string_tok) = iter.find(|tok| tok.green.kind == TokenKind::String) else {
-                return;
-            };
-
-            let path = match dt_tools_analyzer::string::interpret_escaped_string(string_tok.text())
-            {
-                Ok(path) => path,
-                Err(err) => {
-                    diag.emit(Diagnostic::new(
-                        string_tok.text_range(),
-                        Cow::Owned(err.to_string()),
-                        Severity::Error,
-                    ));
-                    return;
-                }
-            };
-
-            let Some(file) = possible_include_paths_utf8(true, &path, parent_path, include_dirs)
-                .map(|path| files.get_file(db, &path))
-                .find(|file| file.is_readable_file(db))
-            else {
-                diag.emit(Diagnostic::new(
-                    text_range,
-                    Cow::Owned(format!(
-                        "Couldn't find file to include from include_dirs={include_dirs:?}"
-                    )),
-                    Severity::Error,
-                ));
-                return;
-            };
-
-            let result = preprocessor_eval_file(
+            handle_directive(
                 db,
                 file,
-                Some(std::mem::take(env).into_salsa_tracked_struct(db)),
-            )
-            .expect("The file should exist, its existence is confirmed above");
-
-            *env = MacroEnvMut {
-                parent: Some(result.env_after(db)),
-                own_map: FxHashMap::default(),
-            };
-
-            PpEvalFileResultToplevelInner::Include {
-                is_preprocessor: false,
-                file,
-                result,
-            }
+                env,
+                diag,
+                mir,
+                is_overlay,
+                "",
+                &dir,
+                include_dirs,
+                parent_path,
+                files,
+            );
         }
         ast::ToplevelItem::PreprocessorConditional(preprocessor_conditional) => {
             let Some((_dir, branch)) =
@@ -439,72 +388,64 @@ fn handle_toplevel_item<'db>(
             else {
                 return;
             };
-
             for item in branch.items() {
-                handle_toplevel_item(db, env, diag, parent_path, include_dirs, toplevels, item);
+                handle_toplevel_item(
+                    db,
+                    file,
+                    env,
+                    diag,
+                    parent_path,
+                    include_dirs,
+                    mir,
+                    is_overlay,
+                    item,
+                );
             }
-            return;
         }
         ast::ToplevelItem::PreprocessorDirective(dir) => match dir.kind() {
             TokenKind::PragmaDirective => {
                 // TODO: implement #pragma
-
                 diag.emit(Diagnostic::new(
                     text_range,
                     Cow::Borrowed("`#pragma` is unimplemented"),
                     Severity::Error,
                 ));
-                return;
             }
-            TokenKind::DefineDirective => {
-                let parsed = match MacroDefinition::parse(dir.syntax().text()) {
-                    Ok(inc) => inc,
-                    Err(err) => {
-                        diag.emit(Diagnostic::new(
-                            if let Some(local_range) = err.text_range() {
-                                local_range.offset(text_range.start)
-                            } else {
-                                text_range
-                            },
-                            Cow::Owned(err.to_string()),
-                            Severity::Error,
-                        ));
-                        return;
-                    }
-                };
-
-                let name_clone = parsed.name.clone();
-                env.own_map.insert(parsed.name.clone(), Some(parsed));
-
-                PpEvalFileResultToplevelInner::MacroDefinition { name: name_clone }
-            }
+            TokenKind::DefineDirective => match MacroDefinition::parse(dir.syntax().text()) {
+                Ok(parsed) => env.insert_macro(parsed),
+                Err(err) => {
+                    diag.emit(Diagnostic::new(
+                        if let Some(local_range) = err.text_range() {
+                            local_range.offset(text_range.start)
+                        } else {
+                            text_range
+                        },
+                        Cow::Owned(err.to_string()),
+                        Severity::Error,
+                    ));
+                }
+            },
             TokenKind::UndefDirective => {
                 let input = dir.syntax().text();
                 let (args, args_text_range) = get_pp_directive_args(input, "undef", text_range);
-
                 if args.contains(' ') {
                     diag.emit(Diagnostic::new(
                         args_text_range,
                         Cow::Borrowed("Arguments to `#undef` should be just a macro name"),
                         Severity::Error,
                     ));
-                    return;
+                } else {
+                    env.own_macro_map.insert(args, None);
                 }
-
-                env.own_map.insert(args, None);
-
-                PpEvalFileResultToplevelInner::Undef
             }
             TokenKind::IncludeDirective => {
                 // TODO: real evaluation and macro substitution
                 let input = dir.syntax().text();
-
                 let Some((relative, path)) =
                     get_pp_directive_arg_string(input, "include", text_range, &diag)
                 else {
                     return;
                 };
-
                 let Some(file) =
                     possible_include_paths_utf8(relative, &path, parent_path, include_dirs)
                         .map(|path| files.get_file(db, &path))
@@ -519,51 +460,618 @@ fn handle_toplevel_item<'db>(
                     ));
                     return;
                 };
-
                 let result = preprocessor_eval_file(
                     db,
                     file,
-                    Some(std::mem::take(env).into_salsa_tracked_struct(db)),
+                    Some(std::mem::take(env).into_immut(db)),
+                    is_overlay,
                 )
                 .expect("The file should exist, its existence is confirmed above");
-
-                *env = MacroEnvMut {
-                    parent: Some(result.env_after(db)),
-                    own_map: FxHashMap::default(),
-                };
-
-                PpEvalFileResultToplevelInner::Include {
-                    is_preprocessor: true,
-                    file,
-                    result,
-                }
+                *env = result.env_after(db).to_mut();
+                mir.merge(result.mir(db));
             }
             TokenKind::ErrorDirective => {
                 let input = dir.syntax().text();
                 let (args, _args_text_range) = get_pp_directive_args(input, "error", text_range);
-
+                // TODO: remove debug thing?
                 diag.emit(Diagnostic::new(
                     text_range,
-                    // TODO: remove debug thing
                     Cow::Owned(format!(
                         "`#error`: {args:?}, defined {args:?}={}",
                         env.get_macro(db, &args).is_some()
                     )),
                     Severity::Error,
                 ));
-                return;
             }
-            _ => return,
+            _ => {}
         },
-    };
+    }
 
     // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
     env.flatten_ancestors(db);
+}
 
-    toplevels.push(PpEvalFileResultToplevel::new(
-        db,
-        text_range,
-        inner,
-        env.to_salsa_tracked_struct_mut(db),
-    ));
+/// Handle a DTS directive: `/include/`, `/delete-node/`, `/delete-property/`.
+fn handle_directive<'db>(
+    db: &'db dyn BaseDb,
+    file: super::file::File,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector,
+    mir: &mut Mir,
+    is_overlay: bool,
+    path_prefix: &str,
+    dir: &ast::Directive,
+    include_dirs: &[Utf8PathBuf],
+    parent_path: &Utf8Path,
+    files: &crate::salsa::file::Files,
+) {
+    let tokens: Vec<_> = dir.syntax().child_tokens().collect();
+    let text_range = dir.syntax().text_range();
+
+    if tokens
+        .iter()
+        .any(|tok| tok.green.kind == TokenKind::DtIncludeDirective)
+    {
+        // /include/ "path"
+        let Some(string_tok) = tokens
+            .iter()
+            .find(|tok| tok.green.kind == TokenKind::String)
+        else {
+            return;
+        };
+        let include_path =
+            match dt_tools_analyzer::string::interpret_escaped_string(string_tok.text()) {
+                Ok(path) => path,
+                Err(err) => {
+                    diag.emit(Diagnostic::new(
+                        string_tok.text_range(),
+                        Cow::Owned(format!("Failed to parse string: {err}")),
+                        Severity::Error,
+                    ));
+                    return;
+                }
+            };
+        let Some(include_file) =
+            possible_include_paths_utf8(true, &include_path, parent_path, include_dirs)
+                .map(|path| files.get_file(db, &path))
+                .find(|f| f.is_readable_file(db))
+        else {
+            diag.emit(Diagnostic::new(
+                text_range,
+                Cow::Owned(format!("Couldn't find file to include: {include_path}")),
+                Severity::Error,
+            ));
+            return;
+        };
+        let result = preprocessor_eval_file(
+            db,
+            include_file,
+            Some(std::mem::take(env).into_immut(db)),
+            is_overlay,
+        )
+        .expect("file exists");
+        *env = result.env_after(db).to_mut();
+        mir.merge(result.mir(db));
+    } else {
+        emit_delete_directive(db, file, env, diag, mir, is_overlay, path_prefix, dir);
+    }
+}
+
+/// Build a node/property path. Handles the root node `/` and avoids `//`.
+fn build_path(parent: &str, name: &str) -> String {
+    if name == "/" {
+        "/".to_owned()
+    } else if parent == "/" {
+        format!("/{name}")
+    } else {
+        format!("{parent}/{name}")
+    }
+}
+
+/// Process an [`ast::DtNode`] and its subtree into flat [`MirDefinition`]s.
+fn process_dt_node<'db>(
+    db: &'db dyn BaseDb,
+    file: super::file::File,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector,
+    mir: &mut Mir,
+    is_overlay: bool,
+    path_prefix: &str,
+    dt_node: &ast::DtNode,
+) {
+    let text_range = dt_node.syntax().text_range();
+    let provenance = MirProvenance { file, text_range };
+
+    // Handle extensions: &label { } or &{/path} { }
+    if let Some(phandle) = dt_node.extension_name() {
+        let Some(target) = convert_phandle(db, env, diag, &phandle) else {
+            return;
+        };
+
+        let target_path = match &target {
+            MirPhandleTarget::Label(name) => {
+                env.get_label(db, name).map(std::borrow::ToOwned::to_owned)
+            }
+            MirPhandleTarget::Path(path) => Some(path.clone()),
+        };
+        if let Some(ref target_path) = target_path {
+            process_dt_node_body(db, file, env, diag, mir, is_overlay, target_path, dt_node);
+        } else if is_overlay {
+            let mut body_mir = Mir::default();
+            process_dt_node_body(db, file, env, diag, &mut body_mir, is_overlay, "", dt_node);
+            // Propagate any nested unresolved extensions.
+            mir.unresolved_extensions
+                .extend(body_mir.unresolved_extensions);
+            if let MirPhandleTarget::Label(label) = target {
+                mir.unresolved_extensions.push(UnresolvedExtension {
+                    label,
+                    body: body_mir.definitions,
+                    provenance: provenance.clone(),
+                });
+            }
+        } else {
+            diag.emit(Diagnostic::new(
+                text_range,
+                Cow::Owned(format!("Label not found: {target:?}")),
+                Severity::Error,
+            ));
+        }
+        return;
+    }
+
+    // Build the node's full path.
+    let name = dt_node
+        .text_name("")
+        .map(Cow::into_owned)
+        .unwrap_or_default();
+    let node_path = build_path(path_prefix, &name);
+
+    // Collect labels defined on this node.
+    let mut labels: Vec<String> = Vec::new();
+    if let Some(label) = dt_node.label()
+        && let Some(label_name) = label.name()
+    {
+        let label_text = label_name.syntax().text().to_string();
+        // Check for duplicate labels (DTC: no duplicates globally).
+        if env.get_macro(db, &label_text).is_some() {
+            // TODO: MultiSpan & cross-file diagnostics
+            diag.emit(Diagnostic::new(
+                label_name.syntax().text_range(),
+                Cow::Owned(format!("Duplicate label `{label_text}`")),
+                Severity::Error,
+            ));
+        } else {
+            env.own_label_map
+                .insert(label_text.clone(), Some(node_path.clone()));
+            labels.push(label_text);
+        }
+    }
+
+    // Emit the node definition.
+    mir.definitions.push(MirDefinition {
+        path: node_path.clone(),
+        value: MirDefinitionValue::Node(MirNodeData { labels }),
+        provenance,
+    });
+
+    // Process the node body: subnodes and properties.
+    process_dt_node_body(db, file, env, diag, mir, is_overlay, &node_path, dt_node);
+}
+
+/// Process the body of an [`ast::DtNode`]: subnodes and properties.
+fn process_dt_node_body<'db>(
+    db: &'db dyn BaseDb,
+    file: super::file::File,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector,
+    mir: &mut Mir,
+    is_overlay: bool,
+    parent_path: &str,
+    dt_node: &ast::DtNode,
+) {
+    // TODO: preprocessor conditionals in nodes
+
+    // Handle directives (e.g. /delete-node/, /delete-property/) in the body.
+    for dir in dt_node.directives() {
+        emit_delete_directive(db, file, env, diag, mir, is_overlay, parent_path, &dir);
+    }
+
+    // Process subnodes recursively.
+    for subnode in dt_node.subnodes() {
+        process_dt_node(db, file, env, diag, mir, is_overlay, parent_path, &subnode);
+    }
+
+    // Process properties.
+    for prop in dt_node.properties() {
+        if let Some(def) = process_dt_property(db, file, env, diag, parent_path, &prop) {
+            mir.definitions.push(def);
+        }
+    }
+}
+
+/// Emit [`MirDefinitionValue::DeletedNode`] or [`MirDefinitionValue::DeletedProperty`] from a directive.
+fn emit_delete_directive<'db>(
+    db: &'db dyn BaseDb,
+    file: super::file::File,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector,
+    mir: &mut Mir,
+    is_overlay: bool,
+    path_prefix: &str,
+    dir: &ast::Directive,
+) {
+    let tokens: Vec<_> = dir.syntax().child_tokens().collect();
+    let text_range = dir.syntax().text_range();
+    let provenance = MirProvenance { file, text_range };
+
+    if tokens
+        .iter()
+        .any(|tok| tok.green.kind == TokenKind::DeleteNodeDirective)
+    {
+        if let Some(name_tok) = tokens.iter().find(|tok| tok.green.kind == TokenKind::Name) {
+            let name = name_tok.text().to_string();
+            let is_label = tokens
+                .iter()
+                .any(|tok| tok.green.kind == TokenKind::Ampersand);
+            let target_path = if is_label {
+                env.get_label(db, &name).map(std::borrow::ToOwned::to_owned)
+            } else {
+                Some(build_path(path_prefix, &name))
+            };
+            if let Some(target_path) = target_path {
+                mir.definitions.push(MirDefinition {
+                    path: target_path,
+                    value: MirDefinitionValue::DeletedNode,
+                    provenance,
+                });
+            } else if !is_overlay {
+                diag.emit(Diagnostic::new(
+                    text_range,
+                    Cow::Owned(format!("Label not found: {name}")),
+                    Severity::Error,
+                ));
+            }
+        }
+    } else if tokens
+        .iter()
+        .any(|tok| tok.green.kind == TokenKind::DeletePropertyDirective)
+        && let Some(name_tok) = tokens.iter().find(|tok| tok.green.kind == TokenKind::Name)
+    {
+        mir.definitions.push(MirDefinition {
+            path: build_path(path_prefix, name_tok.text()),
+            value: MirDefinitionValue::DeletedProperty,
+            provenance,
+        });
+    }
+}
+
+/// Convert a [`ast::DtProperty`] into a [`MirDefinition`], if valid.
+///
+/// Returns `None` if the property has no name or can't be processed.
+fn process_dt_property<'db>(
+    db: &'db dyn BaseDb,
+    file: super::file::File,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector,
+    parent_path: &str,
+    prop: &ast::DtProperty,
+) -> Option<MirDefinition> {
+    let name_ast = prop.name()?;
+    let name = name_ast.syntax().text().to_string();
+    let path = build_path(parent_path, &name);
+
+    let text_range = prop.syntax().text_range();
+    let provenance = MirProvenance { file, text_range };
+
+    let mut values = Vec::new();
+    for value_ast in prop.values() {
+        if let Some(value) = convert_prop_value(db, env, diag, &value_ast) {
+            values.push(value);
+        }
+    }
+
+    Some(MirDefinition {
+        path,
+        value: MirDefinitionValue::Property(MirPropertyData { values }),
+        provenance,
+    })
+}
+
+/// Convert an AST property value to a [`MirValue`].
+fn convert_prop_value<'db>(
+    db: &'db dyn BaseDb,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector,
+    value: &ast::PropValue,
+) -> Option<MirValue> {
+    match value {
+        ast::PropValue::String(tok) => {
+            match dt_tools_analyzer::string::interpret_escaped_string(tok.text()) {
+                Ok(path) => Some(MirValue::String(path)),
+                Err(err) => {
+                    diag.emit(Diagnostic::new(
+                        tok.text_range(),
+                        Cow::Owned(format!("Failed to parse string: {err}")),
+                        Severity::Error,
+                    ));
+                    None
+                }
+            }
+        }
+        ast::PropValue::CellList(cell_list) => {
+            let cells: Vec<MirCell> = cell_list
+                .cells()
+                .filter_map(|cell| convert_cell(db, env, diag, &cell))
+                .collect();
+            Some(MirValue::CellList(cells))
+        }
+        ast::PropValue::Bytestring(tok) => {
+            let mut bytes = Vec::new();
+            let mut first_nibble = None;
+            for ch in tok.text().chars() {
+                if ch == ']' {
+                    break;
+                }
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "to_digit returns values 0-15"
+                )]
+                if let Some(nibble) = ch.to_digit(16) {
+                    let nibble = nibble as u8;
+                    if let Some(first_nibble) = first_nibble.take() {
+                        bytes.push(nibble + (first_nibble << 4));
+                    } else {
+                        first_nibble = Some(nibble);
+                    }
+                }
+            }
+
+            if first_nibble.is_some() {
+                diag.emit(Diagnostic::new(
+                    tok.text_range(),
+                    Cow::Borrowed("Bytestring is missing a hex digit"),
+                    Severity::Error,
+                ));
+                return None;
+            }
+
+            Some(MirValue::Bytestring(bytes))
+        }
+        ast::PropValue::Phandle(phandle) => {
+            let target = convert_phandle(db, env, diag, phandle)?;
+            Some(MirValue::Phandle(target))
+        }
+        ast::PropValue::Macro(macro_inv) => resolve_macro_to_value(
+            db,
+            env,
+            diag,
+            &MacroCtx::Explicit(macro_inv),
+            Entrypoint::PropValues,
+            convert_prop_value,
+        ),
+    }
+}
+
+/// Convert an AST cell to a [`MirCell`].
+fn convert_cell<'db>(
+    db: &'db dyn BaseDb,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector,
+    cell: &ast::Cell,
+) -> Option<MirCell> {
+    match cell {
+        ast::Cell::Number(tok) => {
+            // TODO: combine with expr
+            let src = tok.text();
+            src.parse()
+                .ok()
+                .or_else(|| {
+                    src.strip_prefix("0x")
+                        .or_else(|| src.strip_prefix("0X"))
+                        .and_then(|s| u32::from_str_radix(s, 16).ok())
+                })
+                .map(MirCell::U32)
+            // TODO: error handling?!
+        }
+        ast::Cell::Phandle(phandle) => {
+            Some(MirCell::Phandle(convert_phandle(db, env, diag, phandle)?))
+        }
+        ast::Cell::Macro(macro_inv) => resolve_macro_to_value(
+            db,
+            env,
+            diag,
+            &MacroCtx::Explicit(macro_inv),
+            Entrypoint::Cells,
+            convert_cell,
+        ),
+        // TODO: exprs / DtExpr. Remember to error when it's over u32::MAX or under u32::MIN
+    }
+}
+
+enum MacroCtx<'a> {
+    Explicit(&'a ast::MacroInvocation),
+    Implicit {
+        name: &'a str,
+        text_range: TextRange,
+    },
+}
+
+/// Resolve a macro and reparse the result.
+///
+/// Returns `None` if the macro doesn't exist or there is some other error.
+fn resolve_macro_to_value<'db, AstType: AstNodeOrToken, MirType, D: DiagnosticCollector>(
+    db: &'db dyn BaseDb,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &D,
+    macro_ctx: &MacroCtx,
+    entrypoint: Entrypoint,
+    convert: impl FnOnce(&'db dyn BaseDb, &mut TrackedMapEnvMut<'db>, &D, &AstType) -> Option<MirType>,
+) -> Option<MirType> {
+    let (name, text_range) = match &macro_ctx {
+        MacroCtx::Explicit(inv) => (inv.green_ident()?.text.as_str(), inv.syntax().text_range()),
+        MacroCtx::Implicit { name, text_range } => (*name, *text_range),
+    };
+
+    let Some(def) = env.get_macro(db, name) else {
+        let is_explicit_macro = matches!(macro_ctx, MacroCtx::Explicit(_));
+        if is_explicit_macro {
+            diag.emit(Diagnostic::new(
+                text_range,
+                Cow::Owned(format!("Macro `{name}` is not defined")),
+                Severity::Error,
+            ));
+        }
+        return None;
+    };
+
+    // TODO: use trmaps for error range mapping.
+
+    let (_trmaps, expanded) = match dt_tools_analyzer::macros::substitute_macro_ast(
+        match macro_ctx {
+            MacroCtx::Explicit(inv) => Some(inv),
+            _ => None,
+        },
+        def,
+    ) {
+        Ok(result) => result,
+        Err(err) => {
+            diag.emit(Diagnostic::new(
+                text_range,
+                Cow::Owned(err),
+                Severity::Error,
+            ));
+            return None;
+        }
+    };
+    let parse = entrypoint.parse(&expanded);
+
+    // TODO: use trmaps to map error ranges back to the original macro invocation site.
+    // TODO: multi-file errors!!
+
+    let earliest_lex_error_range = parse.lex_errors.first().map(|e| e.text_range);
+    for lex_error in &parse.lex_errors {
+        diag.emit(Diagnostic::new(
+            lex_error.text_range,
+            format!("{} [lex error]", lex_error.inner).into(),
+            Severity::Error,
+        ));
+    }
+
+    for error in &parse.errors {
+        if let Some(earliest_lex_error_range) = earliest_lex_error_range
+            && error.primary_span.start >= earliest_lex_error_range.start
+        {
+            break;
+        }
+
+        let mut diagnostic = Diagnostic {
+            span: MultiSpan {
+                primary_spans: vec![error.primary_span],
+                span_labels: error.span_labels.clone(),
+            },
+            msg: error.message.clone(),
+            severity: Severity::Error,
+        };
+        tag_diagnostic(&mut diagnostic, "dt-tools(syntax-error)");
+        diag.emit(diagnostic);
+    }
+
+    let Some(ast) = parse.red_node().children().find_map(AstType::cast_either) else {
+        diag.emit(Diagnostic::new(
+            text_range,
+            Cow::Owned(format!(
+                "Couldn't find {} as child of parse's root node",
+                std::any::type_name::<AstType>()
+            )),
+            Severity::Error,
+        ));
+        return None;
+    };
+
+    convert(db, env, diag, &ast)
+}
+
+/// Convert an AST phandle to a [`MirPhandleTarget`].
+fn convert_phandle<'db>(
+    db: &'db dyn BaseDb,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector,
+    phandle: &ast::DtPhandle,
+) -> Option<MirPhandleTarget> {
+    use dt_tools_parser::parser::Entrypoint;
+
+    if let Some(macro_inv) = phandle.macro_invocation() {
+        // If the phandle has a macro invocation (e.g. `&MACRO(...)`), resolve it.
+        resolve_macro_to_value(
+            db,
+            env,
+            diag,
+            &MacroCtx::Explicit(&macro_inv),
+            Entrypoint::ReferenceNoamp,
+            convert_phandle,
+        )
+    } else if phandle.is_path() {
+        // &{/path/to/node}
+        // NOTE: very naive, just strips the prefix/suffix from the source text.
+        // A proper implementation would use the CST structure.
+        let raw = phandle.syntax().green.text();
+        let inner = raw.strip_prefix("&{")?.strip_suffix('}')?;
+
+        Some(MirPhandleTarget::Path(inner.to_owned()))
+    } else {
+        // No explicit macro invocation, but the name itself might still be a macro
+        // (e.g. `#define UART_1 soc/uart` and `&UART_1`).
+        let name_ast = phandle.name()?;
+        let name_text = name_ast.syntax().text().to_string();
+
+        Some(
+            resolve_macro_to_value(
+                db,
+                env,
+                diag,
+                &MacroCtx::Implicit {
+                    name: name_text.as_str(),
+                    text_range: name_ast.syntax().text_range(),
+                },
+                Entrypoint::ReferenceNoamp,
+                convert_phandle,
+            )
+            .unwrap_or(MirPhandleTarget::Label(name_text)),
+        )
+    }
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::needless_raw_string_hashes,
+    reason = "expect-test auto update adds r#"
+)]
+mod tests {
+    use camino::Utf8Path;
+
+    use crate::salsa::db::BaseDb;
+
+    use super::*;
+
+    #[test]
+    fn mir_basic_node() {
+        let db = crate::salsa::db::BaseDatabase::default();
+        IncludeDirs::new(&db, vec![]);
+
+        let file_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/basic.dts");
+        let file = db.get_files().get_file(&db, &file_path);
+
+        let result =
+            preprocessor_eval_file(&db, file, None, false).expect("Should be a readable file");
+        let mir = result.mir(&db);
+
+        expect_test::expect![[r#"
+            node   / 11..63
+            node   /baz 32..60
+            property =  /baz/a/b 79..87
+            property =  /baz/qux 42..55
+            property =  /foo 17..29
+        "#]]
+        .assert_eq(&mir.fmt_for_test());
+    }
 }

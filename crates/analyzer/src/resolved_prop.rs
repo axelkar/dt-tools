@@ -170,7 +170,7 @@ impl Cell {
 
                 let cells = parse.red_node();
 
-                let cell = ast::Cell::cast(cells.children().next().unwrap()).unwrap();
+                let cell = ast::Cell::cast_either(cells.children().next().unwrap()).unwrap();
                 // TODO: handle errors & map textranges somehow?!
                 // TODO: this can return multiple cells
 

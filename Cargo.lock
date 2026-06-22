@@ -432,6 +432,7 @@ dependencies = [
  "dt-tools-lint",
  "dt-tools-parser",
  "dt-tools-workspace",
+ "expect-test",
  "fluent-uri 0.4.1",
  "itertools",
  "parking_lot",

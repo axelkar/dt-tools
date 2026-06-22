@@ -2,12 +2,14 @@ use std::borrow::Cow;
 
 use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity};
+use dt_tools_parser::ast::AstNode;
 
 pub mod db;
 mod expr_eval;
 pub mod file;
 pub mod includes;
 pub mod macros;
+pub mod mir;
 pub mod preprocessor;
 
 #[salsa::tracked]
@@ -137,6 +139,8 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
         }
     }
 
+    // TODO: re-enable? (though preprocessor_eval_file (also TODO: rename it) will probably
+    // supersede the functionality here)
     /*
     if let Some(outline) = outline(db, file) {
         diagnostics.extend_from_slice(outline.diagnostics(db));
@@ -147,7 +151,16 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
     }
     */
 
-    if let Some(result) = preprocessor::preprocessor_eval_file(db, file, None) {
+    // Detect /plugin/; in the root file.
+    let is_overlay = parse_file(db, file).is_some_and(|p| {
+        p.parse(db).source_file().directives().any(|dir| {
+            dir.syntax()
+                .child_tokens()
+                .any(|tok| tok.green.kind == dt_tools_parser::lexer::TokenKind::PluginDirective)
+        })
+    });
+
+    if let Some(result) = preprocessor::preprocessor_eval_file(db, file, None, is_overlay) {
         diagnostics.extend_from_slice(result.diagnostics(db));
     }
 

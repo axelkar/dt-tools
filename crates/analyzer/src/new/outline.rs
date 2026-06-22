@@ -272,7 +272,7 @@ pub fn analyze_file(
         .syntax()
         .children()
         .par_bridge()
-        .filter_map(ast::ToplevelItem::cast)
+        .filter_map(ast::ToplevelItem::cast_either)
         .filter_map(|item| {
             let _span = span.clone().entered();
             maybe_analyze_toplevel(item, src, diag)
@@ -393,7 +393,7 @@ fn maybe_analyze_toplevel(
                                 .syntax()
                                 .children()
                                 .par_bridge()
-                                .filter_map(ast::ToplevelItem::cast)
+                                .filter_map(ast::ToplevelItem::cast_either)
                                 .filter_map(|item| {
                                     let _span = span.clone().entered();
                                     maybe_analyze_toplevel(item, src, diag)

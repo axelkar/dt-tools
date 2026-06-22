@@ -84,14 +84,12 @@ pub trait AstToken: Sized {
 }
 
 /// Trait used for downcasting from [`RedToken`]s and [`RedNode`]s to AST nodes and tokens.
-///
-/// This must only be implemented for enums.
 pub trait AstNodeOrToken: Sized {
     /// Try to cast a [`RedToken`] or a [`RedNode`]s to an AST node or token.
     // TODO: return RedItem back if it doesn't succeed, so reditem doesn't have to be cloned in
     // match_ast!
     #[must_use]
-    fn cast(syntax: RedItem) -> Option<Self> {
+    fn cast_either(syntax: RedItem) -> Option<Self> {
         match syntax {
             RedItem::Node(syntax) => Self::cast_node(syntax),
             RedItem::Token(syntax) => Self::cast_token(syntax),
@@ -112,8 +110,27 @@ pub trait AstNodeOrToken: Sized {
     fn cast_token(syntax: Arc<RedToken>) -> Option<Self>;
 
     /// Returns a reference to the syntax node or token.
-    fn syntax(&self) -> RedItemRef<'_>;
+    fn syntax_item(&self) -> RedItemRef<'_>;
 }
+
+impl<T> AstNodeOrToken for T
+where
+    T: AstNode,
+{
+    fn cast_node(syntax: Arc<RedNode>) -> Option<Self> {
+        Self::cast(syntax)
+    }
+
+    fn cast_token(_syntax: Arc<RedToken>) -> Option<Self> {
+        None
+    }
+
+    fn syntax_item(&self) -> RedItemRef<'_> {
+        TreeItem::Node(self.syntax())
+    }
+}
+
+// TODO: own trait for cast_either?
 
 macro_rules! define_ast_node {
     ($($(#[$attr:meta])* $name:ident : $kind:ident);+ $(;)?) => {
@@ -132,6 +149,29 @@ macro_rules! define_ast_node {
                     }
                 }
                 fn syntax(&self) -> &Arc<RedNode> {
+                    &self.syntax
+                }
+            }
+        )+
+    }
+}
+macro_rules! define_ast_token {
+    ($($(#[$attr:meta])* $name:ident : $kind:ident);+ $(;)?) => {
+        $(
+            $(#[$attr])*
+            #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+            pub struct $name {
+                syntax: Arc<RedToken>
+            }
+
+            impl AstToken for $name {
+                fn cast(syntax: Arc<RedToken>) -> Option<Self> {
+                    match syntax.green.kind {
+                        TokenKind::$kind => Some(Self { syntax }),
+                        _ => None,
+                    }
+                }
+                fn syntax(&self) -> &Arc<RedToken> {
                     &self.syntax
                 }
             }
@@ -218,7 +258,7 @@ define_ast_node! {
 impl SourceFile {
     /// Returns an iterator over direct [`ToplevelItem`] children.
     pub fn items(&self) -> impl Iterator<Item = ToplevelItem> + '_ {
-        self.syntax.children().filter_map(ToplevelItem::cast)
+        self.syntax.children().filter_map(ToplevelItem::cast_either)
     }
     /// Returns an iterator over direct [`Directive`] children.
     pub fn directives(&self) -> impl Iterator<Item = Directive> + '_ {
@@ -291,9 +331,11 @@ impl DtProperty {
             .child_nodes()
             .find(|node| node.green.kind == NodeKind::PropValueList)
         {
-            Some(value_list) => {
-                Either::Left(value_list.owned_children().filter_map(PropValue::cast))
-            }
+            Some(value_list) => Either::Left(
+                value_list
+                    .owned_children()
+                    .filter_map(PropValue::cast_either),
+            ),
             None => Either::Right(std::iter::empty()),
         }
     }
@@ -354,7 +396,7 @@ impl AstNodeOrToken for PropValue {
             _ => None,
         }
     }
-    fn syntax(&self) -> RedItemRef<'_> {
+    fn syntax_item(&self) -> RedItemRef<'_> {
         match self {
             Self::CellList(it) => TreeItem::Node(&it.syntax),
             Self::String(it) | Self::Bytestring(it) => TreeItem::Token(it),
@@ -387,7 +429,7 @@ impl AstNodeOrToken for Cell {
             _ => None,
         }
     }
-    fn syntax(&self) -> RedItemRef<'_> {
+    fn syntax_item(&self) -> RedItemRef<'_> {
         match self {
             Self::Number(it) => TreeItem::Token(it),
             Self::Phandle(it) => TreeItem::Node(&it.syntax),
@@ -437,7 +479,9 @@ impl MacroInvocation {
             .child_tokens()
             .find(|tok| tok.green.kind == TokenKind::Ident)
     }
-    /// Returns the macro's identifier
+    /// Returns the macro's identifier.
+    ///
+    /// The difference between this and [`Self::ident`] is that this returns a reference.
     #[must_use]
     pub fn green_ident(&self) -> Option<&Arc<GreenToken>> {
         self.syntax
@@ -462,7 +506,7 @@ define_ast_node! {
 impl DtCellList {
     // TODO: add example
     pub fn cells(&self) -> impl Iterator<Item = Cell> + '_ {
-        self.syntax.children().filter_map(Cell::cast)
+        self.syntax.children().filter_map(Cell::cast_either)
     }
 }
 
@@ -496,6 +540,11 @@ impl DtNode {
     /// ```
     pub fn properties(&self) -> impl Iterator<Item = DtProperty> + '_ {
         self.syntax.child_nodes().filter_map(DtProperty::cast)
+    }
+
+    /// Returns an iterator over direct [`Directive`] children.
+    pub fn directives(&self) -> impl Iterator<Item = Directive> + '_ {
+        self.syntax.child_nodes().filter_map(Directive::cast)
     }
 
     /// Returns an iterator over direct [`DtNode`] children.
@@ -694,25 +743,13 @@ impl HasName for DtNode {}
 impl HasLabel for DtNode {}
 impl HasMacroInvocation for DtNode {}
 
-/// A generic name.
-///
-/// This can only be found in label, property and node names currently. TODO: update
-///
-/// Kind: [`TokenKind::Name`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Name {
-    syntax: Arc<RedToken>,
-}
-impl AstToken for Name {
-    fn cast(syntax: Arc<RedToken>) -> Option<Self> {
-        match syntax.green.kind {
-            TokenKind::Name => Some(Self { syntax }),
-            _ => None,
-        }
-    }
-    fn syntax(&self) -> &Arc<RedToken> {
-        &self.syntax
-    }
+define_ast_token! {
+    /// A generic name.
+    ///
+    /// This can only be found in label, property and node names currently. TODO: update
+    ///
+    /// Kind: [`TokenKind::Name`]
+    Name: Name;
 }
 impl Name {
     // TODO: make callers use syntax.text directly
@@ -809,7 +846,7 @@ define_ast_node! {
 impl PreprocessorBranch {
     /// Returns an iterator over direct [`ToplevelItem`] children.
     pub fn items(&self) -> impl Iterator<Item = ToplevelItem> + '_ {
-        self.syntax.children().filter_map(ToplevelItem::cast)
+        self.syntax.children().filter_map(ToplevelItem::cast_either)
     }
 }
 
@@ -868,7 +905,7 @@ impl AstNodeOrToken for ToplevelItem {
             syntax,
         )?))
     }
-    fn syntax(&self) -> RedItemRef<'_> {
+    fn syntax_item(&self) -> RedItemRef<'_> {
         match self {
             Self::Node(it) => TreeItem::Node(&it.syntax),
             Self::Directive(it) => TreeItem::Node(&it.syntax),

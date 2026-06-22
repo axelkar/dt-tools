@@ -36,7 +36,7 @@ impl EarlyLintPass for DtcStyle {
                     LintId::DtcStyle,
                     "First item must be `/dts-v1/;` directive",
                     Severity::Error,
-                    first.syntax().text_range(),
+                    first.syntax_item().text_range(),
                 );
             }
         }
