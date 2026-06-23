@@ -257,12 +257,19 @@ impl LanguageServer for Backend {
             params.text_document.version,
         );
 
-        {
+        let msg = {
             // Set the first opened file to be the main file
             let mut main_file = self.session.main_file.lock();
-            main_file.get_or_insert_with(|| params.text_document.uri.clone());
+            let new_main_file = main_file.get_or_insert_with(|| params.text_document.uri.clone());
 
             // TODO: main file in Salsa?
+
+            uri_to_path(new_main_file).map(|path| format!("The main file is {path}."))
+        };
+
+        // Indirection because we can't hold a lock across an await point
+        if let Some(msg) = msg {
+            self.client.show_message(MessageType::INFO, &msg).await;
         }
 
         // TODO: warn files that aren't included by main_file
@@ -294,12 +301,19 @@ impl LanguageServer for Backend {
         let path = uri_to_path(&params.text_document.uri).expect("Invalid document URI");
         self.session.open_docs.remove(path.as_ref());
 
-        {
-            // Set the first opened file to be the main file
+        let msg = {
             let mut main_file = self.session.main_file.lock();
             if *main_file == Some(params.text_document.uri) {
                 *main_file = None;
+                Some("The main file has been removed.")
+            } else {
+                None
             }
+        };
+
+        // Indirection because we can't hold a lock across an await point
+        if let Some(msg) = msg {
+            self.client.show_message(MessageType::INFO, msg).await;
         }
 
         debug!("file closed");
@@ -335,6 +349,7 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
+    // TODO: diagnostics from main file
     async fn push_diagnostics_for_open_docs(&self) {
         // TODO: worker thread
         for entry in &self.session.open_docs {

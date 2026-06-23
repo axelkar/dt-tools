@@ -57,6 +57,7 @@ pub enum NodeKind {
     PropValueList,
     DtPhandle,
     UnitAddress,
+    /// Macro invocation, which may ar may not have arguments.
     MacroInvocation,
     MacroArgument,
 }

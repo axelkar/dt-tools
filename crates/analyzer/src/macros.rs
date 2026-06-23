@@ -623,7 +623,7 @@ pub enum TextRangeMapTo {
     MacroTextOffset(usize),
     /// Forward to two or more places
     Concat(Vec<TextRangeMapTo>),
-    /// Forward to offset inrmacro definition and argument at index
+    /// Forward to offset in macro definition and argument at index
     Stringify {
         macro_text_offset: usize,
         argument_idx: usize,

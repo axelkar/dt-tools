@@ -1,13 +1,68 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, num::ParseIntError, str::FromStr, sync::Arc};
 
 use dt_tools_analyzer::{macros::substitute_macro_ast, string::interpret_escaped_char};
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
 use dt_tools_parser::{
     ast::{self, AstNode},
+    cst::RedToken,
     lexer::TokenKind,
 };
 
 use crate::salsa::{db::BaseDb, macros::env::TrackedMapEnvMut};
+
+/// Parses an integer and emits errors.
+///
+/// # Example
+///
+/// ```ignore
+/// parse_int::<i64>(
+///     src,
+///     i64::from_str_radix,
+///     text_range,
+///     diag,
+///     "64-bit signed integer"
+/// )
+/// ```
+pub fn parse_int_tok<T: FromStr<Err = ParseIntError>>(
+    tok: &Arc<RedToken>,
+    from_str_radix: impl FnOnce(&str, u32) -> Result<T, ParseIntError>,
+    diag: &impl DiagnosticCollector,
+    type_description: &str,
+) -> Option<T> {
+    let emit_err = |err: &ParseIntError| {
+        let msg = err.to_string().replace("target type", type_description);
+        diag.emit(Diagnostic::new(
+            tok.text_range(),
+            msg.into(),
+            Severity::Error,
+        ));
+    };
+
+    let src = tok.text().as_str();
+    if src.starts_with("0x") || src.starts_with("0X") {
+        // Hexadecimal
+        from_str_radix(&src[2..], 16).inspect_err(emit_err).ok()
+    } else {
+        src.parse()
+            .inspect_err(emit_err)
+            .ok()
+    }
+}
+
+pub fn interpret_escaped_char_tok(
+    tok: &Arc<RedToken>,
+    diag: &impl DiagnosticCollector,
+) -> Option<char> {
+    interpret_escaped_char(tok.text())
+        .inspect_err(|err| {
+            diag.emit(Diagnostic::new(
+                tok.text_range(),
+                err.to_string().into(),
+                Severity::Error,
+            ));
+        })
+        .ok()
+}
 
 // TODO: in preprocessor conditional mode, undefined macros that are used as object-like macros evaluate to zero as defined here: https://gcc.gnu.org/onlinedocs/cpp/If.html
 #[expect(clippy::too_many_lines, reason = "It's pretty enough as is")]
@@ -82,21 +137,13 @@ pub fn eval(
                 .child_tokens()
                 .find(|tok| tok.green.kind == TokenKind::Number)
             {
-                // TODO: error handling
-                let src: &str = number.text();
-
-                src.parse().ok().or_else(|| {
-                    src.strip_prefix("0x")
-                        .or_else(|| src.strip_prefix("0X"))
-                        .and_then(|src| i64::from_str_radix(src, 16).ok())
-                })
+                parse_int_tok::<i64>(&number, i64::from_str_radix, diag, "64-bit signed integer")
             } else if let Some(char) = literal_expr
                 .syntax()
                 .child_tokens()
                 .find(|tok| tok.green.kind == TokenKind::Char)
             {
-                // TODO: error handling
-                let val = interpret_escaped_char(char.text()).ok()?;
+                let val = interpret_escaped_char_tok(&char, diag)?;
 
                 Some(val as i64)
             } else {

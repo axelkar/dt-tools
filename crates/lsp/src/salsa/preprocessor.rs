@@ -23,6 +23,7 @@ use dt_tools_parser::{
 
 use crate::salsa::{
     db::BaseDb,
+    expr_eval::{interpret_escaped_char_tok, parse_int_tok},
     includes::IncludeDirs,
     macros::env::{TrackedMapEnv, TrackedMapEnvMut},
     mir::{
@@ -478,7 +479,6 @@ fn handle_toplevel_item<'db>(
                 *env = result.env_after(db).to_mut();
                 mir.merge(result.mir(db));
 
-
                 // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
                 env.flatten_ancestors(db);
             }
@@ -591,8 +591,10 @@ fn process_dt_node<'db>(
     path_prefix: &str,
     dt_node: &ast::DtNode,
 ) {
-    let text_range = dt_node.syntax().text_range();
-    let provenance = MirProvenance { file, text_range };
+    let provenance = MirProvenance {
+        file,
+        text_range: dt_node.syntax().text_range(),
+    };
 
     // Handle extensions: &label { } or &{/path} { }
     if let Some(phandle) = dt_node.extension_name() {
@@ -622,8 +624,12 @@ fn process_dt_node<'db>(
                 });
             }
         } else {
+            let mut body_mir = Mir::default();
+            // Process so diagnostics are emitted
+            process_dt_node_body(db, file, env, diag, &mut body_mir, is_overlay, "", dt_node);
+
             diag.emit(Diagnostic::new(
-                text_range,
+                phandle.syntax().text_range(),
                 Cow::Owned(format!("Label not found: {target}")),
                 Severity::Error,
             ));
@@ -883,17 +889,13 @@ fn convert_cell<'db>(
 ) -> Option<MirCell> {
     match cell {
         ast::Cell::Number(tok) => {
-            // TODO: combine with expr
-            let src = tok.text();
-            src.parse()
-                .ok()
-                .or_else(|| {
-                    src.strip_prefix("0x")
-                        .or_else(|| src.strip_prefix("0X"))
-                        .and_then(|s| u32::from_str_radix(s, 16).ok())
-                })
+            parse_int_tok::<u32>(tok, u32::from_str_radix, diag, "32-bit unsigned integer")
                 .map(MirCell::U32)
-            // TODO: error handling?!
+        }
+        ast::Cell::Char(tok) => {
+            let val = interpret_escaped_char_tok(tok, diag)?;
+
+            Some(MirCell::U32(val as u32))
         }
         ast::Cell::Phandle(phandle) => {
             Some(MirCell::Phandle(convert_phandle(db, env, diag, phandle)?))
@@ -906,7 +908,27 @@ fn convert_cell<'db>(
             Entrypoint::Cells,
             convert_cell,
         ),
-        // TODO: exprs / DtExpr. Remember to error when it's over u32::MAX or under u32::MIN
+        ast::Cell::DtExpr(dt_expr) => {
+            let expr = dt_expr.expr()?;
+            let num = super::expr_eval::eval(db, env, expr, diag)?;
+            if let Ok(num) = u32::try_from(num) {
+                Some(MirCell::U32(num))
+            } else if let Ok(num) = i32::try_from(num) {
+                // Encoded using two's complement
+                Some(MirCell::U32(num.cast_unsigned()))
+            } else {
+                let cmp = if num < 0 { "small" } else { "large" };
+
+                diag.emit(Diagnostic::new(
+                    cell.syntax_item().text_range(),
+                    Cow::Owned(format!(
+                        "number {num} too {cmp} to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer"
+                    )),
+                    Severity::Error,
+                ));
+                None
+            }
+        } // TODO: exprs / DtExpr. Remember to error when it's over u32::MAX or under u32::MIN
     }
 }
 
@@ -1002,8 +1024,10 @@ fn resolve_macro_to_value<'db, AstType: AstNodeOrToken, MirType, D: DiagnosticCo
         diag.emit(Diagnostic::new(
             text_range,
             Cow::Owned(format!(
-                "Couldn't find {} as child of parse's root node",
-                std::any::type_name::<AstType>()
+                "Couldn't find {} as child of parse's root node, found node kinds {:?} and token kinds {:?}",
+                std::any::type_name::<AstType>(),
+                parse.red_node().child_nodes().map(|red| red.green.kind).collect::<Vec<_>>(),
+                parse.red_node().child_tokens().map(|red| red.green.kind).collect::<Vec<_>>()
             )),
             Severity::Error,
         ));
@@ -1101,10 +1125,11 @@ mod tests {
             })
         });
 
+        let diags = crate::salsa::compute_file_diagnostics(&db, main_file);
+
         let result = preprocessor_eval_file(&db, main_file, None, is_overlay)
             .expect("Should be a readable file");
         let mir = result.mir(&db);
-        let diags = result.diagnostics(&db);
 
         let mut out = mir.fmt_for_test(&db);
         if !diags.is_empty() {
@@ -1120,6 +1145,17 @@ mod tests {
             }
         }
         expect.assert_eq(&out);
+    }
+
+    #[test]
+    fn mir_empty() {
+        check_mir(
+            r#"
+/dts-v1/;
+"#,
+            &[],
+            expect![""],
+        );
     }
 
     #[test]
@@ -1158,11 +1194,12 @@ mod tests {
         check_mir(
             r#"
 /dts-v1/;
-LBL: node {};
+/ { LBL: node {}; };
 "#,
             &[],
             expect![[r#"
-                node labels=[LBL] /node /main.dts 11..24
+                node   / /main.dts 11..31
+                node labels=[LBL] /node /main.dts 15..28
             "#]],
         );
     }
@@ -1172,13 +1209,14 @@ LBL: node {};
         check_mir(
             r#"
 /dts-v1/;
-LBL: node {};
+/ { LBL: node {}; };
 &LBL { prop = <1>; };
 "#,
             &[],
             expect![[r#"
-                node labels=[LBL] /node /main.dts 11..24
-                property = CellList([U32(1)]) /node/prop /main.dts 32..43
+                node   / /main.dts 11..31
+                node labels=[LBL] /node /main.dts 15..28
+                property = CellList([U32(1)]) /node/prop /main.dts 39..50
             "#]],
         );
     }
@@ -1302,23 +1340,45 @@ LBL: node {};
     }
 
     #[test]
-    fn mir_macro_in_property() {
+    fn mir_macro() {
         check_mir(
             r#"
 /dts-v1/;
 #define VAL 42
-/ { prop = <VAL>; };
+#define VAL2 "example"
+
+/ { prop = <VAL>, VAL2; };
 "#,
             &[],
             expect![[r#"
-                node   / /main.dts 26..46
-                property = CellList([U32(42)]) /prop /main.dts 30..43
+                node   / /main.dts 50..76
+                property = CellList([U32(42)]), String("example") /prop /main.dts 54..73
             "#]],
         );
     }
 
     #[test]
-    fn mir_undefined_label_error() {
+    fn mir_undefined_macro() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { prop = <VAL>; prop2 = VAL; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..44
+                property = CellList([]) /prop /main.dts 15..28
+                property =  /prop2 /main.dts 29..41
+
+                --- errors ---
+                Error 23..26: Macro `VAL` is not defined [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
+                Error 37..40: Macro `VAL` is not defined [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_undefined_label() {
         check_mir(
             r#"
 /dts-v1/;
@@ -1328,7 +1388,58 @@ LBL: node {};
             expect![[r#"
 
                 --- errors ---
-                Error 11..22: Label not found: &BOGUS [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
+                Error 11..17: Label not found: &BOGUS [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_num_out_of_bounds() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { prop = <(1 << 32)>; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..37
+                property = CellList([]) /prop /main.dts 15..34
+
+                --- errors ---
+                Error 23..32: number 4294967296 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_num_negative() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { prop = <-1 (-1)>; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..35
+                property = CellList([U32(1), U32(4294967295)]) /prop /main.dts 15..32
+
+                --- errors ---
+                Error 23..24: Expected cell or ‘>’, but found ‘-’ [dt-tools(syntax-error)]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_char() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { prop = <'\0' 'a'>; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..36
+                property = CellList([U32(0), U32(97)]) /prop /main.dts 15..33
             "#]],
         );
     }

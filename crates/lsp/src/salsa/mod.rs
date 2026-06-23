@@ -136,7 +136,7 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
         }
 
         // FIXME: main file detection
-        let is_main_file = true;
+        let is_main_file = false;
         for mut lint in
             dt_tools_lint::default_lint(&parse.source_file(), file.contents(db), is_main_file)
         {

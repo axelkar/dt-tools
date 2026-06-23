@@ -176,6 +176,7 @@ impl Cell {
 
                 Cell::from_ast(&cell, _resolve_label, macro_resolver)?
             }
+            _ => todo!(),
         })
     }
 }

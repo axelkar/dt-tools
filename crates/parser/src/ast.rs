@@ -443,31 +443,34 @@ impl AstNodeOrToken for PropValue {
 /// A Devicetree cell, compiled to a 32-bit integer
 #[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Cell {
-    /// 32-bit integer
     Number(Arc<RedToken>),
-    /// Numeric reference
+    Char(Arc<RedToken>),
     Phandle(DtPhandle),
     Macro(MacroInvocation),
+    DtExpr(DtExpr),
 }
 impl AstNodeOrToken for Cell {
     fn cast_node(syntax: Arc<RedNode>) -> Option<Self> {
         match syntax.green.kind {
             NodeKind::DtPhandle => Some(Self::Phandle(DtPhandle { syntax })),
             NodeKind::MacroInvocation => Some(Self::Macro(MacroInvocation { syntax })),
+            NodeKind::DtExpr => Some(Self::DtExpr(DtExpr { syntax })),
             _ => None,
         }
     }
     fn cast_token(syntax: Arc<RedToken>) -> Option<Self> {
         match syntax.green.kind {
             TokenKind::Number => Some(Self::Number(syntax)),
+            TokenKind::Char => Some(Self::Char(syntax)),
             _ => None,
         }
     }
     fn syntax_item(&self) -> RedItemRef<'_> {
         match self {
-            Self::Number(it) => TreeItem::Token(it),
+            Self::Number(it) | Self::Char(it) => TreeItem::Token(it),
             Self::Phandle(it) => TreeItem::Node(&it.syntax),
             Self::Macro(it) => TreeItem::Node(&it.syntax),
+            Self::DtExpr(it) => TreeItem::Node(&it.syntax),
         }
     }
 }
@@ -837,10 +840,18 @@ impl HasName for DtLabel {}
 impl HasMacroInvocation for DtLabel {}
 
 define_ast_node! {
-    /// An expression in a [`Cell`] that should evaluate to an integer. Often parenthesized.
+    /// A parenthesized expression in a [`Cell`] that should evaluate to an integer.
+    ///
+    /// Wraps [`Expr`].
     ///
     /// Kind: [`NodeKind::DtExpr`]
     DtExpr: DtExpr;
+}
+impl DtExpr {
+    /// Returns the first [`Expr`] if it exists.
+    pub fn expr(&self) -> Option<Expr> {
+        self.syntax().child_nodes().find_map(Expr::cast)
+    }
 }
 
 define_ast_node! {

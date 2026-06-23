@@ -6,7 +6,7 @@ use std::fmt;
 
 use dt_tools_parser::TextRange;
 
-use crate::salsa::{db::BaseDb, file::File};
+use crate::salsa::file::File;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Mir {
@@ -27,7 +27,8 @@ impl Mir {
 
     /// Format for snapshot testing.
     #[must_use]
-    pub(crate) fn fmt_for_test(&self, db: &dyn BaseDb) -> String {
+    #[cfg(test)]
+    pub(crate) fn fmt_for_test(&self, db: &dyn crate::salsa::db::BaseDb) -> String {
         use std::fmt::Write;
 
         let mut defs: Vec<_> = self.definitions.iter().collect();

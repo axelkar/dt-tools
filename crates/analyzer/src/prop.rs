@@ -389,7 +389,7 @@ impl CustomValue {
                             ast::Cell::Number(token) => {
                                 CustomValueCellItem::U32(parse_u32(token.text())?)
                             }
-                            ast::Cell::Macro(_) => todo!(),
+                            _ => todo!(),
                         }))
                     })
                     .filter_map(|v| match v {

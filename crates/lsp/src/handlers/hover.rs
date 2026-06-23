@@ -91,7 +91,7 @@ pub async fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover>
         .find(|(text_range, _)| text_range.byte_range().contains(&offset))
     {
         let path = file.path(db);
-        Some((format!("Include\n---\n`{path}`",), Some(text_range)))
+        Some((format!("Include\n---\n`{path}`"), Some(text_range)))
     } else {
         // definition
         let parent = token.parent.clone();

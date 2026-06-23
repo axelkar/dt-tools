@@ -29,6 +29,7 @@ impl Iterator for InterpretEscapedString<'_> {
         self.s.next().map(|c| match c {
             '\\' => match self.s.next() {
                 None => Err(StringParseError::EscapeAtEndOfString),
+                Some('0') => Ok('\0'),
                 Some('a') => Ok('\x07'),
                 Some('b') => Ok('\x08'),
                 Some('v') => Ok('\x0b'),
@@ -92,6 +93,7 @@ pub fn interpret_escaped_string(s: &str) -> Result<String, StringParseError> {
 /// ```
 /// use dt_tools_analyzer::string::{interpret_escaped_char, StringParseError};
 ///
+/// assert_eq!(interpret_escaped_char(r"'\0'"), Ok('\0'));
 /// assert_eq!(interpret_escaped_char(r"'\a'"), Ok('\x07'));
 /// assert_eq!(interpret_escaped_char("'a'"), Ok('a'));
 /// assert_eq!(interpret_escaped_char("'aa'"), Err(StringParseError::CharTooManyChars));

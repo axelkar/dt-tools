@@ -146,13 +146,8 @@ fn expr_binding_power(
 ) -> Option<CompletedMarker> {
     let mut lhs = lhs(p, defined_operator)?;
 
-    loop {
-        let Some(op) = InfixOp::at(p) else {
-            // We’re not at an operator; we don’t know what to do next, so we return and let the
-            // caller decide.
-            break;
-        };
-
+    // If None: We’re not at an operator; we don’t know what to do next, so we return and let the caller decide.
+    while let Some(op) = InfixOp::at(p) {
         let (left_bp, right_bp) = op.binding_power();
 
         if left_bp < min_bp {
