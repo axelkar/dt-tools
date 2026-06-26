@@ -11,7 +11,7 @@ pub struct File {
     #[returns(ref)]
     pub path: Utf8PathBuf,
 
-    // TODO: combine `contents` and `is_readable_file` into `contents: Option<String>`
+    // TODO(important): combine `contents` and `is_readable_file` into `contents: Option<String>`
     /// **Note:** The file may not exist. Check [`File::is_readable_file`] before reading contents.
     #[returns(ref)]
     pub contents: String,

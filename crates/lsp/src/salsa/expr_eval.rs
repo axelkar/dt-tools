@@ -1,14 +1,15 @@
 use std::{borrow::Cow, num::ParseIntError, str::FromStr, sync::Arc};
 
 use dt_tools_analyzer::{macros::substitute_macro_ast, string::interpret_escaped_char};
-use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
+use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
 use dt_tools_parser::{
+    TextRange,
     ast::{self, AstNode},
     cst::RedToken,
     lexer::TokenKind,
 };
 
-use crate::salsa::{db::BaseDb, macros::env::TrackedMapEnvMut};
+use crate::salsa::{db::BaseDb, file::File, macros::env::TrackedMapEnvMut};
 
 /// Parses an integer and emits errors.
 ///
@@ -25,14 +26,15 @@ use crate::salsa::{db::BaseDb, macros::env::TrackedMapEnvMut};
 /// ```
 pub fn parse_int_tok<T: FromStr<Err = ParseIntError>>(
     tok: &Arc<RedToken>,
+    diag: &impl DiagnosticCollector<File>,
+    spanner: &mut impl FnMut(TextRange) -> Span<File>,
     from_str_radix: impl FnOnce(&str, u32) -> Result<T, ParseIntError>,
-    diag: &impl DiagnosticCollector,
     type_description: &str,
 ) -> Option<T> {
     let emit_err = |err: &ParseIntError| {
         let msg = err.to_string().replace("target type", type_description);
         diag.emit(Diagnostic::new(
-            tok.text_range(),
+            spanner(tok.text_range()),
             msg.into(),
             Severity::Error,
         ));
@@ -43,20 +45,19 @@ pub fn parse_int_tok<T: FromStr<Err = ParseIntError>>(
         // Hexadecimal
         from_str_radix(&src[2..], 16).inspect_err(emit_err).ok()
     } else {
-        src.parse()
-            .inspect_err(emit_err)
-            .ok()
+        src.parse().inspect_err(emit_err).ok()
     }
 }
 
 pub fn interpret_escaped_char_tok(
     tok: &Arc<RedToken>,
-    diag: &impl DiagnosticCollector,
+    diag: &impl DiagnosticCollector<File>,
+    spanner: &mut impl FnMut(TextRange) -> Span<File>,
 ) -> Option<char> {
     interpret_escaped_char(tok.text())
         .inspect_err(|err| {
             diag.emit(Diagnostic::new(
-                tok.text_range(),
+                spanner(tok.text_range()),
                 err.to_string().into(),
                 Severity::Error,
             ));
@@ -70,11 +71,12 @@ pub fn eval(
     db: &dyn BaseDb,
     env: &TrackedMapEnvMut,
     ast: ast::Expr,
-    diag: &impl DiagnosticCollector,
+    diag: &impl DiagnosticCollector<File>,
+    spanner: &mut impl FnMut(TextRange) -> Span<File>,
 ) -> Option<i64> {
     match ast {
         ast::Expr::PrefixExpr(prefix_expr) => {
-            let value = || eval(db, env, prefix_expr.expr()?, diag);
+            let mut value = || eval(db, env, prefix_expr.expr()?, diag, spanner);
             match prefix_expr.op()? {
                 TokenKind::Plus => value(),
                 TokenKind::Minus => Some(-value()?),
@@ -96,13 +98,13 @@ pub fn eval(
                 _ => None,
             }
         }
-        ast::Expr::ParenExpr(paren_expr) => eval(db, env, paren_expr.expr()?, diag),
+        ast::Expr::ParenExpr(paren_expr) => eval(db, env, paren_expr.expr()?, diag, spanner),
         ast::Expr::MacroInvocation(macro_invocation) => {
             let ident = macro_invocation.ident()?;
             let name: &str = ident.text();
             let Some(def) = env.get_macro(db, name) else {
                 diag.emit(Diagnostic::new(
-                    ident.text_range(),
+                    spanner(ident.text_range()),
                     Cow::Owned(format!("Macro `{name}` is not defined")),
                     Severity::Error,
                 ));
@@ -116,7 +118,7 @@ pub fn eval(
 
             if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
                 diag.emit(Diagnostic::new(
-                    macro_invocation.syntax().text_range(),
+                    spanner(macro_invocation.syntax().text_range()),
                     Cow::Borrowed("Failed to parse the result of this macro invocation"),
                     Severity::Error,
                 ));
@@ -129,7 +131,8 @@ pub fn eval(
             let expr_ast = parse.red_node().child_nodes().find_map(ast::Expr::cast)?;
 
             // FIXME: diag needs trmaps
-            eval(db, env, expr_ast, diag)
+            // TODO: wrap spanner!
+            eval(db, env, expr_ast, diag, spanner)
         }
         ast::Expr::LiteralExpr(literal_expr) => {
             if let Some(number) = literal_expr
@@ -137,13 +140,19 @@ pub fn eval(
                 .child_tokens()
                 .find(|tok| tok.green.kind == TokenKind::Number)
             {
-                parse_int_tok::<i64>(&number, i64::from_str_radix, diag, "64-bit signed integer")
+                parse_int_tok::<i64>(
+                    &number,
+                    diag,
+                    spanner,
+                    i64::from_str_radix,
+                    "64-bit signed integer",
+                )
             } else if let Some(char) = literal_expr
                 .syntax()
                 .child_tokens()
                 .find(|tok| tok.green.kind == TokenKind::Char)
             {
-                let val = interpret_escaped_char_tok(&char, diag)?;
+                let val = interpret_escaped_char_tok(&char, diag, spanner)?;
 
                 Some(val as i64)
             } else {
@@ -171,8 +180,8 @@ pub fn eval(
 
             let rhs = iter.find_map(|child| ast::Expr::cast(child.as_node()?.clone()))?;
 
-            let lhs_value = eval(db, env, lhs, diag)?;
-            let rhs_value = || eval(db, env, rhs, diag);
+            let lhs_value = eval(db, env, lhs, diag, spanner)?;
+            let rhs_value = || eval(db, env, rhs, diag, spanner);
 
             Some(match op.green.kind {
                 TokenKind::Plus => lhs_value + rhs_value()?,
@@ -197,7 +206,7 @@ pub fn eval(
                     let cond = lhs_value != 0;
                     if cond {
                         let mhs = mhs?;
-                        eval(db, env, mhs, diag)?
+                        eval(db, env, mhs, diag, spanner)?
                     } else {
                         rhs_value()?
                     }
@@ -213,7 +222,7 @@ mod tests {
     use dt_tools_analyzer::macros::MacroDefinition;
     use dt_tools_parser::{ast::AstNode, parser::Entrypoint};
 
-    use crate::salsa::macros::env::TrackedMapEnvMut;
+    use crate::salsa::{db::BaseDb, macros::env::TrackedMapEnvMut};
 
     fn check(input: &str, env: &TrackedMapEnvMut) -> Option<i64> {
         let db = crate::salsa::db::BaseDatabase::default();
@@ -224,8 +233,13 @@ mod tests {
 
         let mut diagnostics = Vec::new();
         let diag = parking_lot::Mutex::new(&mut diagnostics);
+        let file = db
+            .get_files()
+            .add_virtual(&db, "/main.dts".into(), "".to_owned());
 
-        super::eval(&db, env, ast, &diag)
+        super::eval(&db, env, ast, &diag, &mut |text_range| {
+            text_range.within_file(file)
+        })
     }
 
     #[test]

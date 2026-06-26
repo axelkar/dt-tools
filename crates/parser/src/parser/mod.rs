@@ -136,33 +136,34 @@ impl Entrypoint {
         let p = &mut parser;
 
         let root_kind = {
-        let _span = tracy_client::span!("parser::grammar");
+            let _span = tracy_client::span!("parser::grammar");
             match self {
-            Self::SourceFile => {
-                grammar::entry_sourcefile(p);
-                NodeKind::SourceFile
+                Self::SourceFile => {
+                    grammar::entry_sourcefile(p);
+                    NodeKind::SourceFile
+                }
+                Self::Name => {
+                    grammar::entry_name(p);
+                    NodeKind::EntryName
+                }
+                Self::ReferenceNoamp => {
+                    grammar::reference_noamp(p);
+                    NodeKind::DtPhandle
+                }
+                Self::PropValues => {
+                    grammar::propvalues(p, &[]).ok();
+                    NodeKind::EntryPropValues
+                }
+                Self::Cells => {
+                    grammar::cells::<true>(p).ok();
+                    NodeKind::EntryCells
+                }
+                Self::PreprocessorConditional => {
+                    grammar::expr::entry_preprocessor_conditional(p);
+                    NodeKind::EntryPreprocessorConditional
+                }
             }
-            Self::Name => {
-                grammar::entry_name(p);
-                NodeKind::EntryName
-            }
-            Self::ReferenceNoamp => {
-                grammar::reference_noamp(p);
-                NodeKind::DtPhandle
-            }
-            Self::PropValues => {
-                grammar::propvalues(p, &[]).ok();
-                NodeKind::EntryPropValues
-            }
-            Self::Cells => {
-                grammar::cells::<true>(p).ok();
-                NodeKind::EntryCells
-            }
-            Self::PreprocessorConditional => {
-                grammar::expr::entry_preprocessor_conditional(p);
-                NodeKind::EntryPreprocessorConditional
-            }
-        } };
+        };
 
         // Add all tokens to CST and error
         if !p.at_end() {
@@ -680,23 +681,23 @@ Tree:
         check_parse_output(
             output,
             expect![[r#"
-            Errors: [
-                ParseError {
-                    message: "Expected ‘}’, but found end-of-file",
-                    primary_span: TextRange {
-                        start: 9,
-                        end: 10,
+                Errors: [
+                    ParseError {
+                        message: "Expected ‘}’, but found end-of-file",
+                        primary_text_range: TextRange {
+                            start: 9,
+                            end: 10,
+                        },
+                        span_labels: [],
                     },
-                    span_labels: [],
-                },
-            ]
+                ]
 
-            Tree:
-            SourceFile@0..10
-              LCurly@0..1 "{"
-              Whitespace@1..4 "\n  "
-              LineComment@4..10 "// foo"
-        "#]],
+                Tree:
+                SourceFile@0..10
+                  LCurly@0..1 "{"
+                  Whitespace@1..4 "\n  "
+                  LineComment@4..10 "// foo"
+            "#]],
         );
     }
 }

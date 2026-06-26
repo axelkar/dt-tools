@@ -4,7 +4,7 @@ use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, Severity};
 use dt_tools_parser::TextRange;
 
-use crate::salsa::db::BaseDb;
+use crate::salsa::{db::BaseDb, file::File};
 
 /// Global setting singleton
 #[salsa::input(singleton)]
@@ -18,11 +18,11 @@ pub struct IncludeDirs {
 pub struct DocumentDeps<'db> {
     #[tracked]
     #[returns(ref)]
-    pub included_files: Vec<(TextRange, super::file::File)>,
+    pub included_files: Vec<(TextRange, File)>,
 
     #[tracked]
     #[returns(ref)]
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<Diagnostic<File>>,
 }
 
 // TODO: per-AnalyzedInclude??
@@ -32,7 +32,7 @@ pub struct DocumentDeps<'db> {
 ///
 /// Will panic if [`IncludeDirs`] hasn't been defined.
 #[salsa::tracked]
-pub fn document_deps(db: &dyn BaseDb, file: super::file::File) -> Result<DocumentDeps<'_>, ()> {
+pub fn document_deps(db: &dyn BaseDb, file: File) -> Result<DocumentDeps<'_>, ()> {
     let mut included_files = Vec::new();
     let mut diagnostics = Vec::new();
 
@@ -56,7 +56,7 @@ pub fn document_deps(db: &dyn BaseDb, file: super::file::File) -> Result<Documen
             included_files.push((include.text_range, file));
         } else {
             diagnostics.push(Diagnostic::new(
-                include.text_range,
+                include.text_range.within_file(file),
                 Cow::Borrowed("Couldn't find file to include"),
                 Severity::Error,
             ));

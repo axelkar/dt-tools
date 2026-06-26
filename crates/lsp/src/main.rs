@@ -274,7 +274,7 @@ impl LanguageServer for Backend {
 
         // TODO: warn files that aren't included by main_file
 
-        self.push_diagnostics_for_open_docs().await;
+        self.push_diagnostics_from_main_file().await;
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
@@ -290,7 +290,7 @@ impl LanguageServer for Backend {
             params.text_document.version,
         );
 
-        self.push_diagnostics_for_open_docs().await;
+        self.push_diagnostics_from_main_file().await;
     }
     async fn did_save(&self, _: DidSaveTextDocumentParams) {
         self.client
@@ -349,35 +349,45 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
-    // TODO: diagnostics from main file
-    async fn push_diagnostics_for_open_docs(&self) {
+    async fn push_diagnostics_from_main_file(&self) {
+        tracing::trace!("Pushing diagnostics");
+
         // TODO: worker thread
-        for entry in &self.session.open_docs {
-            let path = entry.key();
-            let uri = path_to_uri(path).expect("An open document should(?) exist");
+        let main_uri = self.session.main_file.lock().clone().unwrap();
+        let main_path = uri_to_path(&main_uri).expect("should be a real file with a path");
 
-            let lsp_diagnostics = {
-                let db = &mut *self.session.db.lock();
-                let file = db.get_files().get_file(db, path);
-                let diagnostics = crate::salsa::compute_file_diagnostics(db, file);
-                let Some(rope) = crate::salsa::rope(db, file) else {
-                    continue;
-                };
+        let lsp_diagnostics = {
+            let db = &mut *self.session.db.lock();
+            let file = db.get_files().get_file(db, &main_path);
+            let (diagnostics, included_files) = crate::salsa::compute_diagnostics(db, file);
 
-                // TODO: add a source field to dt-tools-diagnostic::Diagnostic or something
-                // could be like "dt-tools(lint {})"
-                let source = Some("dt-tools".to_owned());
+            // TODO: add a source field to dt-tools-diagnostic::Diagnostic or something
+            // could be like "dt-tools(lint {})"
+            let source = Some("dt-tools".to_owned());
 
-                diagnostics
-                    .iter()
-                    .flat_map(|diagnostic| {
-                        lsp_utils::dt_tools_diagnostic_to_lsp(diagnostic, rope, &source, &uri)
-                    })
-                    .collect::<Vec<_>>()
-            };
+            included_files
+                .iter()
+                .map(|file| {
+                    let path = file.path(db);
 
+                    (
+                        path_to_uri(path).expect("should exist"),
+                        self.session.open_docs.get(path).map(|entry| entry.version),
+                        diagnostics
+                            .iter()
+                            .flat_map(|diagnostic| {
+                                lsp_utils::dt_tools_diagnostic_to_lsp(db, diagnostic, &source, file)
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for (uri, version, lsp_diagnostics) in lsp_diagnostics {
+            tracing::trace!(uri = uri.as_str(), ?version, "Publishing diagnostics");
             self.client
-                .publish_diagnostics(uri.clone(), lsp_diagnostics, Some(entry.version))
+                .publish_diagnostics(uri, lsp_diagnostics, version)
                 .await;
         }
     }

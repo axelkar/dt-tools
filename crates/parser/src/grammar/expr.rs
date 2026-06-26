@@ -389,7 +389,7 @@ mod tests {
                 Errors: [
                     ParseError {
                         message: "Expected ‘+’, ‘-’, ‘*’, ‘/’, ‘%’, ‘&’, ‘|’, ‘^‘, ‘<<’, ‘>>’, ‘&&‘, ‘||‘, ‘<’, ‘>’, ‘<=‘, ‘>=‘, ‘==‘, ‘!=‘, ‘?‘ or end-of-file, but found number literal",
-                        primary_span: TextRange {
+                        primary_text_range: TextRange {
                             start: 2,
                             end: 3,
                         },

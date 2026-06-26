@@ -15,7 +15,6 @@ use dt_tools_parser::{
 };
 use either::Either;
 use enum_as_inner::EnumAsInner;
-use rayon::iter::{ParallelBridge, ParallelIterator};
 use rustc_hash::FxHashMap;
 
 use crate::macros::MacroDefinition;
@@ -108,10 +107,11 @@ impl AnalyzedInclude {
     /// Parses the preprocessor include directive token's text.
     ///
     /// Returns `Err` when there is invalid (or missing) text after `#include`.
-    fn pp_parse(
+    fn pp_parse<F>(
         text_range: TextRange,
         input: &str,
-        diag: &impl DiagnosticCollector,
+        file: F,
+        diag: &impl DiagnosticCollector<F>,
     ) -> Result<Self, PPIncludeParseError> {
         debug_assert!(input.starts_with('#'));
         let s = input
@@ -154,7 +154,8 @@ impl AnalyzedInclude {
                 TextRange {
                     start: text_range.start + offset,
                     end: text_range.end,
-                },
+                }
+                .within_file(file),
                 Cow::Borrowed("Unexpected characters after include string"),
                 Severity::Warn,
             ));
@@ -260,22 +261,23 @@ pub(crate) fn gather_labels<'input>(
     }
 }
 
-pub fn analyze_file(
-    file: &SourceFile,
+pub fn analyze_file<F: Clone>(
+    file_ast: &SourceFile,
     src: &str,
-    diag: &(impl DiagnosticCollector + Sync),
+    file: F,
+    diag: &(impl DiagnosticCollector<F> + Sync),
 ) -> Vec<AnalyzedToplevel> {
     // Pass through the span to the Rayon worker threads
     let span = tracing::Span::current();
 
-    let mut analyzed: Vec<_> = file
+    let mut analyzed: Vec<_> = file_ast
         .syntax()
         .children()
-        .par_bridge()
+        //.par_bridge()
         .filter_map(ast::ToplevelItem::cast_either)
         .filter_map(|item| {
             let _span = span.clone().entered();
-            maybe_analyze_toplevel(item, src, diag)
+            maybe_analyze_toplevel(item, src, file.clone(), diag)
         })
         .collect();
 
@@ -286,10 +288,11 @@ pub fn analyze_file(
 }
 
 #[expect(clippy::too_many_lines, reason = "no good way to make this shorter")]
-fn maybe_analyze_toplevel(
+fn maybe_analyze_toplevel<F: Clone>(
     item: ast::ToplevelItem,
     src: &str,
-    diag: &(impl DiagnosticCollector + Sync),
+    file: F,
+    diag: &(impl DiagnosticCollector<F> + Sync),
 ) -> Option<AnalyzedToplevel> {
     match item {
         ast::ToplevelItem::Node(node) => {
@@ -319,7 +322,7 @@ fn maybe_analyze_toplevel(
                 Ok(path) => path,
                 Err(err) => {
                     diag.emit(Diagnostic::new(
-                        string_tok.text_range(),
+                        string_tok.text_range().within_file(file),
                         Cow::Owned(err.to_string()),
                         Severity::Error,
                     ));
@@ -341,12 +344,13 @@ fn maybe_analyze_toplevel(
                 match AnalyzedInclude::pp_parse(
                     dir.syntax().text_range(),
                     dir.syntax().text(),
+                    file.clone(),
                     diag,
                 ) {
                     Ok(inc) => inc,
                     Err(err) => {
                         diag.emit(Diagnostic::new(
-                            dir.syntax().text_range(),
+                            dir.syntax().text_range().within_file(file),
                             Cow::Owned(err.to_string()),
                             Severity::Error,
                         ));
@@ -368,7 +372,8 @@ fn maybe_analyze_toplevel(
                                 local_range.offset(dir.syntax().text_offset)
                             } else {
                                 dir.syntax().text_range()
-                            },
+                            }
+                            .within_file(file),
                             Cow::Owned(err.to_string()),
                             Severity::Error,
                         ));
@@ -392,11 +397,11 @@ fn maybe_analyze_toplevel(
                             branch
                                 .syntax()
                                 .children()
-                                .par_bridge()
+                                //.par_bridge()
                                 .filter_map(ast::ToplevelItem::cast_either)
                                 .filter_map(|item| {
                                     let _span = span.clone().entered();
-                                    maybe_analyze_toplevel(item, src, diag)
+                                    maybe_analyze_toplevel(item, src, file.clone(), diag)
                                 })
                                 .collect()
                         },

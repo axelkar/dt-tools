@@ -20,8 +20,8 @@ pub struct DtcStyle;
 
 // TODO: validate idents
 
-impl EarlyLintPass for DtcStyle {
-    fn check_document(&mut self, cx: &mut crate::EarlyContext<'_>, file: &ast::SourceFile) {
+impl<F: std::fmt::Debug + Clone> EarlyLintPass<F> for DtcStyle {
+    fn check_document(&mut self, cx: &mut crate::EarlyContext<'_, F>, file: &ast::SourceFile) {
         if cx.is_main_file
             && let Some(first) = file.items().next()
         {
@@ -62,7 +62,7 @@ impl EarlyLintPass for DtcStyle {
             self.check_node(cx, &node);
         }
     }
-    fn check_node(&mut self, cx: &mut crate::EarlyContext<'_>, node: &ast::DtNode) {
+    fn check_node(&mut self, cx: &mut crate::EarlyContext<'_, F>, node: &ast::DtNode) {
         if let Some(label) = node.label() {
             self.check_label(cx, &label);
         }
@@ -89,7 +89,7 @@ impl EarlyLintPass for DtcStyle {
             );
         }
     }
-    fn check_property(&mut self, cx: &mut crate::EarlyContext<'_>, property: &ast::DtProperty) {
+    fn check_property(&mut self, cx: &mut crate::EarlyContext<'_, F>, property: &ast::DtProperty) {
         // TODO: This should really be in validations or in the grammar..
         if let Some(unit_address) = property
             .syntax()

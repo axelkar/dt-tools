@@ -9,29 +9,63 @@ pub mod text_range;
 // TODO: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_error_messages/enum.DiagMessage.html
 pub type DiagnosticMessage = Cow<'static, str>;
 
-/// Just like the [MultiSpan from rustc & clippy][1]
+/// Location in source code
 ///
-/// [1]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_error_messages/struct.MultiSpan.html
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MultiSpan {
-    pub primary_spans: Vec<TextRange>,
-    pub span_labels: Vec<SpanLabel>,
+/// `F` identifies a file/source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Span<F> {
+    pub file: F,
+    pub text_range: TextRange,
 }
-
-impl MultiSpan {
-    /// Offsets the spans by the specified amount.
-    pub fn offset(&mut self, offset: usize) {
-        for tr in &mut self.primary_spans {
-            *tr = tr.offset(offset);
-        }
-        for span_label in &mut self.span_labels {
-            span_label.span = span_label.span.offset(offset);
+impl<F> Span<F> {
+    /// Returns a `Span` with the same file as here and the passed-in `text_range` offset to be inside this span.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dt_tools_diagnostic::{Span, text_range::TextRange};
+    ///
+    /// let span = Span {
+    ///     file: "foo",
+    ///     text_range: TextRange::new(5, 10),
+    /// };
+    ///
+    /// // E.g. from macro parse
+    /// let text_range_inside = TextRange::new(2, 5);
+    ///
+    /// let span_inside = span.subspan_inside(text_range_inside);
+    /// assert_eq!(span_inside, Span {
+    ///     file: "foo",
+    ///     text_range: TextRange::new(7, 10)
+    /// });
+    /// ```
+    #[must_use]
+    pub fn subspan_inside(&self, text_range: TextRange) -> Self
+    where
+        F: Clone,
+    {
+        Self {
+            file: self.file.clone(),
+            text_range: text_range.offset(self.text_range.start),
         }
     }
 }
 
-impl From<TextRange> for MultiSpan {
-    fn from(value: TextRange) -> Self {
+/// Just like the [MultiSpan from rustc & clippy][1]
+///
+/// `F` identifies a file/source.
+///
+/// [1]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_error_messages/struct.MultiSpan.html
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MultiSpan<F> {
+    /// The primary ranges of text this error points to
+    pub primary_spans: Vec<Span<F>>,
+    /// Additional hints in the error
+    pub span_labels: Vec<SpanLabel<F>>,
+}
+
+impl<F> From<Span<F>> for MultiSpan<F> {
+    fn from(value: Span<F>) -> Self {
         Self {
             primary_spans: vec![value],
             span_labels: Vec::new(),
@@ -39,21 +73,22 @@ impl From<TextRange> for MultiSpan {
     }
 }
 
+/// Span label, supplementing the primary spans with additional information
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SpanLabel {
-    pub span: TextRange,
+pub struct SpanLabel<F> {
+    pub span: Span<F>,
     pub msg: DiagnosticMessage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Diagnostic {
-    pub span: MultiSpan,
+pub struct Diagnostic<F> {
+    pub span: MultiSpan<F>,
     pub msg: DiagnosticMessage,
     pub severity: Severity,
 }
-impl Diagnostic {
+impl<F> Diagnostic<F> {
     #[must_use]
-    pub fn new(primary_span: TextRange, msg: DiagnosticMessage, severity: Severity) -> Self {
+    pub fn new(primary_span: Span<F>, msg: DiagnosticMessage, severity: Severity) -> Self {
         Self {
             span: MultiSpan::from(primary_span),
             msg,
@@ -68,47 +103,36 @@ pub enum Severity {
     Error,
 }
 
-pub trait DiagnosticCollector {
-    fn emit(&self, diag: Diagnostic);
+pub trait DiagnosticCollector<F> {
+    fn emit(&self, diag: Diagnostic<F>);
 }
 
-impl<T: DiagnosticCollector> DiagnosticCollector for &T {
-    fn emit(&self, diag: Diagnostic) {
-        <T as DiagnosticCollector>::emit(*self, diag);
+impl<F, T: DiagnosticCollector<F>> DiagnosticCollector<F> for &T {
+    fn emit(&self, diag: Diagnostic<F>) {
+        <T as DiagnosticCollector<F>>::emit(*self, diag);
     }
 }
 
-impl DiagnosticCollector for std::sync::Mutex<&mut Vec<Diagnostic>> {
-    fn emit(&self, diag: Diagnostic) {
+impl<F> DiagnosticCollector<F> for std::sync::Mutex<&mut Vec<Diagnostic<F>>> {
+    fn emit(&self, diag: Diagnostic<F>) {
         self.lock().unwrap().push(diag);
     }
 }
-impl DiagnosticCollector for std::sync::Mutex<Vec<Diagnostic>> {
-    fn emit(&self, diag: Diagnostic) {
+impl<F> DiagnosticCollector<F> for std::sync::Mutex<Vec<Diagnostic<F>>> {
+    fn emit(&self, diag: Diagnostic<F>) {
         self.lock().unwrap().push(diag);
     }
 }
 
 #[cfg(feature = "parking_lot")]
-impl DiagnosticCollector for parking_lot::Mutex<&mut Vec<Diagnostic>> {
-    fn emit(&self, diag: Diagnostic) {
+impl<F> DiagnosticCollector<F> for parking_lot::Mutex<&mut Vec<Diagnostic<F>>> {
+    fn emit(&self, diag: Diagnostic<F>) {
         self.lock().push(diag);
     }
 }
 #[cfg(feature = "parking_lot")]
-impl DiagnosticCollector for parking_lot::Mutex<Vec<Diagnostic>> {
-    fn emit(&self, diag: Diagnostic) {
+impl<F> DiagnosticCollector<F> for parking_lot::Mutex<Vec<Diagnostic<F>>> {
+    fn emit(&self, diag: Diagnostic<F>) {
         self.lock().push(diag);
-    }
-}
-
-pub struct OffsetDiagnosticCollector<T: DiagnosticCollector> {
-    pub inner: T,
-    pub offset: usize,
-}
-impl<T: DiagnosticCollector> DiagnosticCollector for OffsetDiagnosticCollector<T> {
-    fn emit(&self, mut diag: Diagnostic) {
-        diag.span.offset(self.offset);
-        self.inner.emit(diag);
     }
 }

@@ -4,8 +4,11 @@
 //!
 //! [1]: https://www.devicetree.org/
 
-use dt_tools_diagnostic::{Diagnostic, DiagnosticMessage, MultiSpan, Severity};
-use dt_tools_parser::ast::{self, HasLabel};
+use dt_tools_diagnostic::{Diagnostic, DiagnosticMessage, Severity};
+use dt_tools_parser::{
+    TextRange,
+    ast::{self, HasLabel},
+};
 
 mod dtc_style;
 mod kernel_coding_style;
@@ -37,51 +40,53 @@ impl std::fmt::Display for LintId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EarlyLint {
+pub struct EarlyLint<F> {
     pub id: LintId,
-    pub diagnostic: Diagnostic,
+    pub diagnostic: Diagnostic<F>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EarlyContext<'i> {
-    pub lints: Vec<EarlyLint>,
+pub struct EarlyContext<'i, F> {
+    pub lints: Vec<EarlyLint<F>>,
     pub src: &'i str,
     pub is_main_file: bool,
+    pub file: F,
 }
-impl EarlyContext<'_> {
+impl<F: std::fmt::Debug + Clone> EarlyContext<'_, F> {
     pub fn add_lint_from_cst(
         &mut self,
         id: LintId,
         msg: impl Into<DiagnosticMessage> + Clone,
         severity: Severity,
-        span: impl Into<MultiSpan>,
+        text_range: TextRange,
+        //span: impl Into<MultiSpan<F>>,
     ) {
         tracing::debug!("adding lint {}, {:?}", msg.clone().into(), severity);
         self.lints.push(EarlyLint {
             id,
             diagnostic: Diagnostic {
-                span: span.into(),
+                span: text_range.within_file(self.file.clone()).into(),
                 msg: msg.into(),
                 severity,
             },
         });
     }
-    pub fn add_lint(&mut self, lint: EarlyLint) {
+    pub fn add_lint(&mut self, lint: EarlyLint<F>) {
         tracing::debug!("adding lint {lint:?}");
         self.lints.push(lint);
     }
 }
 
 /// The early lint pass before type information is acquired. This runs on [AST](ast)s.
-pub trait EarlyLintPass {
+pub trait EarlyLintPass<F> {
     /// Lint a source file's [AST](ast::SourceFile)
-    fn check_document(&mut self, cx: &mut EarlyContext<'_>, file: &ast::SourceFile) {
+    fn check_document(&mut self, cx: &mut EarlyContext<'_, F>, file: &ast::SourceFile) {
         for node in file.nodes() {
             self.check_node(cx, &node);
         }
     }
     /// Lint a node's [AST](ast::DtNode)
-    fn check_node(&mut self, cx: &mut EarlyContext<'_>, node: &ast::DtNode) {
+    fn check_node(&mut self, cx: &mut EarlyContext<'_, F>, node: &ast::DtNode) {
         if let Some(label) = node.label() {
             self.check_label(cx, &label);
         }
@@ -93,25 +98,31 @@ pub trait EarlyLintPass {
         }
     }
     /// Lint a property's [AST](ast::DtProperty)
-    fn check_property(&mut self, cx: &mut EarlyContext, property: &ast::DtProperty) {
+    fn check_property(&mut self, cx: &mut EarlyContext<F>, property: &ast::DtProperty) {
         if let Some(label) = property.label() {
             self.check_label(cx, &label);
         }
     }
     /// Lint a node label's [AST](ast::DtLabel)
-    fn check_label(&mut self, _cx: &mut EarlyContext, _label: &ast::DtLabel) {}
+    fn check_label(&mut self, _cx: &mut EarlyContext<F>, _label: &ast::DtLabel) {}
 }
 
 #[must_use]
-pub fn default_lint(file: &ast::SourceFile, src: &str, is_main_file: bool) -> Vec<EarlyLint> {
+pub fn default_lint<F: std::fmt::Debug + Clone>(
+    file_ast: &ast::SourceFile,
+    src: &str,
+    is_main_file: bool,
+    file_id: F,
+) -> Vec<EarlyLint<F>> {
     let mut cx = EarlyContext {
         lints: Vec::new(),
         src,
         is_main_file,
+        file: file_id,
     };
     // TODO: go over the tree only once
-    crate::lints::KernelCodingStyle.check_document(&mut cx, file);
-    crate::lints::DtcStyle.check_document(&mut cx, file);
+    crate::lints::KernelCodingStyle.check_document(&mut cx, file_ast);
+    crate::lints::DtcStyle.check_document(&mut cx, file_ast);
     // TODO: warn for `&LABEL,` (ident eats the comma) in a devicetree cell
     cx.lints
 }

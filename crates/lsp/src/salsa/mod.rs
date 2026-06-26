@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use dt_tools_analyzer::new::outline::AnalyzedToplevel;
-use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity};
-use dt_tools_parser::ast::AstNode;
+use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
+use dt_tools_parser::{TextRange, ast::AstNode};
 
 pub mod db;
 mod expr_eval;
@@ -53,7 +53,7 @@ pub struct Outline<'db> {
 
     #[tracked]
     #[returns(ref)]
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<Diagnostic<file::File>>,
 }
 
 /// Computes an outline composed of [`dt_tools_analyzer::new::outline::AnalyzedToplevel`]s.
@@ -68,19 +68,19 @@ pub fn outline(db: &dyn db::BaseDb, file: file::File) -> Option<Outline<'_>> {
     let diag = parking_lot::Mutex::new(&mut diagnostics);
 
     let toplevels =
-        dt_tools_analyzer::new::outline::analyze_file(&file_ast, file.contents(db), &diag);
+        dt_tools_analyzer::new::outline::analyze_file(&file_ast, file.contents(db), file, &diag);
 
     tag_diagnostics(&mut diagnostics, concat!(module_path!(), "::outline"));
 
     Some(Outline::new(db, toplevels, diagnostics))
 }
 
-fn tag_diagnostics(diagnostics: &mut Vec<Diagnostic>, tag: &str) {
+fn tag_diagnostics<F>(diagnostics: &mut Vec<Diagnostic<F>>, tag: &str) {
     for diagnostic in diagnostics {
         tag_diagnostic(diagnostic, tag);
     }
 }
-fn tag_diagnostic(diagnostic: &mut Diagnostic, tag: &str) {
+fn tag_diagnostic<F>(diagnostic: &mut Diagnostic<F>, tag: &str) {
     use std::fmt::Write;
 
     write!(diagnostic.msg.to_mut(), " [{tag}]").ok();
@@ -89,57 +89,91 @@ fn tag_diagnostic(diagnostic: &mut Diagnostic, tag: &str) {
     }
 }
 
+pub fn emit_parse_errors(
+    parse: &dt_tools_parser::parser::Parse,
+    diag: &impl DiagnosticCollector<file::File>,
+    spanner: &mut impl FnMut(TextRange) -> Span<file::File>,
+) -> bool {
+    if parse.lex_errors.is_empty() && parse.errors.is_empty() {
+        return false;
+    }
+
+    let earliest_lex_error_range = parse.lex_errors.first().map(|e| e.text_range);
+    for lex_error in &parse.lex_errors {
+        diag.emit(Diagnostic::new(
+            spanner(lex_error.text_range),
+            format!("{} [lex error]", lex_error.inner).into(),
+            Severity::Error,
+        ));
+    }
+
+    for error in &parse.errors {
+        if let Some(earliest_lex_error_range) = earliest_lex_error_range
+            && error.primary_text_range.start >= earliest_lex_error_range.start
+        {
+            break;
+        }
+
+        let mut diagnostic = Diagnostic {
+            span: MultiSpan {
+                primary_spans: vec![spanner(error.primary_text_range)],
+                span_labels: error
+                    .span_labels
+                    .iter()
+                    .map(|(text_range, msg)| SpanLabel {
+                        span: spanner(*text_range),
+                        msg: msg.clone(),
+                    })
+                    .collect(),
+            },
+            msg: error.message.clone(),
+            severity: Severity::Error,
+        };
+        tag_diagnostic(&mut diagnostic, "dt-tools(syntax-error)");
+        diag.emit(diagnostic);
+    }
+
+    false
+}
+
 #[salsa::tracked(returns(ref))]
-pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) -> Vec<Diagnostic> {
+pub fn compute_diagnostics<'db>(
+    db: &'db dyn db::BaseDb,
+    main_file: file::File,
+) -> (Vec<Diagnostic<file::File>>, Vec<file::File>) {
     let span = profiling::tracy_client::span!("lsp::salsa::compute_file_diagnostics");
-    span.emit_text(file.path(db).as_str());
+    span.emit_text(main_file.path(db).as_str());
 
     let mut diagnostics = Vec::new();
 
-    if !file.is_readable_file(db) {
-        return vec![Diagnostic::new(
-            dt_tools_parser::TextRange { start: 0, end: 0 },
-            Cow::Borrowed("File does not exist"),
-            Severity::Error,
-        )];
+    if !main_file.is_readable_file(db) {
+        // TODO: test this with LSP. Getting rope will probably panic
+        return (
+            vec![Diagnostic::new(
+                dt_tools_parser::TextRange { start: 0, end: 0 }.within_file(main_file),
+                Cow::Borrowed("File does not exist"),
+                Severity::Error,
+            )],
+            vec![main_file],
+        );
     }
 
-    if let Some(parse) = parse_file(db, file) {
+    if let Some(parse) = parse_file(db, main_file) {
         let parse = parse.parse(db);
 
-        let earliest_lex_error_range = parse.lex_errors.first().map(|e| e.text_range);
-        for lex_error in &parse.lex_errors {
-            diagnostics.push(Diagnostic::new(
-                lex_error.text_range,
-                format!("{} [lex error]", lex_error.inner).into(),
-                Severity::Error,
-            ));
-        }
-
-        for error in &parse.errors {
-            if let Some(earliest_lex_error_range) = earliest_lex_error_range
-                && error.primary_span.start >= earliest_lex_error_range.start
-            {
-                break;
-            }
-
-            let mut diagnostic = Diagnostic {
-                span: MultiSpan {
-                    primary_spans: vec![error.primary_span],
-                    span_labels: error.span_labels.clone(),
-                },
-                msg: error.message.clone(),
-                severity: Severity::Error,
-            };
-            tag_diagnostic(&mut diagnostic, "dt-tools(syntax-error)");
-            diagnostics.push(diagnostic);
-        }
+        let diag = parking_lot::Mutex::new(&mut diagnostics);
+        emit_parse_errors(parse, &diag, &mut |text_range| {
+            text_range.within_file(main_file)
+        });
 
         // FIXME: main file detection
         let is_main_file = false;
-        for mut lint in
-            dt_tools_lint::default_lint(&parse.source_file(), file.contents(db), is_main_file)
-        {
+        for mut lint in dt_tools_lint::default_lint(
+            &parse.source_file(),
+            main_file.contents(db),
+            is_main_file,
+            main_file,
+        ) {
             tag_diagnostic(&mut lint.diagnostic, &format!("dt-tools(lint {})", lint.id));
             diagnostics.push(lint.diagnostic);
         }
@@ -158,7 +192,7 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
     */
 
     // Detect /plugin/; in the root file.
-    let is_overlay = parse_file(db, file).is_some_and(|p| {
+    let is_overlay = parse_file(db, main_file).is_some_and(|p| {
         p.parse(db).source_file().directives().any(|dir| {
             dir.syntax()
                 .child_tokens()
@@ -166,12 +200,18 @@ pub fn compute_file_diagnostics<'db>(db: &'db dyn db::BaseDb, file: file::File) 
         })
     });
 
-    if let Some(result) = preprocessor::preprocessor_eval_file(db, file, None, is_overlay) {
+    let mut included_files = if let Some(result) =
+        preprocessor::preprocessor_eval_file(db, main_file, None, is_overlay)
+    {
         diagnostics.extend_from_slice(result.diagnostics(db));
-    }
+        result.included_files(db).clone()
+    } else {
+        Vec::new()
+    };
 
     diagnostics.dedup();
-    diagnostics
+    included_files.dedup();
+    (diagnostics, included_files)
 }
 
 #[cfg(test)]

@@ -8,8 +8,8 @@ use crate::{EarlyLintPass, LintId};
 /// Currently excludes naming conventions.
 pub struct KernelCodingStyle;
 
-impl EarlyLintPass for KernelCodingStyle {
-    fn check_node(&mut self, cx: &mut crate::EarlyContext<'_>, node: &ast::DtNode) {
+impl<F: std::fmt::Debug + Clone> EarlyLintPass<F> for KernelCodingStyle {
+    fn check_node(&mut self, cx: &mut crate::EarlyContext<'_, F>, node: &ast::DtNode) {
         if let Some(label) = node.label() {
             self.check_label(cx, &label);
         }
@@ -21,7 +21,7 @@ impl EarlyLintPass for KernelCodingStyle {
             self.check_node(cx, &node);
         }
     }
-    fn check_property(&mut self, cx: &mut crate::EarlyContext<'_>, property: &ast::DtProperty) {
+    fn check_property(&mut self, cx: &mut crate::EarlyContext<'_, F>, property: &ast::DtProperty) {
         for value in property.values() {
             if let ast::PropValue::CellList(cell_list) = value {
                 for cell in cell_list.cells() {

@@ -746,7 +746,7 @@ Tree:
                 Errors: [
                     ParseError {
                         message: "Expected ‘,’ or end-of-file, but found ‘;’",
-                        primary_span: TextRange {
+                        primary_text_range: TextRange {
                             start: 5,
                             end: 6,
                         },
@@ -783,7 +783,7 @@ Tree:
                 Errors: [
                     ParseError {
                         message: "Expected cell or end-of-file, but found ‘>’",
-                        primary_span: TextRange {
+                        primary_text_range: TextRange {
                             start: 3,
                             end: 4,
                         },

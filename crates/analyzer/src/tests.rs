@@ -1,8 +1,10 @@
 use dt_tools_parser::ast::SourceFile;
 
 struct PanickingDiagnosticCollector;
-impl dt_tools_diagnostic::DiagnosticCollector for PanickingDiagnosticCollector {
-    fn emit(&self, diag: dt_tools_diagnostic::Diagnostic) {
+impl<F: std::fmt::Debug> dt_tools_diagnostic::DiagnosticCollector<F>
+    for PanickingDiagnosticCollector
+{
+    fn emit(&self, diag: dt_tools_diagnostic::Diagnostic<F>) {
         panic!("Diagnostic emitted: {diag:#?}");
     }
 }
@@ -17,7 +19,7 @@ fn dts_to_json(filename: &str) -> serde_json::Value {
 
     let file = &parse.source_file();
 
-    let analyzed = crate::new::outline::analyze_file(file, src, diag);
+    let analyzed = crate::new::outline::analyze_file(file, src, (), diag);
 
     let includes = analyzed
         .iter()

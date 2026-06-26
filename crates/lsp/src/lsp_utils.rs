@@ -1,10 +1,13 @@
 use std::borrow::Cow;
 
 use camino::Utf8Path;
+use dt_tools_diagnostic::Span;
 use dt_tools_parser::TextRange;
 use fluent_uri::component::Scheme;
 use ropey::Rope;
 use tower_lsp_server::ls_types::{self, Position, Range, Uri};
+
+use crate::salsa::file::File;
 
 pub fn position_to_offset(position: Position, rope: &Rope) -> Option<usize> {
     Some(rope.try_line_to_char(position.line as usize).ok()? + position.character as usize)
@@ -54,21 +57,46 @@ pub fn path_to_uri(path: &Utf8Path) -> Option<Uri> {
     Uri::from_file_path(path)
 }
 
+/// Converts a [`dt_tools_diagnostic::Span`] to a [`ls_types::Location`].
+pub fn span_to_location(
+    db: &dyn crate::salsa::db::BaseDb,
+    span: &Span<File>,
+) -> ls_types::Location {
+    ls_types::Location {
+        uri: path_to_uri(span.file.path(db)).expect("should be absolute"),
+        range: range_to_lsp(
+            span.text_range,
+            crate::salsa::rope(db, span.file)
+                .as_ref()
+                .expect("file should exist"),
+        )
+        .expect("range should be in the rope"),
+    }
+}
+
 /// Converts a [`dt_tools_diagnostic::Diagnostic`] to one or more [`ls_types::Diagnostic`]s.
+///
+/// `file_filter` exists because [`ls_types::Diagnostic`] does not contain a field for file
+/// information; this must be run separately for every file.
 #[expect(clippy::ref_option, reason = "Fixes borrow checker issues")]
 pub fn dt_tools_diagnostic_to_lsp<'a>(
-    diagnostic: &'a dt_tools_diagnostic::Diagnostic,
-    rope: &'a Rope,
+    db: &'a dyn crate::salsa::db::BaseDb,
+    diagnostic: &'a dt_tools_diagnostic::Diagnostic<File>,
     source: &'a Option<String>,
-    uri: &'a Uri,
+    file_filter: &'a File,
 ) -> impl Iterator<Item = ls_types::Diagnostic> + 'a {
+    let rope = crate::salsa::rope(db, *file_filter)
+        .as_ref()
+        .expect("file should exist");
+
     diagnostic
         .span
         .primary_spans
         .iter()
+        .filter(|span| span.file == *file_filter)
         .enumerate()
-        .map(|(i, span)| ls_types::Diagnostic {
-            range: range_to_lsp(*span, rope).expect("range should be in the rope"),
+        .map(move |(i, span)| ls_types::Diagnostic {
+            range: range_to_lsp(span.text_range, rope).expect("range should be in the rope"),
             severity: Some(match diagnostic.severity {
                 dt_tools_diagnostic::Severity::Warn => ls_types::DiagnosticSeverity::WARNING,
                 dt_tools_diagnostic::Severity::Error => ls_types::DiagnosticSeverity::ERROR,
@@ -84,20 +112,13 @@ pub fn dt_tools_diagnostic_to_lsp<'a>(
                     .filter(|(j, _)| *j != i)
                     .map(|(_, span)| ls_types::DiagnosticRelatedInformation {
                         // link to other primary spans
-                        location: ls_types::Location {
-                            uri: uri.clone(),
-                            range: range_to_lsp(*span, rope).expect("range should be in the rope"),
-                        },
+                        location: span_to_location(db, span),
                         message: "see also".to_owned(),
                     })
                     .chain(diagnostic.span.span_labels.iter().map(|span_label| {
                         ls_types::DiagnosticRelatedInformation {
                             // link to span labels
-                            location: ls_types::Location {
-                                uri: uri.clone(),
-                                range: range_to_lsp(span_label.span, rope)
-                                    .expect("range should be in the rope"),
-                            },
+                            location: span_to_location(db, &span_label.span),
                             message: span_label.msg.clone().into_owned(),
                         }
                     }))
@@ -105,31 +126,35 @@ pub fn dt_tools_diagnostic_to_lsp<'a>(
             ),
             ..Default::default()
         })
-        .chain(diagnostic.span.span_labels.iter().map(|span_label| {
-            ls_types::Diagnostic {
-                range: range_to_lsp(span_label.span, rope).expect("range should be in the rope"),
-                severity: Some(ls_types::DiagnosticSeverity::HINT),
-                source: source.clone(),
-                message: span_label.msg.clone().into_owned(),
-                related_information: Some(
-                    diagnostic
-                        .span
-                        .primary_spans
-                        .iter()
-                        .map(|span| ls_types::DiagnosticRelatedInformation {
-                            // link to primary spans
-                            location: ls_types::Location {
-                                uri: uri.clone(),
-                                range: range_to_lsp(*span, rope)
-                                    .expect("range should be in the rope"),
-                            },
-                            message: "original diagnostic".to_owned(),
-                        })
-                        .collect(),
-                ),
-                ..Default::default()
-            }
-        }))
+        .chain(
+            diagnostic
+                .span
+                .span_labels
+                .iter()
+                .filter(|span_label| span_label.span.file == *file_filter)
+                .map(move |span_label| {
+                    ls_types::Diagnostic {
+                        range: range_to_lsp(span_label.span.text_range, rope)
+                            .expect("range should be in the rope"),
+                        severity: Some(ls_types::DiagnosticSeverity::HINT),
+                        source: source.clone(),
+                        message: span_label.msg.clone().into_owned(),
+                        related_information: Some(
+                            diagnostic
+                                .span
+                                .primary_spans
+                                .iter()
+                                .map(|span| ls_types::DiagnosticRelatedInformation {
+                                    // link to primary spans
+                                    location: span_to_location(db, span),
+                                    message: "original diagnostic".to_owned(),
+                                })
+                                .collect(),
+                        ),
+                        ..Default::default()
+                    }
+                }),
+        )
 }
 
 #[cfg(test)]

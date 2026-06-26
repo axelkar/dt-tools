@@ -322,6 +322,16 @@ impl RedNode {
         })
     }
 
+    /// Creates a new red node with an offset and no parent.
+    #[must_use]
+    pub fn new_offset(root: Arc<GreenNode>, itext_: usize) -> Arc<Self> {
+        Arc::new(RedNode {
+            parent: None,
+            green: root,
+            text_offset: itext_,
+        })
+    }
+
     /// Returns the text range.
     #[inline]
     #[must_use]

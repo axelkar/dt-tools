@@ -120,7 +120,7 @@ impl Stage2Property {
 pub fn compute(
     outline: &[AnalyzedToplevel],
     _includes: &[ResolvedInclude],
-    diag: &impl DiagnosticCollector,
+    diag: &impl DiagnosticCollector<()>,
 ) -> Stage2File {
     let mut root_node = Stage2Node::default();
     let macro_db: FxHashMap<_, _> = outline
@@ -142,7 +142,7 @@ pub fn compute(
 fn get_node_prop_name(
     plain_name: Option<&str>,
     ast: &impl HasMacroInvocation,
-    diag: &impl DiagnosticCollector,
+    diag: &impl DiagnosticCollector<()>,
     macro_db: &FxHashMap<String, (TextRange, &MacroDefinition)>,
 ) -> Option<String> {
     let (macro_ast, macro_def) = match plain_name {
@@ -162,7 +162,7 @@ fn get_node_prop_name(
 
                 let Some((_macro_tr, macro_def)) = macro_db.get(macro_name.as_str()) else {
                     diag.emit(Diagnostic::new(
-                        macro_ast.syntax().text_range(),
+                        macro_ast.syntax().text_range().within_file(()),
                         Cow::Owned(format!("Unrecognized macro name {macro_name}")),
                         Severity::Error,
                     ));
@@ -187,7 +187,7 @@ fn get_node_prop_name(
 
 fn merge_root_node(
     ast: &ast::DtNode,
-    diag: &impl DiagnosticCollector,
+    diag: &impl DiagnosticCollector<()>,
     stage2: &mut Stage2Node,
     macro_db: &FxHashMap<String, (TextRange, &MacroDefinition)>,
 ) {
@@ -198,7 +198,7 @@ fn merge_root_node(
         match_ast! {
             match syntax {
                 ast::DtNode(child_ast) => if child_ast.is_extension() {
-                    diag.emit(Diagnostic::new(child_ast.syntax().text_range(), Cow::Borrowed("Extension nodes may not be defined in other nodes"), Severity::Error));
+                    diag.emit(Diagnostic::new(child_ast.syntax().text_range().within_file(()), Cow::Borrowed("Extension nodes may not be defined in other nodes"), Severity::Error));
                 } else {
                     let Some(name) = get_node_prop_name(child_ast.text_name("").as_deref(), &child_ast, diag, macro_db) else {
                         continue
@@ -209,9 +209,9 @@ fn merge_root_node(
                             // can't mix
                             diag.emit(Diagnostic {
                                 span: MultiSpan {
-                                    primary_spans: vec![child_ast.syntax().text_range()],
+                                    primary_spans: vec![child_ast.syntax().text_range().within_file(())],
                                     span_labels: vec![SpanLabel {
-                                        span: other.name_text_range().expect("Must have a name"),
+                                        span: other.name_text_range().expect("Must have a name").within_file(()),
                                         msg: Cow::Owned(format!("previous definition of `{name}` here")),
                                     }],
                                 },
@@ -247,9 +247,9 @@ fn merge_root_node(
                         // TODO: DTC supports node_name_vs_property_name as a warning
                         diag.emit(Diagnostic {
                             span: MultiSpan {
-                                primary_spans: vec![name_ast.syntax().text_range()],
+                                primary_spans: vec![name_ast.syntax().text_range().within_file(())],
                                 span_labels: vec![SpanLabel {
-                                    span: other.name_text_range().expect("Must have a name"),
+                                    span: other.name_text_range().expect("Must have a name").within_file(()),
                                     msg: Cow::Owned(format!("previous definition of `{name}` here")),
                                 }],
                             },
@@ -264,7 +264,7 @@ fn merge_root_node(
                             Ok(value) => Ok(value),
                             Err(err) => {
                                 diag.emit(Diagnostic::new(
-                                    value_ast.syntax_item().text_range(),
+                                    value_ast.syntax_item().text_range().within_file(()),
                                     Cow::Owned(err.to_string()),
                                     Severity::Error,
                                 ));

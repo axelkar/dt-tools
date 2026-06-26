@@ -3,6 +3,8 @@ use codespan_reporting::diagnostic::Label;
 use crate::Severity;
 
 /// Prints diagnostics of a single file using [`codespan_reporting`].
+///
+/// Note: [`Span::file`](crate::Span::file) is ignored.
 #[expect(
     clippy::missing_errors_doc,
     reason = "Propagated from codespan_reporting, which doesn't document it at all."
@@ -10,7 +12,7 @@ use crate::Severity;
 pub fn print_diagnostics_single_file<Name: std::fmt::Display + Clone, Source: AsRef<str>>(
     name: Name,
     source: Source,
-    diagnostics: Vec<crate::Diagnostic>,
+    diagnostics: Vec<crate::Diagnostic<()>>,
 ) -> Result<(), codespan_reporting::files::Error> {
     let mut files = codespan_reporting::files::SimpleFiles::new();
     let file_id = files.add(name, source);
@@ -25,18 +27,20 @@ pub fn print_diagnostics_single_file<Name: std::fmt::Display + Clone, Source: As
             &mut writer.lock(),
             &config,
             &files,
-            &diagnostic.into_codespan_reporting(file_id),
+            &diagnostic.into_codespan_reporting(|_f| file_id),
         )?;
     }
 
     Ok(())
 }
 
-impl crate::Diagnostic {
+impl<F> crate::Diagnostic<F> {
     /// Converts [`crate::Diagnostic`] into [`codespan_reporting::diagnostic::Diagnostic`].
-    pub fn into_codespan_reporting<FileId: Clone>(
+    ///
+    /// [`Span::file`](crate::Span::file) is converted to the `FileId` using `convert_file`.
+    pub fn into_codespan_reporting<FileId>(
         self,
-        file_id: FileId,
+        convert_file: impl Fn(F) -> FileId,
     ) -> codespan_reporting::diagnostic::Diagnostic<FileId> {
         codespan_reporting::diagnostic::Diagnostic::new(match self.severity {
             Severity::Error => codespan_reporting::diagnostic::Severity::Error,
@@ -46,10 +50,14 @@ impl crate::Diagnostic {
         .with_labels(
             self.span
                 .primary_spans
-                .iter()
-                .map(|span| Label::primary(file_id.clone(), *span))
-                .chain(self.span.span_labels.iter().map(|span| {
-                    Label::secondary(file_id.clone(), span.span).with_message(span.msg.as_ref())
+                .into_iter()
+                .map(|span| Label::primary(convert_file(span.file), span.text_range))
+                .chain(self.span.span_labels.into_iter().map(|span_label| {
+                    Label::secondary(
+                        convert_file(span_label.span.file),
+                        span_label.span.text_range,
+                    )
+                    .with_message(span_label.msg.as_ref())
                 }))
                 .collect(),
         )

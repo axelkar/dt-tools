@@ -1,4 +1,3 @@
-use dt_tools_diagnostic::SpanLabel;
 use itertools::Itertools;
 use std::borrow::Cow;
 
@@ -82,9 +81,9 @@ pub struct ParseError {
     /// The error message
     pub message: Cow<'static, str>,
     /// The primary range of text this error points to
-    pub primary_span: TextRange,
+    pub primary_text_range: TextRange,
     /// Additional hints in the error
-    pub span_labels: Vec<SpanLabel>,
+    pub span_labels: Vec<(TextRange, Cow<'static, str>)>,
 }
 
 /// [`LexError`] wrapped with a text range and the source text.
@@ -123,7 +122,7 @@ pub struct ErrorBuilder<'p, 't, 'input, MsgState> {
     m: Option<Marker>,
     bump: Bump,
     msg: MsgState,
-    span_labels: Vec<SpanLabel>,
+    span_labels: Vec<(TextRange, Cow<'static, str>)>,
     hints: Vec<Cow<'static, str>>,
 }
 impl<'p, 't, 'input> ErrorBuilder<'p, 't, 'input, MessageMissing> {
@@ -196,8 +195,8 @@ impl<'p, 't, 'input, MsgState> ErrorBuilder<'p, 't, 'input, MsgState> {
     /// Adds a span label.
     #[inline]
     #[must_use]
-    pub fn add_span_label(mut self, span: TextRange, msg: Cow<'static, str>) -> Self {
-        self.span_labels.push(SpanLabel { span, msg });
+    pub fn add_span_label(mut self, text_range: TextRange, msg: Cow<'static, str>) -> Self {
+        self.span_labels.push((text_range, msg));
         self
     }
 
@@ -216,21 +215,18 @@ impl ErrorBuilder<'_, '_, '_, MessageFilled> {
     /// Does the things specified in the builder.
     #[inline]
     pub fn emit(mut self) {
-        let primary_span = self.p.current_token_error_range();
+        let primary_text_range = self.p.current_token_error_range();
 
         for hint in self.hints {
-            self.span_labels.push(SpanLabel {
-                span: primary_span,
-                msg: hint,
-            });
+            self.span_labels.push((primary_text_range, hint));
         }
 
         #[cfg(feature = "grammar-tracing")]
-        tracing::debug!(?primary_span, message = %self.msg.0, expected = ?self.p.expected);
+        tracing::debug!(?primary_text_range, message = %self.msg.0, expected = ?self.p.expected);
 
         self.p.emit_parse_error(ParseError {
             message: self.msg.0,
-            primary_span,
+            primary_text_range,
             span_labels: self.span_labels,
         });
 

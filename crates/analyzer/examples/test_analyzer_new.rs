@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut new_diagnostics = Vec::new();
     let diag = std::sync::Mutex::new(&mut new_diagnostics);
 
-    let outline = dt_tools_analyzer::new::outline::analyze_file(&file, &text, &diag);
+    let outline = dt_tools_analyzer::new::outline::analyze_file(&file, &text, (), &diag);
     println!(
         "{}={:#?}",
         "macro defs".cyan(),

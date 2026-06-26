@@ -1,15 +1,17 @@
 use std::fmt::{Debug, Display};
 use std::ops::Range;
 
+use crate::Span;
+
 // TODO: use `text_size::TextRange` instead
 // TODO: u32
 
-/// A location in source code
+/// Location in source code of a specific file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TextRange {
-    /// The beginning byte offset of the span (inclusive)
+    /// The beginning byte offset (inclusive)
     pub start: usize,
-    /// The ending byte offset of the span (exclusive)
+    /// The ending byte offset (exclusive)
     pub end: usize,
 }
 impl Display for TextRange {
@@ -24,18 +26,18 @@ impl TextRange {
     pub const fn new(start: usize, end: usize) -> TextRange {
         TextRange { start, end }
     }
-    /// Returns the length of the span.
+    /// Returns the length of the text range.
     ///
     /// # Example
     ///
     /// ```
     /// use dt_tools_diagnostic::text_range::TextRange;
     ///
-    /// let span = TextRange { start: 4, end: 7 };
-    /// assert_eq!(span.length(), 3);
+    /// let text_range = TextRange { start: 4, end: 7 };
+    /// assert_eq!(text_range.length(), 3);
     ///
-    /// let span = TextRange { start: 4, end: 4 };
-    /// assert_eq!(span.length(), 0);
+    /// let text_range = TextRange { start: 4, end: 4 };
+    /// assert_eq!(text_range.length(), 0);
     /// ```
     #[inline]
     #[must_use]
@@ -43,15 +45,15 @@ impl TextRange {
         self.end - self.start
     }
 
-    /// Offsets the span by the specified amount.
+    /// Offsets the text range by the specified amount.
     ///
     /// # Example
     ///
     /// ```
     /// use dt_tools_diagnostic::text_range::TextRange;
     ///
-    /// let span = TextRange { start: 4, end: 7 };
-    /// assert_eq!(span.offset(2), TextRange { start: 6, end: 9 });
+    /// let text_range = TextRange { start: 4, end: 7 };
+    /// assert_eq!(text_range.offset(2), TextRange { start: 6, end: 9 });
     /// ```
     #[inline]
     #[must_use]
@@ -62,18 +64,18 @@ impl TextRange {
         }
     }
 
-    /// Offsets the span by the specified amount, possibly negative.
+    /// Offsets the text range by the specified amount, possibly negative.
     ///
     /// # Example
     ///
     /// ```
     /// use dt_tools_diagnostic::text_range::TextRange;
     ///
-    /// let span = TextRange { start: 4, end: 7 };
-    /// assert_eq!(span.offset_wrapping_signed(-2), TextRange { start: 2, end: 5 });
+    /// let text_range = TextRange { start: 4, end: 7 };
+    /// assert_eq!(text_range.offset_wrapping_signed(-2), TextRange { start: 2, end: 5 });
     ///
-    /// let span = TextRange { start: 0, end: 2 };
-    /// assert_eq!(span.offset_wrapping_signed(-2), TextRange { start: usize::MAX - 1, end: 0 });
+    /// let text_range = TextRange { start: 0, end: 2 };
+    /// assert_eq!(text_range.offset_wrapping_signed(-2), TextRange { start: usize::MAX - 1, end: 0 });
     /// ```
     #[inline]
     #[must_use]
@@ -93,12 +95,12 @@ impl TextRange {
     ///
     /// let source = "foo bar baz";
     ///
-    /// let span = TextRange { start: 4, end: 7 };
-    /// assert_eq!(span.text(source), Some("bar"));
+    /// let text_range = TextRange { start: 4, end: 7 };
+    /// assert_eq!(text_range.text(source), Some("bar"));
     ///
     /// // Out of bounds
-    /// let span = TextRange { start: 11, end: 12 };
-    /// assert_eq!(span.text(source), None);
+    /// let text_range = TextRange { start: 11, end: 12 };
+    /// assert_eq!(text_range.text(source), None);
     /// ```
     #[inline]
     #[must_use]
@@ -124,7 +126,7 @@ impl TextRange {
 
     /// Returns a `TextRange` that would enclose both `self` and `end`.
     ///
-    /// Note that this can also be used to extend the span "backwards":
+    /// Note that this can also be used to extend the text range "backwards":
     /// `start.to(end)` and `end.to(start)` return the same `TextRange`.
     ///
     /// ```text
@@ -159,6 +161,16 @@ impl TextRange {
     #[must_use]
     pub fn until(self, end: TextRange) -> TextRange {
         TextRange::new(self.start.min(end.start), self.start.max(end.start))
+    }
+
+    /// Returns a `Span` from this text range and a file.
+    #[inline]
+    #[must_use]
+    pub fn within_file<F>(self, file: F) -> Span<F> {
+        Span {
+            file,
+            text_range: self,
+        }
     }
 }
 
