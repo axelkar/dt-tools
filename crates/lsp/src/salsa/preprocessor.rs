@@ -45,7 +45,7 @@ pub struct PpEvalFileResult<'db> {
 
     #[tracked]
     #[returns(ref)]
-    pub included_files: Vec<File>,
+    pub processed_files: Vec<File>,
 
     #[tracked]
     #[returns(ref)]
@@ -343,7 +343,7 @@ fn handle_toplevel_item<'db>(
     diag: &impl DiagnosticCollector<File>,
     parent_path: &Utf8Path,
     include_dirs: &[Utf8PathBuf],
-    included_files: &mut Vec<File>,
+    processed_files: &mut Vec<File>,
     mir: &mut Mir,
     is_overlay: bool,
     item: ast::ToplevelItem,
@@ -362,7 +362,7 @@ fn handle_toplevel_item<'db>(
                 file,
                 env,
                 diag,
-                included_files,
+                processed_files,
                 mir,
                 is_overlay,
                 "",
@@ -388,7 +388,7 @@ fn handle_toplevel_item<'db>(
                     diag,
                     parent_path,
                     include_dirs,
-                    included_files,
+                    processed_files,
                     mir,
                     is_overlay,
                     item,
@@ -456,7 +456,7 @@ fn handle_toplevel_item<'db>(
                     return;
                 };
 
-                included_files.push(include_file);
+                processed_files.push(include_file);
 
                 let result = preprocessor_eval_file(
                     db,
@@ -472,7 +472,7 @@ fn handle_toplevel_item<'db>(
                     .diagnostics(db)
                     .iter()
                     .for_each(|diagnostic| diag.emit(diagnostic.clone()));
-                included_files.extend_from_slice(result.included_files(db));
+                processed_files.extend_from_slice(result.processed_files(db));
 
                 // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
                 env.flatten_ancestors(db);
@@ -502,7 +502,7 @@ fn handle_directive<'db>(
     file: File,
     env: &mut TrackedMapEnvMut<'db>,
     diag: &impl DiagnosticCollector<File>,
-    included_files: &mut Vec<File>,
+    processed_files: &mut Vec<File>,
     mir: &mut Mir,
     is_overlay: bool,
     path_prefix: &str,
@@ -552,7 +552,7 @@ fn handle_directive<'db>(
             return;
         };
 
-        included_files.push(include_file);
+        processed_files.push(include_file);
 
         let result = preprocessor_eval_file(
             db,
@@ -568,7 +568,7 @@ fn handle_directive<'db>(
             .diagnostics(db)
             .iter()
             .for_each(|diagnostic| diag.emit(diagnostic.clone()));
-        included_files.extend_from_slice(result.included_files(db));
+        processed_files.extend_from_slice(result.processed_files(db));
 
         // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
         env.flatten_ancestors(db);

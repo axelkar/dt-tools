@@ -200,18 +200,20 @@ pub fn compute_diagnostics<'db>(
         })
     });
 
-    let mut included_files = if let Some(result) =
+    let mut processed_files = if let Some(result) =
         preprocessor::preprocessor_eval_file(db, main_file, None, is_overlay)
     {
         diagnostics.extend_from_slice(result.diagnostics(db));
-        result.included_files(db).clone()
+        result.processed_files(db).clone()
     } else {
         Vec::new()
     };
 
+    processed_files.push(main_file);
+
     diagnostics.dedup();
-    included_files.dedup();
-    (diagnostics, included_files)
+    processed_files.dedup();
+    (diagnostics, processed_files)
 }
 
 #[cfg(test)]

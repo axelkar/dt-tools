@@ -356,16 +356,16 @@ impl Backend {
         let main_uri = self.session.main_file.lock().clone().unwrap();
         let main_path = uri_to_path(&main_uri).expect("should be a real file with a path");
 
-        let lsp_diagnostics = {
+        let diags_per_file = {
             let db = &mut *self.session.db.lock();
             let file = db.get_files().get_file(db, &main_path);
-            let (diagnostics, included_files) = crate::salsa::compute_diagnostics(db, file);
+            let (diagnostics, processed_files) = crate::salsa::compute_diagnostics(db, file);
 
             // TODO: add a source field to dt-tools-diagnostic::Diagnostic or something
             // could be like "dt-tools(lint {})"
             let source = Some("dt-tools".to_owned());
 
-            included_files
+            processed_files
                 .iter()
                 .map(|file| {
                     let path = file.path(db);
@@ -384,8 +384,8 @@ impl Backend {
                 .collect::<Vec<_>>()
         };
 
-        for (uri, version, lsp_diagnostics) in lsp_diagnostics {
-            tracing::trace!(uri = uri.as_str(), ?version, "Publishing diagnostics");
+        for (uri, version, lsp_diagnostics) in diags_per_file {
+            tracing::trace!(uri = uri.as_str(), ?version, "Publishing {} diagnostics", lsp_diagnostics.len());
             self.client
                 .publish_diagnostics(uri, lsp_diagnostics, version)
                 .await;
