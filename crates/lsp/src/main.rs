@@ -133,13 +133,16 @@ impl Session {
         // - include (for #define's in header files)
         // - scripts/dtc/include-prefixes
 
-        crate::salsa::includes::IncludeDirs::new(
-            db,
-            dt_tools_workspace
-                .as_ref()
-                .map(|dt_tools_workspace| dt_tools_workspace.config.include_dirs.clone())
-                .unwrap_or_default(),
-        );
+        let new_include_dirs = dt_tools_workspace
+            .as_ref()
+            .map(|dt_tools_workspace| dt_tools_workspace.config.include_dirs.clone())
+            .unwrap_or_default();
+
+        if let Some(include_dirs) = crate::salsa::includes::IncludeDirs::try_get(db) {
+            include_dirs.set_include_dirs(db).to(new_include_dirs);
+        } else {
+            crate::salsa::includes::IncludeDirs::new(db, new_include_dirs);
+        }
 
         *self.dt_tools_workspace.lock() = dt_tools_workspace;
     }
@@ -238,6 +241,7 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         debug!("file opened");
+        self.session.update_workspace().await;
         self.client
             .log_message(MessageType::INFO, "file opened!")
             .await;
@@ -385,7 +389,12 @@ impl Backend {
         };
 
         for (uri, version, lsp_diagnostics) in diags_per_file {
-            tracing::trace!(uri = uri.as_str(), ?version, "Publishing {} diagnostics", lsp_diagnostics.len());
+            tracing::trace!(
+                uri = uri.as_str(),
+                ?version,
+                "Publishing {} diagnostics",
+                lsp_diagnostics.len()
+            );
             self.client
                 .publish_diagnostics(uri, lsp_diagnostics, version)
                 .await;

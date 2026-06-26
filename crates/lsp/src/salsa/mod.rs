@@ -4,6 +4,8 @@ use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
 use dt_tools_parser::{TextRange, ast::AstNode};
 
+use crate::salsa::{macros::env::InternedKey, preprocessor::PpEvalFileResult};
+
 pub mod db;
 mod expr_eval;
 pub mod file;
@@ -136,6 +138,66 @@ pub fn emit_parse_errors(
     false
 }
 
+#[salsa::tracked]
+fn check_mir_post<'db>(
+    db: &'db dyn db::BaseDb,
+    result: PpEvalFileResult<'db>,
+) -> Vec<Diagnostic<file::File>> {
+    let mut diagnostics = Vec::new();
+
+    if result.is_overlay(db) {
+        return Vec::new();
+    }
+    let mir = result.mir(db);
+
+    // We have to check phandles at the end because phandles are fine in any order.
+    for def in &mir.definitions {
+        if let mir::MirDefinitionValue::Property(mir_property_data) = &def.value {
+            for value in &mir_property_data.values {
+                match value {
+                    mir::MirValue::CellList(mir_cells) => {
+                        for cell in mir_cells {
+                            if let mir::MirCell::Phandle(mir::MirPhandleTarget::Label(label_name)) =
+                                cell
+                                && result
+                                    .env_after(db)
+                                    .get_label(db, InternedKey::new(db, label_name))
+                                    .is_none()
+                            {
+                                diagnostics.push(Diagnostic::new(
+                                    def.provenance.text_range.within_file(def.provenance.file),
+                                    Cow::Owned(format!("Label not found: {label_name}")),
+                                    Severity::Error,
+                                ));
+                            }
+                        }
+                    }
+                    mir::MirValue::Phandle(mir::MirPhandleTarget::Label(label_name))
+                        if result
+                            .env_after(db)
+                            .get_label(db, InternedKey::new(db, label_name))
+                            .is_none() =>
+                    {
+                        diagnostics.push(Diagnostic::new(
+                            def.provenance.text_range.within_file(def.provenance.file),
+                            Cow::Owned(format!("Label not found: {label_name}")),
+                            Severity::Error,
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    tag_diagnostics(
+        &mut diagnostics,
+        concat!(module_path!(), "::check_mir_post"),
+    );
+
+    diagnostics
+}
+
 #[salsa::tracked(returns(ref))]
 pub fn compute_diagnostics<'db>(
     db: &'db dyn db::BaseDb,
@@ -204,6 +266,9 @@ pub fn compute_diagnostics<'db>(
         preprocessor::preprocessor_eval_file(db, main_file, None, is_overlay)
     {
         diagnostics.extend_from_slice(result.diagnostics(db));
+
+        diagnostics.extend_from_slice(&check_mir_post(db, result));
+
         result.processed_files(db).clone()
     } else {
         Vec::new()

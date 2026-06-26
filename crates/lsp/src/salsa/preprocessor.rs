@@ -667,11 +667,14 @@ fn process_dt_node<'db>(
         if let Some(ref target_path) = target_path {
             process_dt_node_body(db, file, env, diag, mir, is_overlay, target_path, dt_node);
         } else if is_overlay {
+            // Overlay; we can leave the extension unresolved
             let mut body_mir = Mir::default();
             process_dt_node_body(db, file, env, diag, &mut body_mir, is_overlay, "", dt_node);
+
             // Propagate any nested unresolved extensions.
             mir.unresolved_extensions
                 .extend(body_mir.unresolved_extensions);
+
             if let MirPhandleTarget::Label(label) = target {
                 mir.unresolved_extensions.push(UnresolvedExtension {
                     label,
@@ -680,6 +683,9 @@ fn process_dt_node<'db>(
                 });
             }
         } else {
+            // DTC wants extensions to be resolved from items above/before the extensions in
+            // non-overlay mode.
+
             // Process so diagnostics are emitted
             let mut body_mir = Mir::default();
             process_dt_node_body(db, file, env, diag, &mut body_mir, is_overlay, "", dt_node);
@@ -1098,6 +1104,9 @@ fn convert_phandle<'db>(
         // (e.g. `#define UART_1 soc/uart` and `&UART_1`).
         let name_ast = phandle.name()?;
 
+        // DTC wants extensions to be resolved from items above/before the extensions in
+        // non-overlay mode, but phandles are fine in any order.
+
         Some(
             resolve_macro_to_value(
                 db,
@@ -1486,7 +1495,7 @@ mod tests {
     }
 
     #[test]
-    fn mir_undefined_label() {
+    fn mir_undefined_label_extension() {
         check_mir(
             r#"
 /dts-v1/;
@@ -1497,6 +1506,24 @@ mod tests {
 
                 --- errors ---
                 Error 11..17: Label not found: &BOGUS [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_undefined_label_phandle() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo = &BOGUS; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..31
+                property = Phandle(Label("BOGUS")) /foo /main.dts 15..28
+
+                --- errors ---
+                Error 15..28: Label not found: BOGUS [dt_tools_lsp::salsa::check_mir_post]
             "#]],
         );
     }
