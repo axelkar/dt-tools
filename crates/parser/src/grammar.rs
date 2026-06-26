@@ -406,10 +406,13 @@ fn item(p: &mut Parser) {
 
         // TODO: add AtSign to NAME_SET and don't treat the unit address specially?
         if p.at(TokenKind::AtSign) {
-            let m = p.start();
+            let mut m = p.start();
             // unit address
             p.bump();
-            if !p.eat_name() {
+
+            if p.silent_at_macro_invocation_with_args() {
+                m = macro_invocation(m, p).precede(p);
+            } else if !p.eat_name() {
                 p.error().msg_expected().emit();
             }
             m.complete(p, NodeKind::UnitAddress);
@@ -1186,6 +1189,44 @@ Tree:
                   BlockComment@0..10 "/* test */"
                   Whitespace@10..11 " "
                   LineComment@11..18 "// test"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_node_name_macro_invocation() {
+        check(
+            "FOO()@BAR {}; FOO@BAR() {};",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..27
+                  DtNode@0..13
+                    MacroInvocation@0..5
+                      Ident@0..3 "FOO"
+                      LParen@3..4 "("
+                      RParen@4..5 ")"
+                    UnitAddress@5..9
+                      AtSign@5..6 "@"
+                      Name@6..9 "BAR"
+                    Whitespace@9..10 " "
+                    LCurly@10..11 "{"
+                    RCurly@11..12 "}"
+                    Semicolon@12..13 ";"
+                  Whitespace@13..14 " "
+                  DtNode@14..27
+                    Name@14..17 "FOO"
+                    UnitAddress@17..23
+                      MacroInvocation@17..23
+                        AtSign@17..18 "@"
+                        Ident@18..21 "BAR"
+                        LParen@21..22 "("
+                        RParen@22..23 ")"
+                    Whitespace@23..24 " "
+                    LCurly@24..25 "{"
+                    RCurly@25..26 "}"
+                    Semicolon@26..27 ";"
             "#]],
         );
     }

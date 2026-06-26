@@ -13,7 +13,7 @@ use dt_tools_parser::{
     TextRange,
     ast::{
         self, AstNode, AstNodeOrToken, AstToken, HasDtPhandle, HasLabel, HasMacroInvocation,
-        HasName,
+        HasName, HasUnitAddress,
     },
     cst::RedNode,
     lexer::TokenKind,
@@ -26,7 +26,11 @@ use crate::salsa::{
     expr_eval::{interpret_escaped_char_tok, parse_int_tok},
     file::File,
     includes::IncludeDirs,
-    macros::env::{TrackedMapEnv, TrackedMapEnvMut},
+    macros::{
+        MacroCtx,
+        env::{TrackedMapEnv, TrackedMapEnvMut},
+        substitute_macro_tok,
+    },
     mir::{
         Mir, MirCell, MirDefinition, MirDefinitionValue, MirNodeData, MirPhandleTarget,
         MirPropertyData, MirProvenance, MirValue, UnresolvedExtension,
@@ -588,6 +592,49 @@ fn build_path(parent: &str, name: &str) -> String {
     }
 }
 
+fn resolve_name_or_macro<'db, Ast: HasName + HasMacroInvocation>(
+    db: &'db dyn BaseDb,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector<File>,
+    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    ast: &Ast,
+) -> Option<String> {
+    if let Some(name_ast) = ast.name() {
+        Some(
+            substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Implicit(&name_ast))
+                .map(|(_span, _trmaps, expanded)| expanded)
+                .unwrap_or(name_ast.syntax().text().as_str().to_owned()),
+        )
+    } else if let Some(invoc) = ast.macro_invocation() {
+        substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Explicit(&invoc))
+            .map(|(_span, _trmaps, expanded)| expanded)
+    } else {
+        None
+    }
+}
+
+fn get_name_and_unit_addr<'db, Ast: HasName + HasMacroInvocation + HasUnitAddress>(
+    db: &'db dyn BaseDb,
+    env: &mut TrackedMapEnvMut<'db>,
+    diag: &impl DiagnosticCollector<File>,
+    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    ast: &Ast,
+) -> Option<String> {
+    let without_unit_addr = resolve_name_or_macro(db, env, diag, spanner, ast);
+
+    let unit_addr = ast
+        .unit_address()
+        .and_then(|ast| resolve_name_or_macro(db, env, diag, spanner, &ast));
+
+    without_unit_addr.map(|without_unit_addr| {
+        if let Some(unit_addr) = unit_addr {
+            format!("{without_unit_addr}@{unit_addr}")
+        } else {
+            without_unit_addr
+        }
+    })
+}
+
 /// Process an [`ast::DtNode`] and its subtree into flat [`MirDefinition`]s.
 fn process_dt_node<'db>(
     db: &'db dyn BaseDb,
@@ -633,8 +680,8 @@ fn process_dt_node<'db>(
                 });
             }
         } else {
-            let mut body_mir = Mir::default();
             // Process so diagnostics are emitted
+            let mut body_mir = Mir::default();
             process_dt_node_body(db, file, env, diag, &mut body_mir, is_overlay, "", dt_node);
 
             diag.emit(Diagnostic::new(
@@ -646,44 +693,55 @@ fn process_dt_node<'db>(
         return;
     }
 
-    // TODO: handle possible macros
-    // Build the node's full path.
-    let name = dt_node
-        .text_name("")
-        .map(Cow::into_owned)
-        .unwrap_or_default();
-    let node_path = build_path(path_prefix, &name);
+    let name = get_name_and_unit_addr(db, env, diag, &mut |tr| tr.within_file(file), dt_node)
+        .or_else(|| {
+            // Root node
+            dt_node
+                .syntax()
+                .child_tokens()
+                .any(|tok| tok.green.kind == TokenKind::Slash)
+                .then(String::new)
+        });
 
-    // Collect labels defined on this node.
-    let mut labels: Vec<String> = Vec::new();
-    if let Some(label) = dt_node.label()
-        && let Some(label_name) = label.name()
-    {
-        let label_text = label_name.syntax().text().to_string();
-        // Check for duplicate labels (DTC: no duplicates globally).
-        if env.get_macro(db, &label_text).is_some() {
-            // TODO: MultiSpan & cross-file diagnostics
-            diag.emit(Diagnostic::new(
-                label_name.syntax().text_range().within_file(file),
-                Cow::Owned(format!("Duplicate label `{label_text}`")),
-                Severity::Error,
-            ));
-        } else {
-            env.own_label_map
-                .insert(label_text.clone(), Some(node_path.clone()));
-            labels.push(label_text);
+    if let Some(name) = name {
+        // Build the node's full path.
+        let node_path = build_path(path_prefix, &name);
+
+        // Collect labels defined on this node.
+        let mut labels: Vec<String> = Vec::new();
+        if let Some(label_ast) = dt_node.label()
+            && let Some(label_name) =
+                resolve_name_or_macro(db, env, diag, &mut |tr| tr.within_file(file), &label_ast)
+        {
+            // Check for duplicate labels (DTC: no duplicates globally).
+            if env.get_label(db, &label_name).is_some() {
+                // TODO: MultiSpan & cross-file diagnostics
+                diag.emit(Diagnostic::new(
+                    label_ast.syntax().text_range().within_file(file),
+                    Cow::Owned(format!("Duplicate label `{label_name}`")),
+                    Severity::Error,
+                ));
+            } else {
+                env.own_label_map
+                    .insert(label_name.clone(), Some(node_path.clone()));
+                labels.push(label_name);
+            }
         }
+
+        // Emit the node definition.
+        mir.definitions.push(MirDefinition {
+            path: node_path.clone(),
+            value: MirDefinitionValue::Node(MirNodeData { labels }),
+            provenance,
+        });
+
+        // Process the node body: subnodes and properties.
+        process_dt_node_body(db, file, env, diag, mir, is_overlay, &node_path, dt_node);
+    } else {
+        // Process so diagnostics are emitted
+        let mut body_mir = Mir::default();
+        process_dt_node_body(db, file, env, diag, &mut body_mir, is_overlay, "", dt_node);
     }
-
-    // Emit the node definition.
-    mir.definitions.push(MirDefinition {
-        path: node_path.clone(),
-        value: MirDefinitionValue::Node(MirNodeData { labels }),
-        provenance,
-    });
-
-    // Process the node body: subnodes and properties.
-    process_dt_node_body(db, file, env, diag, mir, is_overlay, &node_path, dt_node);
 }
 
 /// Process the body of an [`ast::DtNode`]: subnodes and properties.
@@ -796,13 +854,6 @@ fn process_dt_property<'db>(
     parent_path: &str,
     prop: &ast::DtProperty,
 ) -> Option<MirDefinition> {
-    let name_ast = prop.name()?;
-    let name = name_ast.syntax().text().to_string();
-    let path = build_path(parent_path, &name);
-
-    let text_range = prop.syntax().text_range();
-    let provenance = MirProvenance { file, text_range };
-
     let mut values = Vec::new();
     for value_ast in prop.values() {
         if let Some(value) =
@@ -811,6 +862,12 @@ fn process_dt_property<'db>(
             values.push(value);
         }
     }
+
+    let name = get_name_and_unit_addr(db, env, diag, &mut |tr| tr.within_file(file), prop)?;
+    let path = build_path(parent_path, &name);
+
+    let text_range = prop.syntax().text_range();
+    let provenance = MirProvenance { file, text_range };
 
     Some(MirDefinition {
         path,
@@ -954,15 +1011,7 @@ fn convert_cell<'db>(
     }
 }
 
-enum MacroCtx<'a> {
-    Explicit(&'a ast::MacroInvocation),
-    Implicit {
-        name: &'a str,
-        text_range: TextRange,
-    },
-}
-
-/// Resolve a macro and reparse the result.
+/// Resolves and substitutes a macro and reparses the result.
 ///
 /// Returns `None` if the macro doesn't exist or there is some other error.
 fn resolve_macro_to_value<
@@ -986,39 +1035,8 @@ fn resolve_macro_to_value<
         &AstType,
     ) -> Option<MirType>,
 ) -> Option<MirType> {
-    let (name, span) = match &macro_ctx {
-        MacroCtx::Explicit(inv) => (
-            inv.green_ident()?.text.as_str(),
-            spanner(inv.syntax().text_range()),
-        ),
-        MacroCtx::Implicit { name, text_range } => (*name, spanner(*text_range)),
-    };
+    let (span, _trmaps, expanded) = substitute_macro_tok(db, env, diag, spanner, macro_ctx)?;
 
-    let Some(def) = env.get_macro(db, name) else {
-        let is_explicit_macro = matches!(macro_ctx, MacroCtx::Explicit(_));
-        if is_explicit_macro {
-            diag.emit(Diagnostic::new(
-                span,
-                Cow::Owned(format!("Macro `{name}` is not defined")),
-                Severity::Error,
-            ));
-        }
-        return None;
-    };
-
-    let (_trmaps, expanded) = match dt_tools_analyzer::macros::substitute_macro_ast(
-        match macro_ctx {
-            MacroCtx::Explicit(inv) => Some(inv),
-            _ => None,
-        },
-        def,
-    ) {
-        Ok(result) => result,
-        Err(err) => {
-            diag.emit(Diagnostic::new(span, Cow::Owned(err), Severity::Error));
-            return None;
-        }
-    };
     let parse = entrypoint.parse(&expanded);
 
     // TODO: use trmaps to map error ranges back to the original macro invocation site.
@@ -1026,11 +1044,14 @@ fn resolve_macro_to_value<
 
     emit_parse_errors(&parse, &diag, spanner);
 
-    let Some(ast) = parse.red_node().children().find_map(AstType::cast_either) else {
+    let red_node = parse.red_node();
+    let Some(ast) = AstType::cast_node(red_node.clone())
+        .or_else(|| red_node.children().find_map(AstType::cast_either))
+    else {
         diag.emit(Diagnostic::new(
             span,
             Cow::Owned(format!(
-                "Couldn't find {} as child of parse's root node, found node kinds {:?} and token kinds {:?}",
+                "Internal compiler error: Couldn't find {} as child of parse's root node, found node kinds {:?} and token kinds {:?}",
                 std::any::type_name::<AstType>(),
                 parse.red_node().child_nodes().map(|red| red.green.kind).collect::<Vec<_>>(),
                 parse.red_node().child_tokens().map(|red| red.green.kind).collect::<Vec<_>>()
@@ -1076,7 +1097,6 @@ fn convert_phandle<'db>(
         // No explicit macro invocation, but the name itself might still be a macro
         // (e.g. `#define UART_1 soc/uart` and `&UART_1`).
         let name_ast = phandle.name()?;
-        let name_text = name_ast.syntax().text().to_string();
 
         Some(
             resolve_macro_to_value(
@@ -1084,14 +1104,11 @@ fn convert_phandle<'db>(
                 env,
                 diag,
                 spanner,
-                &MacroCtx::Implicit {
-                    name: name_text.as_str(),
-                    text_range: name_ast.syntax().text_range(),
-                },
+                &MacroCtx::Implicit(&name_ast),
                 Entrypoint::ReferenceNoamp,
                 convert_phandle,
             )
-            .unwrap_or(MirPhandleTarget::Label(name_text)),
+            .unwrap_or(MirPhandleTarget::Label(name_ast.syntax().text().to_owned())),
         )
     }
 }
@@ -1389,6 +1406,66 @@ mod tests {
     }
 
     #[test]
+    fn mir_macro_label() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define MACRO FOO
+
+/ { MACRO: foo {}; };
+/ { prop = <&FOO>; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 30..51
+                node   / /main.dts 52..73
+                node labels=[FOO] /foo /main.dts 34..48
+                property = CellList([Phandle(Label("FOO"))]) /prop /main.dts 56..70
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_macro_reference() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define MACRO FOO
+
+/ { FOO: foo {}; };
+/ { prop = <&MACRO>; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 30..49
+                node   / /main.dts 50..73
+                node labels=[FOO] /foo /main.dts 34..46
+                property = CellList([Phandle(Label("FOO"))]) /prop /main.dts 54..70
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_macro_node() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define FOO SUBSTITUTED
+
+/ { FOO@bar {}; };
+/ { bar@FOO {}; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 36..54
+                node   / /main.dts 55..73
+                node   /SUBSTITUTED@bar /main.dts 40..51
+                node   /bar@SUBSTITUTED /main.dts 59..70
+            "#]],
+        );
+    }
+
+    #[test]
     fn mir_undefined_macro() {
         check_mir(
             r#"
@@ -1420,6 +1497,27 @@ mod tests {
 
                 --- errors ---
                 Error 11..17: Label not found: &BOGUS [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_duplicate_label() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo: bar {}; };
+/ { foo: baz {}; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..30
+                node   / /main.dts 31..50
+                node labels=[foo] /bar /main.dts 15..27
+                node   /baz /main.dts 35..47
+
+                --- errors ---
+                Error 35..39: Duplicate label `foo` [dt_tools_lsp::salsa::preprocessor::preprocessor_eval_file]
             "#]],
         );
     }

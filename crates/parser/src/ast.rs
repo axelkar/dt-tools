@@ -246,6 +246,14 @@ pub trait HasMacroInvocation: AstNode {
     }
 }
 
+/// Trait for [`AstNode`]s with [`UnitAddress`]s
+pub trait HasUnitAddress: AstNode {
+    /// Returns the first [`UnitAddress`] if it exists.
+    fn unit_address(&self) -> Option<UnitAddress> {
+        self.syntax().child_nodes().find_map(UnitAddress::cast)
+    }
+}
+
 /// Trait for [`AstNode`]s with [`DtPhandle`]s
 pub trait HasDtPhandle: AstNode {
     /// Returns the first [`DtPhandle`] if it exists.
@@ -309,13 +317,6 @@ define_ast_node! {
     ///
     /// Kind: [`NodeKind::DirectiveArguments`]
     DirectiveArguments: DirectiveArguments;
-
-    /// A [Devicetree property][1].
-    ///
-    /// Kind: [`NodeKind::DtProperty`]
-    ///
-    /// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
-    DtProperty: DtProperty;
 }
 
 impl Directive {
@@ -338,6 +339,20 @@ impl Directive {
 }
 impl HasName for DirectiveArguments {}
 impl HasDtPhandle for DirectiveArguments {}
+
+define_ast_node! {
+    /// A [Devicetree property][1].
+    ///
+    /// Kind: [`NodeKind::DtProperty`]
+    ///
+    /// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
+    DtProperty: DtProperty;
+
+    /// Unit address part of a node's or a property's name.
+    ///
+    /// Kind: [`NodeKind::UnitAddress`]
+    UnitAddress: UnitAddress;
+}
 
 impl DtProperty {
     /// Returns an iterator over direct [`PropValue`] children.
@@ -373,37 +388,14 @@ impl DtProperty {
             None => Either::Right(std::iter::empty()),
         }
     }
-
-    /// Returns the unit addresses.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile, HasName};
-    /// use dt_tools_parser::cst::RedNode;
-    /// use std::sync::Arc;
-    ///
-    /// let src = "/ { my_prop@unit_address = <1>; };";
-    /// let file = SourceFile::parse(src).source_file();
-    /// let property = file
-    ///     .nodes().next().unwrap()
-    ///     .properties().next().unwrap();
-    ///
-    /// assert_eq!(property.name().unwrap().text(src), Some("my_prop"));
-    /// assert_eq!(property.unit_address().unwrap().text(src), Some("unit_address"));
-    ///
-    /// ```
-    pub fn unit_address(&self) -> Option<Name> {
-        self.syntax
-            .child_nodes()
-            .find(|node| node.green.kind == NodeKind::UnitAddress)?
-            .child_tokens()
-            .find_map(Name::cast)
-    }
 }
 impl HasName for DtProperty {}
 impl HasLabel for DtProperty {}
 impl HasMacroInvocation for DtProperty {}
+impl HasUnitAddress for DtProperty {}
+
+impl HasName for UnitAddress {}
+impl HasMacroInvocation for UnitAddress {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum PropValue {
@@ -612,33 +604,6 @@ impl DtNode {
         self.syntax.child_nodes().filter_map(DtNode::cast)
     }
 
-    /// Returns the unit addresses.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use dt_tools_parser::ast::{DtNode, AstNode, SourceFile, HasName};
-    /// use dt_tools_parser::cst::RedNode;
-    /// use std::sync::Arc;
-    ///
-    /// let src = "/ { my_node@unit_address { foo = <1>; }; };";
-    /// let file = SourceFile::parse(src).source_file();
-    /// let node = file
-    ///     .nodes().next().unwrap()
-    ///     .subnodes().next().unwrap();
-    ///
-    /// assert_eq!(node.name().unwrap().text(src), Some("my_node"));
-    /// assert_eq!(node.unit_address().unwrap().text(src), Some("unit_address"));
-    ///
-    /// ```
-    pub fn unit_address(&self) -> Option<Name> {
-        self.syntax
-            .child_nodes()
-            .find(|node| node.green.kind == NodeKind::UnitAddress)?
-            .child_tokens()
-            .find_map(Name::cast)
-    }
-
     /// Returns the name with the unit address.
     ///
     /// # Example
@@ -660,7 +625,7 @@ impl DtNode {
     // TODO: Cow -> String, remove src
     #[must_use]
     pub fn text_name(&self, _src: &str) -> Option<Cow<'static, str>> {
-        Some(match self.unit_address() {
+        Some(match self.unit_address().and_then(|ast| ast.name()) {
             None => Cow::Owned(self.name()?.syntax.text().clone().to_owned()),
 
             // Since whitespace before and after @ should be deny-linted I should be able to
@@ -784,6 +749,7 @@ impl DtNode {
 impl HasName for DtNode {}
 impl HasLabel for DtNode {}
 impl HasMacroInvocation for DtNode {}
+impl HasUnitAddress for DtNode {}
 
 define_ast_token! {
     /// A generic name.
@@ -792,15 +758,6 @@ define_ast_token! {
     ///
     /// Kind: [`TokenKind::Name`]
     Name: Name;
-}
-impl Name {
-    // TODO: make callers use syntax.text directly
-    #[inline]
-    #[deprecated = "use syntax.text() directly"]
-    #[must_use]
-    pub fn text(&self, _src: &str) -> Option<&str> {
-        Some(self.syntax.text())
-    }
 }
 
 // FIXME: dirty unimplemented hack for dt_tools_lsp::hover

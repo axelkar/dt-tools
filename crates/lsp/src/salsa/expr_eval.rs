@@ -112,7 +112,7 @@ pub fn eval(
             };
 
             // TODO: error handling
-            let (trmaps, s) = substitute_macro_ast(Some(&macro_invocation), def).ok()?;
+            let (_trmaps, s) = substitute_macro_ast(Some(&macro_invocation), def).ok()?;
 
             let parse = dt_tools_parser::parser::Entrypoint::PreprocessorConditional.parse(&s);
 
