@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::salsa::file::Files;
+use crate::file::Files;
 
 #[salsa::db]
 pub trait BaseDb: salsa::Database {
@@ -42,18 +42,5 @@ impl DbSnapshot {
         F: FnOnce(&BaseDatabase) -> T + std::panic::UnwindSafe,
     {
         salsa::Cancelled::catch(|| f(&self.db))
-    }
-}
-
-impl crate::Session {
-    /// Creates a snapshot of the database that can be sent to worker threads. While this
-    /// snapshot exists, trying to modify the database will block, and try to cancel
-    /// operations. This can easily cause a deadlock.
-    pub(crate) fn snapshot(&self) -> DbSnapshot {
-        DbSnapshot {
-            // FIXME: I don't think this makes a real snapshot, because salsa::Storage
-            // contains an Arc???
-            db: self.db.lock().clone(),
-        }
     }
 }

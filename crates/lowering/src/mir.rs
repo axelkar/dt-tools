@@ -2,7 +2,7 @@ use std::fmt;
 
 use dt_tools_parser::TextRange;
 
-use crate::salsa::file::File;
+use crate::file::File;
 
 /// Mid-level intermediate representation of devicetrees.
 ///
@@ -27,7 +27,7 @@ impl Mir {
     /// Format for snapshot testing.
     #[must_use]
     #[cfg(test)]
-    pub(crate) fn fmt_for_test(&self, db: &dyn crate::salsa::db::BaseDb) -> String {
+    pub(crate) fn fmt_for_test(&self, db: &dyn crate::db::BaseDb) -> String {
         use std::fmt::Write;
 
         let mut defs: Vec<_> = self.definitions.iter().collect();

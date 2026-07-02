@@ -13,7 +13,7 @@ use dt_tools_parser::{
     parser::Entrypoint,
 };
 
-use crate::salsa::{
+use crate::{
     db::BaseDb,
     emit_parse_errors,
     file::File,
@@ -75,7 +75,7 @@ pub struct LoweredFile<'db> {
 /// Will panic if [`IncludeDirs`] hasn't been defined.
 pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'_>> {
     // Detect /plugin/; in the root file.
-    let is_overlay = crate::salsa::parse_file(db, root_file).is_some_and(|p| {
+    let is_overlay = crate::parse_file(db, root_file).is_some_and(|p| {
         p.parse(db).source_file().directives().any(|dir| {
             dir.syntax()
                 .child_tokens()
@@ -275,14 +275,14 @@ mod tests {
     use expect_test::{Expect, expect};
 
     use super::*;
-    use crate::salsa::db::BaseDb;
+    use crate::db::BaseDb;
 
     /// Run the preprocessor on virtual files and snapshot MIR + diagnostics.
     ///
     /// The root file is named "/main.dts".
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
     fn check_mir(root_file_contents: &str, other_files: &[(&str, &str)], expect: Expect) {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
         IncludeDirs::new(&db, vec![]);
 
         let root_file = db.get_files().add_virtual(
@@ -296,7 +296,7 @@ mod tests {
                 .add_virtual(&db, Utf8PathBuf::from(path), contents.to_owned());
         }
 
-        let (diags, _included_files) = crate::salsa::compute_diagnostics(&db, root_file);
+        let (diags, _included_files) = crate::compute_diagnostics(&db, root_file);
 
         let result = lower_root_file(&db, root_file).expect("Should be a readable file");
         let mir = result.mir(&db);
@@ -443,7 +443,7 @@ mod tests {
                 property = CellList([U32(1)]) /main_prop /main.dts 35..51
 
                 --- errors ---
-                Error 16..21: Macro `BOGUS` is not defined [dt_tools_lsp::salsa::lowering::preprocessor_eval_file] [dt_tools_lsp::salsa::lowering::preprocessor_eval_file]
+                Error 16..21: Macro `BOGUS` is not defined [dt_tools_lowering::lowering::preprocessor_eval_file] [dt_tools_lowering::lowering::preprocessor_eval_file]
             "#]],
         );
     }
@@ -624,8 +624,8 @@ mod tests {
                 property =  /prop2 /main.dts 29..41
 
                 --- errors ---
-                Error 23..26: Macro `VAL` is not defined [dt_tools_lsp::salsa::lowering::preprocessor_eval_file]
-                Error 37..40: Macro `VAL` is not defined [dt_tools_lsp::salsa::lowering::preprocessor_eval_file]
+                Error 23..26: Macro `VAL` is not defined [dt_tools_lowering::lowering::preprocessor_eval_file]
+                Error 37..40: Macro `VAL` is not defined [dt_tools_lowering::lowering::preprocessor_eval_file]
             "#]],
         );
     }
@@ -641,7 +641,7 @@ mod tests {
             expect![[r#"
 
                 --- errors ---
-                Error 11..17: Label not found: &BOGUS [dt_tools_lsp::salsa::lowering::preprocessor_eval_file]
+                Error 11..17: Label not found: &BOGUS [dt_tools_lowering::lowering::preprocessor_eval_file]
             "#]],
         );
     }
@@ -659,7 +659,7 @@ mod tests {
                 property = Phandle(Label("BOGUS")) /foo /main.dts 15..28
 
                 --- errors ---
-                Error 15..28: Label not found: BOGUS [dt_tools_lsp::salsa::check_mir_post]
+                Error 15..28: Label not found: BOGUS [dt_tools_lowering::check_mir_post]
             "#]],
         );
     }
@@ -680,7 +680,7 @@ mod tests {
                 node   /baz /main.dts 35..47
 
                 --- errors ---
-                Error 35..39: Duplicate label `foo` [dt_tools_lsp::salsa::lowering::preprocessor_eval_file]
+                Error 35..39: Duplicate label `foo` [dt_tools_lowering::lowering::preprocessor_eval_file]
             "#]],
         );
     }
@@ -698,7 +698,7 @@ mod tests {
                 property = CellList([]) /prop /main.dts 15..34
 
                 --- errors ---
-                Error 23..32: number 4294967296 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer [dt_tools_lsp::salsa::lowering::preprocessor_eval_file]
+                Error 23..32: number 4294967296 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer [dt_tools_lowering::lowering::preprocessor_eval_file]
             "#]],
         );
     }

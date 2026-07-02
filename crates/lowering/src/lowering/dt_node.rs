@@ -8,7 +8,7 @@ use dt_tools_parser::{
 };
 
 use super::{IntraFileCtx, dt_property::process_dt_property, lower_phandle};
-use crate::salsa::{
+use crate::{
     db::BaseDb,
     file::File,
     lowering::toplevel::emit_delete_directive,

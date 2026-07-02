@@ -9,7 +9,7 @@ use dt_tools_parser::{
     lexer::TokenKind,
 };
 
-use crate::salsa::{db::BaseDb, file::File, macros::env::TrackedMapEnvMut};
+use crate::{db::BaseDb, file::File, macros::env::TrackedMapEnvMut};
 
 /// Parses an integer and emits errors.
 ///
@@ -222,10 +222,10 @@ mod tests {
     use dt_tools_analyzer::macros::MacroDefinition;
     use dt_tools_parser::{TextRange, ast::AstNode, parser::Entrypoint};
 
-    use crate::salsa::{db::BaseDb, macros::env::TrackedMapEnvMut};
+    use crate::{db::BaseDb, macros::env::TrackedMapEnvMut};
 
     fn check(input: &str, env: &TrackedMapEnvMut) -> Option<i64> {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
 
         let parse = Entrypoint::PreprocessorConditional.parse(input);
         let ast = dt_tools_parser::ast::Expr::cast(parse.red_node().child_nodes().next().unwrap())
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_prefix_defined() {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
         let file = db
             .get_files()
             .add_virtual(&db, "/main.dts".into(), String::new());
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_macro() {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
         let file = db
             .get_files()
             .add_virtual(&db, "/main.dts".into(), String::new());
@@ -324,7 +324,7 @@ mod tests {
     #[test]
     #[ignore = "overflows stack"]
     fn test_macro_self_recursion() {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
         let file = db
             .get_files()
             .add_virtual(&db, "/main.dts".into(), String::new());

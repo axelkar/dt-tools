@@ -8,7 +8,7 @@ use dt_tools_parser::{
 };
 
 use super::{IntraFileCtx, lower_phandle, resolve_macro_to_value};
-use crate::salsa::{
+use crate::{
     db::BaseDb,
     expr_eval::{self, interpret_escaped_char_tok, parse_int_tok},
     file::File,

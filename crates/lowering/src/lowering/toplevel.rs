@@ -13,7 +13,7 @@ use super::{
     IntraFileCtx, lower_phandle,
     preprocessor::{get_pp_directive_args, get_pp_include_arg},
 };
-use crate::salsa::{
+use crate::{
     file::File,
     lowering::{
         dt_node::{build_path, process_dt_node},
@@ -204,7 +204,7 @@ pub(crate) fn handle_directive(
     dir: &ast::DtsDirective,
     include_dirs: &[Utf8PathBuf],
     parent_dir_path: &Utf8Path,
-    files: &crate::salsa::file::Files,
+    files: &crate::file::Files,
 ) {
     let tokens: Vec<_> = dir.syntax().child_tokens().collect();
     let text_range = dir.syntax().text_range();

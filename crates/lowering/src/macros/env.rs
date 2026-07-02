@@ -3,7 +3,7 @@ use dt_tools_analyzer::macros::MacroDefinition;
 use dt_tools_diagnostic::Span;
 use rustc_hash::FxHashMap;
 
-use crate::salsa::{db::BaseDb, file::File};
+use crate::{db::BaseDb, file::File};
 
 /// Interned string for a key in [`TrackedMapEnv`].
 #[salsa::interned]

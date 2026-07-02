@@ -1,3 +1,4 @@
+use dt_tools_lowering::{db::BaseDb, includes::document_deps};
 use dt_tools_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
@@ -8,11 +9,7 @@ use tower_lsp_server::ls_types::{
     GotoDefinitionParams, GotoDefinitionResponse, Location, MessageType, Position, Range,
 };
 
-use crate::{
-    lsp_utils::position_to_offset,
-    salsa::{db::BaseDb, includes::document_deps},
-    uri_to_path,
-};
+use crate::{lsp_utils::position_to_offset, uri_to_path};
 
 // TODO: go to phandle, macro definition or other definitions of the same node/property
 pub async fn goto_definition(
@@ -28,10 +25,10 @@ pub async fn goto_definition(
     let db = &db;
     let file = db.get_files().get_file(db, &path);
 
-    let Some(rope) = crate::salsa::rope(db, file) else {
+    let Some(rope) = dt_tools_lowering::rope(db, file) else {
         return None;
     };
-    let parse = crate::salsa::parse_file(db, file)?;
+    let parse = dt_tools_lowering::parse_file(db, file)?;
     let file_ast = parse.parse(db).source_file();
     let cst = file_ast.syntax();
 
@@ -47,7 +44,7 @@ pub async fn goto_definition(
         .find(|(text_range, _)| text_range.byte_range().contains(&offset))
     {
         return Some(GotoDefinitionResponse::Scalar(Location::new(
-            file.uri(db),
+            crate::lsp_utils::file_uri(db, *file),
             Range {
                 start: Position::new(0, 0),
                 end: Position::new(0, 0),

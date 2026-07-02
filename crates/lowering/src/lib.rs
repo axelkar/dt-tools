@@ -4,11 +4,12 @@ use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
 use dt_tools_parser::TextRange;
 
-use crate::salsa::{lowering::LoweredFile, macros::env::InternedKey};
+use crate::{lowering::LoweredFile, macros::env::InternedKey};
 
 pub mod db;
 mod expr_eval;
 pub mod file;
+// TODO: remove includes / document_deps in favor of new lowering stuff
 pub mod includes;
 pub mod lowering;
 pub mod macros;
@@ -58,6 +59,7 @@ pub struct Outline<'db> {
     pub diagnostics: Vec<Diagnostic<file::File>>,
 }
 
+// TODO: remove outline in favor of new lowering stuff
 /// Computes an outline composed of [`dt_tools_analyzer::new::outline::AnalyzedToplevel`]s.
 ///
 /// Returns `None` if the file doesn't exist.
@@ -199,8 +201,8 @@ fn check_mir_post<'db>(
 }
 
 #[salsa::tracked(returns(ref))]
-pub fn compute_diagnostics<'db>(
-    db: &'db dyn db::BaseDb,
+pub fn compute_diagnostics(
+    db: &dyn db::BaseDb,
     root_file: file::File,
 ) -> (Vec<Diagnostic<file::File>>, Vec<file::File>) {
     let span = profiling::tracy_client::span!("lsp::salsa::compute_file_diagnostics");
@@ -275,11 +277,11 @@ mod tests {
     use camino::Utf8Path;
 
     use super::*;
-    use crate::salsa::db::BaseDb;
+    use crate::db::BaseDb;
 
     #[test]
     fn test_parse_file() {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
         let file_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/basic.dts");
         let file = db.get_files().get_file(&db, &file_path);
 
@@ -292,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_outline() {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
         let file_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
         let file = db.get_files().get_file(&db, &file_path);
 

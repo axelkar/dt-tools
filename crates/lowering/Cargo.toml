@@ -1,0 +1,29 @@
+[package]
+name = "dt-tools-lowering"
+edition = "2024"
+version.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+dt-tools-parser.workspace = true
+dt-tools-analyzer.workspace = true
+dt-tools-diagnostic = { workspace = true, features = ["parking_lot"] }
+dt-tools-lint.workspace = true
+salsa.workspace = true
+camino.workspace = true
+parking_lot.workspace = true
+ropey = "1.6.1"
+dashmap.workspace = true
+profiling = { version = "1.0.18", features = ["profile-with-tracy"] }
+tracing.workspace = true
+rustc-hash.workspace = true
+
+[dev-dependencies]
+expect-test.workspace = true
+
+[lints]
+workspace = true

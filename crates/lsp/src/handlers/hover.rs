@@ -1,6 +1,12 @@
 use std::fmt::Write;
 
 use dt_tools_diagnostic::Span;
+use dt_tools_lowering::{
+    db::BaseDb,
+    file::File,
+    lowering::lower_root_file,
+    mir::{MirDefinition, MirDefinitionValue},
+};
 use dt_tools_parser::{TextRange, ast::AstNode};
 use itertools::Itertools;
 use tower_lsp_server::ls_types::{
@@ -9,18 +15,12 @@ use tower_lsp_server::ls_types::{
 
 use crate::{
     lsp_utils::{offset_to_position, position_to_offset},
-    salsa::{
-        db::BaseDb,
-        file::File,
-        lowering::lower_root_file,
-        mir::{MirDefinition, MirDefinitionValue},
-    },
     uri_to_path,
 };
 
 fn make_hover_info(
     db: &dyn BaseDb,
-    file: crate::salsa::file::File,
+    file: dt_tools_lowering::file::File,
     markdown: String,
     text_range: Option<TextRange>,
 ) -> Hover {
@@ -30,7 +30,7 @@ fn make_hover_info(
             value: markdown,
         }),
         range: text_range.and_then(|text_range| {
-            crate::salsa::rope(db, file).as_ref().and_then(|rope| {
+            dt_tools_lowering::rope(db, file).as_ref().and_then(|rope| {
                 Some(Range::new(
                     offset_to_position(text_range.start, rope)?,
                     offset_to_position(text_range.end, rope)?,
@@ -52,7 +52,7 @@ pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
 
     let root_file = state.session.root_file()?;
 
-    let Some(rope) = crate::salsa::rope(db, file) else {
+    let Some(rope) = dt_tools_lowering::rope(db, file) else {
         return None;
     };
     let offset = position_to_offset(params.position, rope)?;
@@ -93,7 +93,7 @@ pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
 }
 
 fn cst_tree_section(db: &dyn BaseDb, file: File, offset: usize) -> Option<(String, TextRange)> {
-    let parse = crate::salsa::parse_file(db, file)?;
+    let parse = dt_tools_lowering::parse_file(db, file)?;
     let file_ast = parse.parse(db).source_file();
     let cst = file_ast.syntax();
     let token = cst.token_at_offset(offset)?;
@@ -199,7 +199,7 @@ fn fmt_span(db: &dyn BaseDb, span: &Span<File>, is_here: bool, s: &mut String) {
         let line = line + 1;
         let column = column + 1;
 
-        let uri = span.file.uri(db);
+        let uri = crate::lsp_utils::file_uri(db, span.file);
         let uri = uri.as_str();
 
         write!(
@@ -274,10 +274,10 @@ fn include_section(
 }
 
 fn phandle_section(
-    db: &dyn BaseDb,
-    root_file: File,
-    file: File,
-    offset: usize,
+    _db: &dyn BaseDb,
+    _root_file: File,
+    _file: File,
+    _offset: usize,
 ) -> Option<(String, TextRange)> {
     // TODO
 

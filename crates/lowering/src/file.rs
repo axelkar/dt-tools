@@ -2,13 +2,12 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use salsa::Durability;
-use tower_lsp_server::ls_types::Uri;
 
-use crate::{
-    FxDashMap,
-    lsp_utils::path_to_uri,
-    salsa::{db::BaseDb, includes::IncludeDirs},
-};
+use crate::{db::BaseDb, includes::IncludeDirs};
+
+// FIXME: rename `is_readable_file` to something more fitting
+pub type FxDashMap<K, V> =
+    dashmap::DashMap<K, V, std::hash::BuildHasherDefault<rustc_hash::FxHasher>>;
 
 /// The main database input.
 #[salsa::input(debug)]
@@ -30,18 +29,12 @@ pub struct File {
 impl File {
     /// Returns the zero-indexed line and column of an offset in this file.
     pub fn line_column(self, db: &dyn BaseDb, offset: usize) -> Option<(usize, usize)> {
-        let rope = crate::salsa::rope(db, self).as_ref()?;
+        let rope = crate::rope(db, self).as_ref()?;
 
         let line = rope.try_byte_to_line(offset).ok()?;
         let first_char_of_line = rope.try_line_to_byte(line).ok()?;
         let column = offset - first_char_of_line;
         Some((line, column))
-    }
-
-    /// Returns the URI of the path.
-    #[expect(clippy::missing_panics_doc, reason = "Shouldn't panic")]
-    pub fn uri(self, db: &dyn BaseDb) -> Uri {
-        path_to_uri(self.path(db)).expect("path should be absolute (checked in File constructors)")
     }
 
     /// Returns the path with the first [include directory](IncludeDirs) prefix removed.
@@ -113,11 +106,11 @@ impl std::panic::RefUnwindSafe for Files {}
 mod tests {
     use camino::Utf8Path;
 
-    use crate::salsa::{db::BaseDb, includes::IncludeDirs};
+    use crate::{db::BaseDb, includes::IncludeDirs};
 
     #[test]
     fn read_file() {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
         let file_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/basic.dts");
         let file = db.get_files().get_file(&db, &file_path.clone());
 
@@ -129,7 +122,7 @@ mod tests {
 
     #[test]
     fn shorter_path() {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
         IncludeDirs::new(&db, vec!["/foo/bar".into()]);
 
         let file = db

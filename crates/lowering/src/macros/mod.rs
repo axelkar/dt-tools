@@ -7,7 +7,7 @@ use dt_tools_parser::{
     ast::{self, AstNode, AstToken},
 };
 
-use crate::salsa::{db::BaseDb, file::File, macros::env::TrackedMapEnvMut};
+use crate::{db::BaseDb, file::File, macros::env::TrackedMapEnvMut};
 
 pub mod env;
 

@@ -7,9 +7,7 @@ use dt_tools_parser::{
     cst::RedNode,
 };
 
-use crate::salsa::{
-    db::BaseDb, emit_parse_errors, expr_eval, file::File, macros::env::TrackedMapEnvMut,
-};
+use crate::{db::BaseDb, emit_parse_errors, expr_eval, file::File, macros::env::TrackedMapEnvMut};
 
 /// Strips the `#directive` prefix from a preprocessor directive.
 pub(crate) fn get_pp_directive_args(

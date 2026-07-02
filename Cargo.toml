@@ -11,17 +11,19 @@ repository = "https://github.com/axelkar/dt-tools"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-dt-tools-parser.path = "./crates/parser"
 dt-tools-analyzer.path = "./crates/analyzer"
-dt-tools-lint.path = "./crates/lint"
 dt-tools-diagnostic.path = "./crates/diagnostic"
+dt-tools-lint.path = "./crates/lint"
+dt-tools-lowering.path = "./crates/lowering"
+dt-tools-parser.path = "./crates/parser"
 dt-tools-workspace.path = "./crates/workspace"
+
 tracing = "0.1.40"
 #dashmap = "7.0.0-rc2" # experimental version for entry_ref support
 # https://github.com/xacrimon/dashmap/pull/367
 dashmap = { git = "https://github.com/axelkar/dashmap" }
 rustc-hash = "2.0.0"
-itertools = "0.14.0"
+itertools = "0.15.0"
 tracing-subscriber = "0.3.18"
 pretty_assertions = "1.4.0"
 owo-colors = "4.0.0"
@@ -35,7 +37,7 @@ serde_yaml = "0.9.33"
 either = "1.15"
 serde = "1"
 fs-err = "3.1.0"
-salsa = "0.26.0"
+salsa = "0.27.2"
 camino = "1.2.1" # UTF-8 paths
 tower-lsp-server = "0.23.0"
 fluent-uri = "0.4.1"

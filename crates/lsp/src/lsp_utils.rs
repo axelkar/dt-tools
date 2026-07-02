@@ -2,12 +2,11 @@ use std::borrow::Cow;
 
 use camino::Utf8Path;
 use dt_tools_diagnostic::Span;
+use dt_tools_lowering::file::File;
 use dt_tools_parser::TextRange;
 use fluent_uri::component::Scheme;
 use ropey::Rope;
 use tower_lsp_server::ls_types::{self, Position, Range, Uri};
-
-use crate::salsa::file::File;
 
 pub fn position_to_offset(position: Position, rope: &Rope) -> Option<usize> {
     Some(rope.try_line_to_char(position.line as usize).ok()? + position.character as usize)
@@ -57,16 +56,21 @@ pub fn path_to_uri(path: &Utf8Path) -> Option<Uri> {
     Uri::from_file_path(path)
 }
 
+/// Returns the URI for a [`File`].
+pub fn file_uri(db: &dyn dt_tools_lowering::db::BaseDb, file: File) -> Uri {
+    path_to_uri(file.path(db)).expect("path should be absolute (checked in File constructors)")
+}
+
 /// Converts a [`dt_tools_diagnostic::Span`] to a [`ls_types::Location`].
 pub fn span_to_location(
-    db: &dyn crate::salsa::db::BaseDb,
+    db: &dyn dt_tools_lowering::db::BaseDb,
     span: &Span<File>,
 ) -> ls_types::Location {
     ls_types::Location {
-        uri: span.file.uri(db),
+        uri: file_uri(db, span.file),
         range: range_to_lsp(
             span.text_range,
-            crate::salsa::rope(db, span.file)
+            dt_tools_lowering::rope(db, span.file)
                 .as_ref()
                 .expect("file should exist"),
         )
@@ -80,12 +84,12 @@ pub fn span_to_location(
 /// information; this must be run separately for every file.
 #[expect(clippy::ref_option, reason = "Fixes borrow checker issues")]
 pub fn dt_tools_diagnostic_to_lsp<'a>(
-    db: &'a dyn crate::salsa::db::BaseDb,
+    db: &'a dyn dt_tools_lowering::db::BaseDb,
     diagnostic: &'a dt_tools_diagnostic::Diagnostic<File>,
     source: &'a Option<String>,
     file_filter: &'a File,
 ) -> impl Iterator<Item = ls_types::Diagnostic> + 'a {
-    let rope = crate::salsa::rope(db, *file_filter)
+    let rope = dt_tools_lowering::rope(db, *file_filter)
         .as_ref()
         .expect("file should exist");
 

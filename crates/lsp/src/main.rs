@@ -2,6 +2,10 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 use ::salsa::Setter;
 use camino::{Utf8Path, Utf8PathBuf};
+use dt_tools_lowering::{
+    db::{BaseDatabase, BaseDb},
+    includes::IncludeDirs,
+};
 use dt_tools_workspace::{
     WorkspacePathFindResult,
     config::{CombinedConfig, env_config::EnvConfig, toml_config::TomlConfig},
@@ -22,21 +26,12 @@ use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 use triomphe::Arc;
 
-use crate::{
-    capabilities::ResolvedClientCapabilities,
-    err_report::Report,
-    lsp_utils::uri_to_path,
-    salsa::{
-        db::{BaseDatabase, BaseDb},
-        includes::IncludeDirs,
-    },
-};
+use crate::{capabilities::ResolvedClientCapabilities, err_report::Report, lsp_utils::uri_to_path};
 
 mod capabilities;
 mod err_report;
 mod handlers;
 mod lsp_utils;
-pub mod salsa;
 
 /// A fast map that can be sent between threads
 pub type FxDashMap<K, V> =
@@ -71,7 +66,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn root_file(&self) -> Option<crate::salsa::file::File> {
+    pub fn root_file(&self) -> Option<dt_tools_lowering::file::File> {
         let root_uri = self.root_file.lock().clone()?;
         let root_path = uri_to_path(&root_uri);
 
@@ -380,7 +375,7 @@ impl Backend {
         let diags_per_file = {
             let db = &mut *self.session.db.lock();
             let file = db.get_files().get_file(db, &root_path);
-            let (diagnostics, processed_files) = crate::salsa::compute_diagnostics(db, file);
+            let (diagnostics, processed_files) = dt_tools_lowering::compute_diagnostics(db, file);
 
             // TODO: add a source field to dt-tools-diagnostic::Diagnostic or something
             // could be like "dt-tools(lint {})"
@@ -392,7 +387,7 @@ impl Backend {
                     let path = file.path(db);
 
                     (
-                        file.uri(db),
+                        lsp_utils::file_uri(db, *file),
                         self.session.open_docs.get(path).map(|entry| entry.version),
                         diagnostics
                             .iter()

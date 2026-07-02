@@ -4,7 +4,7 @@ use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, Severity};
 use dt_tools_parser::TextRange;
 
-use crate::salsa::{db::BaseDb, file::File};
+use crate::{db::BaseDb, file::File};
 
 /// Global setting singleton
 #[salsa::input(singleton)]
@@ -73,11 +73,11 @@ mod tests {
     use camino::Utf8Path;
 
     use super::*;
-    use crate::salsa::db::BaseDb;
+    use crate::db::BaseDb;
 
     #[test]
     fn test_document_deps() {
-        let db = crate::salsa::db::BaseDatabase::default();
+        let db = crate::db::BaseDatabase::default();
         IncludeDirs::new(&db, vec![]);
 
         let file_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
