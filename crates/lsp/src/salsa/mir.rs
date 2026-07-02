@@ -1,13 +1,12 @@
-//! Dt-tool's mid-level intermediate representation (MIR) of devicetrees.
-//!
-//! Uses a flat list of definitions keyed by full path. Tree assembly and merging happens at the end.
-
 use std::fmt;
 
 use dt_tools_parser::TextRange;
 
 use crate::salsa::file::File;
 
+/// Mid-level intermediate representation of devicetrees.
+///
+/// Uses a flat list of definitions keyed by full path. Tree assembly and merging happens at the end.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Mir {
     pub definitions: Vec<MirDefinition>,

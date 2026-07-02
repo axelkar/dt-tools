@@ -470,14 +470,14 @@ fn item(p: &mut Parser) {
     } else if p.at_set(&[TokenKind::V1Directive, TokenKind::PluginDirective]) {
         p.bump();
         p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
-        m.complete(p, NodeKind::Directive);
+        m.complete(p, NodeKind::DtsDirective);
     } else if p.eat(TokenKind::DtIncludeDirective) {
         // TODO: only match this at root
         // When an error is emitted, hint that include directives aren't supported outside the top
         // level
 
         p.expect(TokenKind::String);
-        m.complete(p, NodeKind::Directive);
+        m.complete(p, NodeKind::DtsDirective);
     } else if p.eat(TokenKind::MemreserveDirective) {
         let m_params = p.start();
         p.expect(TokenKind::Number);
@@ -485,7 +485,7 @@ fn item(p: &mut Parser) {
         m_params.complete(p, NodeKind::DirectiveArguments);
 
         p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
-        m.complete(p, NodeKind::Directive);
+        m.complete(p, NodeKind::DtsDirective);
     } else if p.at_set(&[
         TokenKind::DeleteNodeDirective,
         TokenKind::DeletePropertyDirective,
@@ -502,7 +502,7 @@ fn item(p: &mut Parser) {
         m_params.complete(p, NodeKind::DirectiveArguments);
 
         p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
-        m.complete(p, NodeKind::Directive);
+        m.complete(p, NodeKind::DtsDirective);
     } else {
         p.error().bump().complete(m).msg_expected().emit();
     }
@@ -638,9 +638,9 @@ pub(super) fn entry_name(p: &mut Parser) {
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::{Entrypoint, parse};
-
     use expect_test::{Expect, ExpectFile, expect, expect_file};
+
+    use crate::parser::{Entrypoint, parse};
 
     #[track_caller]
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
@@ -1030,22 +1030,22 @@ Tree:
                 Tree:
                 SourceFile@0..100
                   Whitespace@0..1 "\n"
-                  Directive@1..10
+                  DtsDirective@1..10
                     V1Directive@1..9 "/dts-v1/"
                     Semicolon@9..10 ";"
                   Whitespace@10..11 "\n"
-                  Directive@11..20
+                  DtsDirective@11..20
                     PluginDirective@11..19 "/plugin/"
                     Semicolon@19..20 ";"
                   Whitespace@20..21 "\n"
-                  Directive@21..45
+                  DtsDirective@21..45
                     DeleteNodeDirective@21..34 "/delete-node/"
                     Whitespace@34..35 " "
                     DirectiveArguments@35..44
                       Name@35..44 "node-name"
                     Semicolon@44..45 ";"
                   Whitespace@45..46 "\n"
-                  Directive@46..67
+                  DtsDirective@46..67
                     DeleteNodeDirective@46..59 "/delete-node/"
                     Whitespace@59..60 " "
                     DirectiveArguments@60..66
@@ -1054,7 +1054,7 @@ Tree:
                         Name@61..66 "label"
                     Semicolon@66..67 ";"
                   Whitespace@67..68 "\n"
-                  Directive@68..99
+                  DtsDirective@68..99
                     MemreserveDirective@68..80 "/memreserve/"
                     Whitespace@80..81 " "
                     DirectiveArguments@81..98

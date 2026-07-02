@@ -11,14 +11,13 @@ use clap::{
         styling::{AnsiColor, Style},
     },
 };
-use tracing_subscriber::filter::LevelFilter;
-
 use dt_tools_workspace::{
     Workspace, WorkspacePathFindResult,
     config::{
         CombinedConfig, cli_config::CliConfig, env_config::EnvConfig, toml_config::TomlConfig,
     },
 };
+use tracing_subscriber::filter::LevelFilter;
 
 fn styles() -> Styles {
     Styles::styled()

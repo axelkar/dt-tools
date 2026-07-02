@@ -244,9 +244,8 @@ impl<'t, 'input> Source<'t, 'input> {
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer::Lexer;
-
     use super::*;
+    use crate::lexer::Lexer;
 
     #[track_caller]
     fn expect_next_token_text(source: &mut Source, expected: &str) {

@@ -1,8 +1,8 @@
-use itertools::Itertools;
 use std::borrow::Cow;
 
-use super::{Marker, Parser};
+use itertools::Itertools;
 
+use super::{Marker, Parser};
 use crate::{
     TextRange,
     cst::NodeKind,

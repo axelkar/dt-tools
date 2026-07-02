@@ -143,8 +143,9 @@ pub fn find_select(
 mod tests {
     use std::path::PathBuf;
 
-    use super::*;
     use dt_tools_parser::ast;
+
+    use super::*;
 
     fn compile_example(example: &str, binding_schema: &BindingSchema) {
         // Hack for examples that already have root nodes like simple-framebuffer.yaml

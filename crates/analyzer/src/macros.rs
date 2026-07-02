@@ -759,9 +759,10 @@ fn stringify(input: &str) -> String {
 mod tests {
     use std::fmt::Write;
 
-    use super::*;
     use expect_test::{Expect, expect};
     use pretty_assertions::assert_eq;
+
+    use super::*;
 
     #[test]
     fn test_stringify() {

@@ -2,7 +2,7 @@ Errors: []
 
 Tree:
 SourceFile@0..582
-  Directive@0..9
+  DtsDirective@0..9
     V1Directive@0..8 "/dts-v1/"
     Semicolon@8..9 ";"
   Whitespace@9..11 "\n\n"

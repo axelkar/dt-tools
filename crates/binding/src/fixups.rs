@@ -17,9 +17,8 @@
 
 use serde_yaml::{Mapping, Value};
 
-use crate::fixups::types::ty_eq;
-
 use self::types::{is_int, is_string};
+use crate::fixups::types::ty_eq;
 
 mod types {
     use serde_yaml::{Mapping, Value};

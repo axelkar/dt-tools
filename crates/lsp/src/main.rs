@@ -1,29 +1,36 @@
+use std::net::{Ipv4Addr, SocketAddr};
+
 use ::salsa::Setter;
 use camino::{Utf8Path, Utf8PathBuf};
-use dt_tools_workspace::WorkspacePathFindResult;
-use dt_tools_workspace::config::CombinedConfig;
-use dt_tools_workspace::config::env_config::EnvConfig;
-use dt_tools_workspace::config::toml_config::TomlConfig;
-use std::net::{Ipv4Addr, SocketAddr};
-use tokio::{net::TcpListener, sync::Mutex};
-use tower_lsp_server::ls_types::{
-    DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
-    InitializeResult, InitializedParams, MessageType, OneOf, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkspaceFolder,
-    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
+use dt_tools_workspace::{
+    WorkspacePathFindResult,
+    config::{CombinedConfig, env_config::EnvConfig, toml_config::TomlConfig},
 };
-use tower_lsp_server::{Client, LanguageServer, LspService, Server};
+use tokio::{net::TcpListener, sync::Mutex};
+use tower_lsp_server::{
+    Client, LanguageServer, LspService, Server,
+    ls_types::{
+        DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
+        DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams,
+        GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
+        InitializeResult, InitializedParams, MessageType, OneOf, ServerCapabilities, ServerInfo,
+        TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkspaceFolder,
+        WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
+    },
+};
 use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::EnvFilter;
 use triomphe::Arc;
 
-use crate::capabilities::ResolvedClientCapabilities;
-use crate::err_report::Report;
-use crate::lsp_utils::uri_to_path;
-use crate::salsa::db::{BaseDatabase, BaseDb};
-use crate::salsa::includes::IncludeDirs;
+use crate::{
+    capabilities::ResolvedClientCapabilities,
+    err_report::Report,
+    lsp_utils::uri_to_path,
+    salsa::{
+        db::{BaseDatabase, BaseDb},
+        includes::IncludeDirs,
+    },
+};
 
 mod capabilities;
 mod err_report;
@@ -210,7 +217,6 @@ impl LanguageServer for Backend {
                 }),
                 //completion_provider: (),
                 //signature_help_provider: (),
-                // definition_provider: (), // TODO: refer to kernel Documentation/bindings ?!?
                 definition_provider: Some(OneOf::Left(true)),
                 // implementation_provider: (), // TODO: for labels
                 // references_provider: (), // TODO: for labels
@@ -226,7 +232,7 @@ impl LanguageServer for Backend {
                 //document_link_provider: (),
                 //color_provider: (),
                 //folding_range_provider: (),
-                //declaration_provider: (),
+                //declaration_provider: (), // TODO: go to devicetree binding file
                 //execute_command_provider: (),
                 //linked_editing_range_provider: (),
                 //inline_value_provider: (),

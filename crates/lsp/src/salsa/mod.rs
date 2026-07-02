@@ -4,15 +4,15 @@ use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
 use dt_tools_parser::TextRange;
 
-use crate::salsa::{macros::env::InternedKey, preprocessor::PpEvalFileResult};
+use crate::salsa::{lowering::LoweredFile, macros::env::InternedKey};
 
 pub mod db;
 mod expr_eval;
 pub mod file;
 pub mod includes;
+pub mod lowering;
 pub mod macros;
 pub mod mir;
-pub mod preprocessor;
 
 #[salsa::tracked]
 pub struct Parse<'db> {
@@ -141,7 +141,7 @@ pub fn emit_parse_errors(
 #[salsa::tracked]
 fn check_mir_post<'db>(
     db: &'db dyn db::BaseDb,
-    result: PpEvalFileResult<'db>,
+    result: LoweredFile<'db>,
 ) -> Vec<Diagnostic<file::File>> {
     let mut diagnostics = Vec::new();
 
@@ -253,16 +253,15 @@ pub fn compute_diagnostics<'db>(
     }
     */
 
-    let mut processed_files =
-        if let Some(result) = preprocessor::preprocessor_eval_root_file(db, root_file) {
-            diagnostics.extend_from_slice(result.diagnostics(db));
+    let mut processed_files = if let Some(result) = lowering::lower_root_file(db, root_file) {
+        diagnostics.extend_from_slice(result.diagnostics(db));
 
-            diagnostics.extend_from_slice(&check_mir_post(db, result));
+        diagnostics.extend_from_slice(&check_mir_post(db, result));
 
-            result.processed_files(db).clone()
-        } else {
-            Vec::new()
-        };
+        result.processed_files(db).clone()
+    } else {
+        Vec::new()
+    };
 
     processed_files.push(root_file);
 
@@ -275,9 +274,8 @@ pub fn compute_diagnostics<'db>(
 mod tests {
     use camino::Utf8Path;
 
-    use crate::salsa::db::BaseDb;
-
     use super::*;
+    use crate::salsa::db::BaseDb;
 
     #[test]
     fn test_parse_file() {

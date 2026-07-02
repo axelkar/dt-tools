@@ -72,9 +72,8 @@ pub fn document_deps(db: &dyn BaseDb, file: File) -> Result<DocumentDeps<'_>, ()
 mod tests {
     use camino::Utf8Path;
 
-    use crate::salsa::db::BaseDb;
-
     use super::*;
+    use crate::salsa::db::BaseDb;
 
     #[test]
     fn test_document_deps() {

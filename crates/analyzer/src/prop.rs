@@ -253,8 +253,9 @@ pub enum ValueFromAstError {
     /// AST is missing items
     MissingAst,
 }
-use crate::string::StringParseError;
 use ValueFromAstError::MissingAst;
+
+use crate::string::StringParseError;
 
 impl Value {
     pub fn into_custom_value(self) -> Vec<CustomValue> {

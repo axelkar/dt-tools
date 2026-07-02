@@ -16,12 +16,11 @@ use dt_tools_parser::{
 use enum_as_inner::EnumAsInner;
 use rustc_hash::FxHashMap;
 
+use super::outline::{AnalyzedToplevel, LabelDef};
 use crate::{
     macros::{MacroDefinition, substitute_macro_ast},
     resolved_prop::Value,
 };
-
-use super::outline::{AnalyzedToplevel, LabelDef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedInclude<'a> {

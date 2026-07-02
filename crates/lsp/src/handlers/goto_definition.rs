@@ -1,8 +1,3 @@
-use crate::{
-    lsp_utils::position_to_offset,
-    salsa::{db::BaseDb, includes::document_deps},
-    uri_to_path,
-};
 use dt_tools_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
@@ -13,6 +8,13 @@ use tower_lsp_server::ls_types::{
     GotoDefinitionParams, GotoDefinitionResponse, Location, MessageType, Position, Range,
 };
 
+use crate::{
+    lsp_utils::position_to_offset,
+    salsa::{db::BaseDb, includes::document_deps},
+    uri_to_path,
+};
+
+// TODO: go to phandle, macro definition or other definitions of the same node/property
 pub async fn goto_definition(
     state: &crate::Backend,
     params: GotoDefinitionParams,

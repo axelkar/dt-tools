@@ -18,8 +18,7 @@ pub mod lints {
     //!
     //! Currently all lints in here are applied by the [`default_lint`](crate::default_lint) function
     //! used by the LSP.
-    pub use crate::dtc_style::DtcStyle;
-    pub use crate::kernel_coding_style::KernelCodingStyle;
+    pub use crate::{dtc_style::DtcStyle, kernel_coding_style::KernelCodingStyle};
 }
 
 // TODO: something like this:

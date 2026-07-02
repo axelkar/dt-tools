@@ -1,6 +1,5 @@
-use crate::{cst::NodeKind, lexer::TokenKind};
-
 use super::ParseError;
+use crate::{cst::NodeKind, lexer::TokenKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Event {

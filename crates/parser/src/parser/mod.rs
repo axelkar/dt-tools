@@ -5,19 +5,18 @@
 
 use std::sync::Arc;
 
+pub(crate) use marker::{CompletedMarker, Marker};
+use smallvec::SmallVec;
+#[cfg(feature = "grammar-tracing")]
+use tracing::debug;
+
+use self::{event::Event, source::Source};
 use crate::{
     TextRange, ast,
     cst::{GreenNode, NodeKind, RedNode},
     grammar,
     lexer::{Lexer, TokenKind},
 };
-
-use self::event::Event;
-use self::source::Source;
-pub(crate) use marker::{CompletedMarker, Marker};
-use smallvec::SmallVec;
-#[cfg(feature = "grammar-tracing")]
-use tracing::debug;
 
 mod errors;
 mod event;
@@ -536,10 +535,8 @@ pub mod visualizer {
 mod tests {
     use expect_test::{Expect, expect};
 
-    use super::sink::Sink;
+    use super::{sink::Sink, *};
     use crate::{cst::NodeKind, lexer::Lexer};
-
-    use super::*;
 
     #[track_caller]
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]

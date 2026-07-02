@@ -12,8 +12,7 @@
 
 use std::{fmt, sync::Arc};
 
-use crate::TextRange;
-use crate::lexer::TokenKind;
+use crate::{TextRange, lexer::TokenKind};
 
 /// The kind of a CST node
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,7 +39,7 @@ pub enum NodeKind {
     /// Node wrapping a parse error
     ParseError,
     /// Node wrapping a DTS directive
-    Directive,
+    DtsDirective,
     /// Node wrapping a DTS directive's arguments
     DirectiveArguments,
     /// Preprocessor conditional, which contains the preprocessor directives and the branches.

@@ -2,10 +2,10 @@
 //!
 //! Use `--assert` in argv[2] to `pretty_assertions::assert_eq`
 
+use std::{process::Command, time::Instant};
+
 use dt_tools_parser::ast::SourceFile;
 use owo_colors::{OwoColorize as _, colors::xterm::Gray};
-use std::process::Command;
-use std::time::Instant;
 
 fn remove_first<T>(vec: &mut Vec<T>) -> Option<T> {
     if vec.is_empty() {

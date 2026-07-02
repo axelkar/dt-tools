@@ -1,30 +1,43 @@
 use std::fmt::Write;
 
-use crate::{
-    lsp_utils::{offset_to_position, position_to_offset},
-    salsa::{
-        db::BaseDb,
-        file::File,
-        mir::{MirDefinition, MirDefinitionValue},
-        preprocessor::preprocessor_eval_root_file,
-    },
-    uri_to_path,
-};
 use dt_tools_diagnostic::Span;
-use dt_tools_parser::{
-    TextRange,
-    ast::{self, AstNode},
-};
+use dt_tools_parser::{TextRange, ast::AstNode};
 use itertools::Itertools;
 use tower_lsp_server::ls_types::{
     Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Range,
 };
 
-fn _node_definition(node: &ast::DtNode, src: &str) -> String {
-    let path = node.path(src).join("/");
+use crate::{
+    lsp_utils::{offset_to_position, position_to_offset},
+    salsa::{
+        db::BaseDb,
+        file::File,
+        lowering::lower_root_file,
+        mir::{MirDefinition, MirDefinitionValue},
+    },
+    uri_to_path,
+};
 
-    // TODO: get documentation by `compatible`
-    format!("node `/{path}`")
+fn make_hover_info(
+    db: &dyn BaseDb,
+    file: crate::salsa::file::File,
+    markdown: String,
+    text_range: Option<TextRange>,
+) -> Hover {
+    Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: markdown,
+        }),
+        range: text_range.and_then(|text_range| {
+            crate::salsa::rope(db, file).as_ref().and_then(|rope| {
+                Some(Range::new(
+                    offset_to_position(text_range.start, rope)?,
+                    offset_to_position(text_range.end, rope)?,
+                ))
+            })
+        }),
+    }
 }
 
 pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
@@ -48,12 +61,14 @@ pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
     let mir_definition_section = mir_definition_section(db, root_file, file, offset);
     let env_section = env_section(db, root_file, file, offset);
     let include_section = include_section(db, root_file, file, offset);
+    let phandle_section = phandle_section(db, root_file, file, offset);
 
     let section_strs = [
         cst_tree_section.as_ref(),
         mir_definition_section.as_ref(),
         env_section.as_ref(),
         include_section.as_ref(),
+        phandle_section.as_ref(),
     ]
     .into_iter()
     .flatten()
@@ -140,7 +155,7 @@ fn mir_definition_section(
         s
     }
 
-    let mir = preprocessor_eval_root_file(db, root_file)?.mir(db);
+    let mir = lower_root_file(db, root_file)?.mir(db);
 
     // TODO: unresolved_extensions
     let matching_defs = mir
@@ -158,8 +173,9 @@ fn mir_definition_section(
         .filter(|def| def.path == most_precise.path)
         .collect_vec();
 
-    let mut already_defined = false;
+    // TODO: get e.g. binding documentation using `compatible`
 
+    let mut already_defined = false;
     Some((
         format!(
             "MIR: {}\n\n- {}",
@@ -203,7 +219,7 @@ fn env_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
-    let result = preprocessor_eval_root_file(db, root_file)?;
+    let result = lower_root_file(db, root_file)?;
 
     let mut env = result.env_after(db).to_mut();
     env.flatten_ancestors(db);
@@ -244,7 +260,7 @@ fn include_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
-    let result = preprocessor_eval_root_file(db, root_file)?;
+    let result = lower_root_file(db, root_file)?;
 
     let include = result
         .includes(db)
@@ -257,24 +273,13 @@ fn include_section(
     ))
 }
 
-fn make_hover_info(
+fn phandle_section(
     db: &dyn BaseDb,
-    file: crate::salsa::file::File,
-    markdown: String,
-    text_range: Option<TextRange>,
-) -> Hover {
-    Hover {
-        contents: HoverContents::Markup(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: markdown,
-        }),
-        range: text_range.and_then(|text_range| {
-            crate::salsa::rope(db, file).as_ref().and_then(|rope| {
-                Some(Range::new(
-                    offset_to_position(text_range.start, rope)?,
-                    offset_to_position(text_range.end, rope)?,
-                ))
-            })
-        }),
-    }
+    root_file: File,
+    file: File,
+    offset: usize,
+) -> Option<(String, TextRange)> {
+    // TODO
+
+    None
 }

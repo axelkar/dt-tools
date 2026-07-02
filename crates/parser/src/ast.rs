@@ -41,8 +41,7 @@
 //! use dt_tools_parser::ast::HasName;
 //! assert!(ast.name().is_some())
 //! ```
-use std::borrow::Cow;
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use either::Either;
 use enum_as_inner::EnumAsInner;
@@ -285,8 +284,8 @@ impl SourceFile {
         self.syntax.children().filter_map(ToplevelItem::cast_either)
     }
     /// Returns an iterator over direct [`Directive`] children.
-    pub fn directives(&self) -> impl Iterator<Item = Directive> + '_ {
-        self.syntax.child_nodes().filter_map(Directive::cast)
+    pub fn directives(&self) -> impl Iterator<Item = DtsDirective> + '_ {
+        self.syntax.child_nodes().filter_map(DtsDirective::cast)
     }
     /// Returns an iterator over direct [`DtNode`] children.
     pub fn nodes(&self) -> impl Iterator<Item = DtNode> + '_ {
@@ -319,7 +318,7 @@ define_ast_node! {
     ///
     /// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#compiler-directives
     // TODO: directive parameters
-    Directive: Directive;
+    DtsDirective: DtsDirective;
 
     /// Node wrapping a DTS directive's arguments.
     ///
@@ -327,7 +326,7 @@ define_ast_node! {
     DirectiveArguments: DirectiveArguments;
 }
 
-impl Directive {
+impl DtsDirective {
     /// Returns the kind of the first token with [`TokenKind::is_dts_directive`] if one exists.
     #[must_use]
     pub fn kind(&self) -> Option<TokenKind> {
@@ -581,8 +580,8 @@ impl DtNode {
     }
 
     /// Returns an iterator over direct [`Directive`] children.
-    pub fn directives(&self) -> impl Iterator<Item = Directive> + '_ {
-        self.syntax.child_nodes().filter_map(Directive::cast)
+    pub fn directives(&self) -> impl Iterator<Item = DtsDirective> + '_ {
+        self.syntax.child_nodes().filter_map(DtsDirective::cast)
     }
 
     /// Returns an iterator over direct [`NodeItem`] children.
@@ -896,7 +895,7 @@ pub enum ToplevelItem {
     /// A DTS directive
     ///
     /// e.g. `/include/ file.dts;`
-    Directive(Directive),
+    Directive(DtsDirective),
     /// A preprocessor conditional.
     PreprocessorConditional(PreprocessorConditional),
     /// A preprocessor directive
@@ -908,7 +907,7 @@ impl AstNodeOrToken for ToplevelItem {
     fn cast_node(syntax: Arc<RedNode>) -> Option<Self> {
         match syntax.green.kind {
             NodeKind::DtNode => Some(Self::Node(DtNode { syntax })),
-            NodeKind::Directive => Some(Self::Directive(Directive { syntax })),
+            NodeKind::DtsDirective => Some(Self::Directive(DtsDirective { syntax })),
             NodeKind::PreprocessorConditional => {
                 Some(Self::PreprocessorConditional(PreprocessorConditional {
                     syntax,
@@ -998,14 +997,14 @@ impl AstNode for Expr {
 pub enum NodeItem {
     DtProperty(DtProperty),
     DtNode(DtNode),
-    Directive(Directive),
+    Directive(DtsDirective),
 }
 impl AstNode for NodeItem {
     fn cast(syntax: Arc<RedNode>) -> Option<Self> {
         match syntax.green.kind {
             NodeKind::DtProperty => Some(Self::DtProperty(DtProperty { syntax })),
             NodeKind::DtNode => Some(Self::DtNode(DtNode { syntax })),
-            NodeKind::Directive => Some(Self::Directive(Directive { syntax })),
+            NodeKind::DtsDirective => Some(Self::Directive(DtsDirective { syntax })),
             _ => None,
         }
     }

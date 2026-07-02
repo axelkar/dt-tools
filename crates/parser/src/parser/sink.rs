@@ -2,14 +2,12 @@
 
 use std::{borrow::Cow, mem, sync::Arc};
 
+use super::{Parse, ParseError, WrappedLexError, event::Event};
 // TODO: && and || as joined https://nnethercote.github.io/2022/10/05/quirks-of-rusts-token-representation.html
-
 use crate::{
     cst::{GreenItem, GreenNode, GreenToken, NodeKind, TokenText},
     lexer::{Token, TokenKind},
 };
-
-use super::{Parse, ParseError, WrappedLexError, event::Event};
 
 pub(crate) struct Sink<'t, 'input> {
     /// The incoming tokens for trivia handling.

@@ -1,7 +1,8 @@
+use std::path::PathBuf;
+
 use anyhow::{Context as _, anyhow};
 use fluent_uri::Uri;
 use serde_json::Value;
-use std::path::PathBuf;
 
 // TODO: "workspace dirs", read all the $id's and use here
 // TODO(axka 2025-05-14): what does $id mean?

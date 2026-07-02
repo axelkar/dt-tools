@@ -1,5 +1,7 @@
-use std::fmt::{Debug, Display};
-use std::ops::Range;
+use std::{
+    fmt::{Debug, Display},
+    ops::Range,
+};
 
 use crate::Span;
 
