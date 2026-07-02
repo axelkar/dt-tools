@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
+use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
 use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstToken, HasLabels, HasMacroInvocation, HasName, HasUnitAddress},
@@ -181,13 +181,23 @@ pub(crate) fn collect_labels(
             &label_ast,
         ) {
             // Check for duplicate labels (DTC: no duplicates globally).
-            if ctx.env.get_label_path(ctx.db, &label_name).is_some() {
+            if let Some((old_path, span)) = ctx.env.get_label(ctx.db, &label_name)
+                && old_path != node_path
+            {
                 // TODO: MultiSpan & cross-file diagnostics
-                ctx.diag.emit(Diagnostic::new(
-                    label_ast.syntax().text_range().within_file(ctx.file),
-                    Cow::Owned(format!("Duplicate label `{label_name}`")),
-                    Severity::Error,
-                ));
+                ctx.diag.emit(Diagnostic {
+                    span: MultiSpan {
+                        primary_spans: vec![label_ast.syntax().text_range().within_file(ctx.file)],
+                        span_labels: vec![SpanLabel {
+                            span: *span,
+                            msg: Cow::Owned(format!(
+                                "Previous definition of label `{label_name}` here"
+                            )),
+                        }],
+                    },
+                    msg: Cow::Owned(format!("Duplicate label `{label_name}`")),
+                    severity: Severity::Warn,
+                });
             } else {
                 ctx.env.own_label_map.insert(
                     label_name.clone(),

@@ -134,11 +134,6 @@ pub(crate) fn lower_file<'db>(
         );
     }
 
-    super::tag_diagnostics(
-        &mut diagnostics,
-        concat!(module_path!(), "::preprocessor_eval_file"),
-    );
-
     Some(LoweredFile::new(
         db,
         env.into_immut(db),
@@ -443,7 +438,7 @@ mod tests {
                 property = CellList([U32(1)]) /main_prop /main.dts 35..51
 
                 --- errors ---
-                Error 16..21: Macro `BOGUS` is not defined [dt_tools_lowering::lowering::preprocessor_eval_file] [dt_tools_lowering::lowering::preprocessor_eval_file]
+                Error 16..21: Macro `BOGUS` is not defined
             "#]],
         );
     }
@@ -624,8 +619,8 @@ mod tests {
                 property =  /prop2 /main.dts 29..41
 
                 --- errors ---
-                Error 23..26: Macro `VAL` is not defined [dt_tools_lowering::lowering::preprocessor_eval_file]
-                Error 37..40: Macro `VAL` is not defined [dt_tools_lowering::lowering::preprocessor_eval_file]
+                Error 23..26: Macro `VAL` is not defined
+                Error 37..40: Macro `VAL` is not defined
             "#]],
         );
     }
@@ -641,7 +636,7 @@ mod tests {
             expect![[r#"
 
                 --- errors ---
-                Error 11..17: Label not found: &BOGUS [dt_tools_lowering::lowering::preprocessor_eval_file]
+                Error 11..17: Label not found: &BOGUS
             "#]],
         );
     }
@@ -680,7 +675,7 @@ mod tests {
                 node   /baz /main.dts 35..47
 
                 --- errors ---
-                Error 35..39: Duplicate label `foo` [dt_tools_lowering::lowering::preprocessor_eval_file]
+                Warn 35..39: Duplicate label `foo`
             "#]],
         );
     }
@@ -698,7 +693,7 @@ mod tests {
                 property = CellList([]) /prop /main.dts 15..34
 
                 --- errors ---
-                Error 23..32: number 4294967296 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer [dt_tools_lowering::lowering::preprocessor_eval_file]
+                Error 23..32: number 4294967296 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer
             "#]],
         );
     }

@@ -16,7 +16,7 @@ use super::{
 use crate::{
     file::File,
     lowering::{
-        dt_node::{build_path, process_dt_node},
+        dt_node::{build_path, get_name_and_unit_addr, process_dt_node},
         lower_file,
         preprocessor::pp_cond_directive_eval,
     },
@@ -290,8 +290,14 @@ pub(crate) fn emit_delete_directive(
     };
 
     if kind == Some(TokenKind::DeleteNodeDirective) {
-        let target_path = if let Some(name_tok) = args.name() {
-            build_path(path_prefix, name_tok.syntax().text().as_str())
+        let target_path = if let Some(name) = get_name_and_unit_addr(
+            ctx.db,
+            ctx.env,
+            ctx.diag,
+            &mut |tr| tr.within_file(ctx.file),
+            &args,
+        ) {
+            build_path(path_prefix, &name)
         } else if let Some(phandle) = args.dt_phandle() {
             let Some(target) = lower_phandle(
                 ctx.db,
@@ -326,6 +332,40 @@ pub(crate) fn emit_delete_directive(
         } else {
             return;
         };
+
+        // TODO: this should not error (i.e. labels should only be resolved at the end):
+        // label: node {};
+        // foo = &label;
+        // /delete-node/ &label;
+        // label: anothernode {};
+
+        // TODO: better way to do this
+        // TODO: investigate DTC behavior more
+
+        // Clear the labels too
+        let mut labels = Vec::new();
+        for def in ctx
+            .mir
+            .definitions
+            .iter()
+            .rev()
+            .filter(|def| {
+                def.path.starts_with(&format!("{target_path}/")) || def.path == target_path
+            })
+            .take_while(|def| {
+                // Until previous deletion?
+                !(def.path == target_path && def.value == MirDefinitionValue::DeletedNode)
+            })
+        {
+            if let MirDefinitionValue::Node(data) = &def.value {
+                labels.extend_from_slice(&data.labels);
+            }
+        }
+        labels.dedup();
+
+        for label in labels {
+            ctx.env.own_label_map.insert(label, None);
+        }
 
         ctx.mir.definitions.push(MirDefinition {
             path: target_path,

@@ -345,6 +345,8 @@ impl DtsDirective {
     }
 }
 impl HasName for DirectiveArguments {}
+impl HasUnitAddress for DirectiveArguments {}
+impl HasMacroInvocation for DirectiveArguments {}
 impl HasDtPhandle for DirectiveArguments {}
 
 define_ast_node! {
