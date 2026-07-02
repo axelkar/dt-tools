@@ -10,6 +10,7 @@ use crate::{
     },
     uri_to_path,
 };
+use dt_tools_diagnostic::Span;
 use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode},
@@ -43,28 +44,15 @@ pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
     };
     let offset = position_to_offset(params.position, rope)?;
 
-    // TODO
     let cst_tree_section = cst_tree_section(db, file, offset);
     let mir_definition_section = mir_definition_section(db, root_file, file, offset);
-    let label_section = label_section(db, root_file, file, offset);
+    let env_section = env_section(db, root_file, file, offset);
     let include_section = include_section(db, root_file, file, offset);
-
-    if [
-        cst_tree_section.as_ref(),
-        mir_definition_section.as_ref(),
-        label_section.as_ref(),
-        include_section.as_ref(),
-    ]
-    .iter()
-    .all(Option::is_none)
-    {
-        return None;
-    }
 
     let section_strs = [
         cst_tree_section.as_ref(),
         mir_definition_section.as_ref(),
-        label_section.as_ref(),
+        env_section.as_ref(),
         include_section.as_ref(),
     ]
     .into_iter()
@@ -74,18 +62,18 @@ pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
 
     let text_range = [
         mir_definition_section.as_ref(),
-        label_section.as_ref(),
+        env_section.as_ref(),
         include_section.as_ref(),
         cst_tree_section.as_ref(),
     ]
     .into_iter()
-    .find_map(|opt| opt.map(|tup| tup.1));
+    .find_map(|opt| opt.map(|tup| tup.1))?;
 
     Some(make_hover_info(
         db,
         file,
         section_strs.join("\n---\n"),
-        text_range,
+        Some(text_range),
     ))
 }
 
@@ -126,45 +114,28 @@ fn mir_definition_section(
     ) -> String {
         let mut s: String = match &def.value {
             MirDefinitionValue::Node(mir_node_data) => format!(
-                "Node {}defined with labels `{}`",
+                "Node {}defined with labels `{}` ",
                 already_defined.then_some("re").unwrap_or_default(),
                 mir_node_data.labels.join(", ")
             ),
             MirDefinitionValue::Property(mir_property_data) => format!(
-                "Property {}defined with values `{}`",
+                "Property {}defined with values `{}` ",
                 already_defined.then_some("re").unwrap_or_default(),
                 mir_property_data.values.iter().join(", ")
             ),
-            MirDefinitionValue::DeletedNode => "Node deleted".to_owned(),
-            MirDefinitionValue::DeletedProperty => "Property deleted".to_owned(),
+            MirDefinitionValue::DeletedNode => "Node deleted ".to_owned(),
+            MirDefinitionValue::DeletedProperty => "Property deleted ".to_owned(),
         };
         *already_defined = true;
 
         // Provenance
-        let is_here = def == most_precise;
-        let shorter_path = def.provenance.file.shorter_path(db);
-        if is_here {
-            s.push_str(" _here_");
-        } else if let Some((line, column)) = def
-            .provenance
-            .file
-            .line_column(db, def.provenance.text_range.start)
-        {
-            // Line and column are 0-based in LSP but 1-based in text and file:// links
-            let line = line + 1;
-            let column = column + 1;
-
-            let uri = def.provenance.file.uri(db);
-            let uri = uri.as_str();
-
-            write!(
-                &mut s,
-                " [`{shorter_path}:{line}:{column}`]({uri}#L{line}:{column})"
-            )
-            .ok();
-        } else {
-            write!(&mut s, " `{shorter_path}`").ok();
-        }
+        let is_here = def.provenance == most_precise.provenance;
+        fmt_span(
+            db,
+            &def.provenance.text_range.within_file(def.provenance.file),
+            is_here,
+            &mut s,
+        );
 
         s
     }
@@ -203,7 +174,30 @@ fn mir_definition_section(
     ))
 }
 
-fn label_section(
+fn fmt_span(db: &dyn BaseDb, span: &Span<File>, is_here: bool, s: &mut String) {
+    let shorter_path = span.file.shorter_path(db);
+    if is_here {
+        s.push_str("_here_");
+    } else if let Some((line, column)) = span.file.line_column(db, span.text_range.start) {
+        // Line and column are 0-based in LSP but 1-based in text and file:// links
+        let line = line + 1;
+        let column = column + 1;
+
+        let uri = span.file.uri(db);
+        let uri = uri.as_str();
+
+        write!(
+            s,
+            "at [`{shorter_path}:{line}:{column}`]({uri}#L{line}:{column})"
+        )
+        .ok();
+    } else {
+        write!(s, "at `{shorter_path}`").ok();
+    }
+}
+
+/// Shows env definitions
+fn env_section(
     db: &dyn BaseDb,
     root_file: File,
     file: File,
@@ -211,8 +205,37 @@ fn label_section(
 ) -> Option<(String, TextRange)> {
     let result = preprocessor_eval_root_file(db, root_file)?;
 
-    //result.env_after(db).get_label
-    None
+    let mut env = result.env_after(db).to_mut();
+    env.flatten_ancestors(db);
+
+    let macro_ = env
+        .own_macro_map
+        .iter()
+        .filter_map(|(key, opt)| Some((key, opt.as_ref()?)))
+        .find(|(_, (_, span))| span.file == file && span.text_range.byte_range().contains(&offset))
+        .map(|(name, (_def, span))| (format!("Macro `{name}`"), span.text_range));
+
+    let label = env
+        .own_label_map
+        .iter()
+        .filter_map(|(key, opt)| Some((key, opt.as_ref()?)))
+        .find(|(_, (_, span))| span.file == file && span.text_range.byte_range().contains(&offset))
+        .map(|(name, (_path, span))| (format!("Label `{name}`"), span.text_range));
+
+    let text_range = macro_
+        .as_ref()
+        .map(|tup| tup.1)
+        .or_else(|| label.as_ref().map(|tup| tup.1))?;
+
+    Some((
+        [macro_, label]
+            .into_iter()
+            .flatten()
+            .map(|tup| tup.0)
+            .collect_vec()
+            .join("\n---\n"),
+        text_range,
+    ))
 }
 
 fn include_section(

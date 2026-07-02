@@ -433,7 +433,9 @@ fn handle_toplevel_item(
                 ));
             }
             TokenKind::DefineDirective => match MacroDefinition::parse(dir.syntax().text()) {
-                Ok(parsed) => ctx.env.insert_macro(parsed),
+                Ok(parsed) => ctx
+                    .env
+                    .insert_macro(parsed, text_range.within_file(ctx.file)),
                 Err(err) => {
                     ctx.diag.emit(Diagnostic::new(
                         if let Some(local_range) = err.text_range() {
@@ -521,7 +523,7 @@ fn handle_toplevel_item(
                     text_range.within_file(ctx.file),
                     Cow::Owned(format!(
                         "`#error`: {args:?}, defined {args:?}={}",
-                        ctx.env.get_macro(ctx.db, &args).is_some()
+                        ctx.env.get_macro_def(ctx.db, &args).is_some()
                     )),
                     Severity::Error,
                 ));
@@ -690,7 +692,7 @@ fn process_dt_node(
         let target_path = match &target {
             MirPhandleTarget::Label(name) => ctx
                 .env
-                .get_label(ctx.db, name)
+                .get_label_path(ctx.db, name)
                 .map(std::borrow::ToOwned::to_owned),
             MirPhandleTarget::Path(path) => Some(path.clone()),
         };
@@ -826,7 +828,7 @@ fn collect_labels(
             &label_ast,
         ) {
             // Check for duplicate labels (DTC: no duplicates globally).
-            if ctx.env.get_label(ctx.db, &label_name).is_some() {
+            if ctx.env.get_label_path(ctx.db, &label_name).is_some() {
                 // TODO: MultiSpan & cross-file diagnostics
                 ctx.diag.emit(Diagnostic::new(
                     label_ast.syntax().text_range().within_file(ctx.file),
@@ -834,9 +836,13 @@ fn collect_labels(
                     Severity::Error,
                 ));
             } else {
-                ctx.env
-                    .own_label_map
-                    .insert(label_name.clone(), Some(node_path.to_owned()));
+                ctx.env.own_label_map.insert(
+                    label_name.clone(),
+                    Some((
+                        node_path.to_owned(),
+                        label_ast.syntax().text_range().within_file(ctx.file),
+                    )),
+                );
                 labels.push(label_name);
             }
         }
@@ -900,7 +906,7 @@ fn emit_delete_directive(
 
             match &target {
                 MirPhandleTarget::Label(name) => {
-                    if let Some(path) = ctx.env.get_label(ctx.db, name) {
+                    if let Some(path) = ctx.env.get_label_path(ctx.db, name) {
                         path.to_owned()
                     } else {
                         // Couldn't resolve it.

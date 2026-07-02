@@ -37,7 +37,7 @@ pub fn substitute_macro_tok<'db>(
         ),
     };
 
-    let Some(def) = env.get_macro(db, name) else {
+    let Some(def) = env.get_macro_def(db, name) else {
         let is_explicit_macro = matches!(macro_ctx, MacroCtx::Explicit(_));
         if is_explicit_macro {
             diag.emit(Diagnostic::new(

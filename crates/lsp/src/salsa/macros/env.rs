@@ -1,8 +1,9 @@
 // TODO: not MacroEnv anymore; move file.
 use dt_tools_analyzer::macros::MacroDefinition;
+use dt_tools_diagnostic::Span;
 use rustc_hash::FxHashMap;
 
-use crate::salsa::db::BaseDb;
+use crate::salsa::{db::BaseDb, file::File};
 
 /// Interned string for a key in [`TrackedMapEnv`].
 #[salsa::interned]
@@ -18,12 +19,12 @@ pub struct TrackedMapEnv<'db> {
     /// Map of defined macros. Inner `Option` so it can be overriden over `parent` to `None`.
     #[tracked]
     #[returns(ref)]
-    own_macro_map: FxHashMap<String, Option<MacroDefinition>>,
+    own_macro_map: FxHashMap<String, Option<(MacroDefinition, Span<File>)>>,
 
     /// Map of defined labels to paths. Inner `Option` so it can be overriden over `parent` to `None`.
     #[tracked]
     #[returns(ref)]
-    own_label_map: FxHashMap<String, Option<String>>,
+    own_label_map: FxHashMap<String, Option<(String, Span<File>)>>,
 }
 
 #[salsa::tracked]
@@ -38,7 +39,11 @@ impl<'db> TrackedMapEnv<'db> {
     /// We have to clone the output value because it has to be stored in the Salsa database without
     /// referring to [`TrackedMapEnv::own_map`].
     #[salsa::tracked(returns(as_ref))]
-    pub fn get_macro(self, db: &'db dyn BaseDb, name: InternedKey<'db>) -> Option<MacroDefinition> {
+    pub fn get_macro(
+        self,
+        db: &'db dyn BaseDb,
+        name: InternedKey<'db>,
+    ) -> Option<(MacroDefinition, Span<File>)> {
         let span = profiling::tracy_client::span!("TrackedMapEnv::get_macro");
         span.emit_text(name.text(db));
 
@@ -59,7 +64,36 @@ impl<'db> TrackedMapEnv<'db> {
 
     /// See [`Self::get_macro`] for details about Salsa integration.
     #[salsa::tracked(returns(as_ref))]
-    pub fn get_label(self, db: &'db dyn BaseDb, name: InternedKey<'db>) -> Option<String> {
+    pub fn get_macro_def(
+        self,
+        db: &'db dyn BaseDb,
+        name: InternedKey<'db>,
+    ) -> Option<MacroDefinition> {
+        let span = profiling::tracy_client::span!("TrackedMapEnv::get_macro_def");
+        span.emit_text(name.text(db));
+
+        tracing::trace!(
+            name = name.text(db),
+            self = ?self.0,
+            self.parent = ?self.parent(db).map(|parent| parent.0),
+            "get_macro",
+        );
+
+        self.own_macro_map(db)
+            .get(name.text(db))
+            .map(|opt| opt.as_ref().map(|(def, _span)| def))
+            .or_else(|| Some(self.parent(db)?.get_macro_def(db, name)))
+            .flatten() // flattening at the end makes sure own_map can override None
+            .cloned()
+    }
+
+    /// See [`Self::get_macro`] for details about Salsa integration.
+    #[salsa::tracked(returns(as_ref))]
+    pub fn get_label(
+        self,
+        db: &'db dyn BaseDb,
+        name: InternedKey<'db>,
+    ) -> Option<(String, Span<File>)> {
         let span = profiling::tracy_client::span!("TrackedMapEnv::get_label");
         span.emit_text(name.text(db));
 
@@ -78,11 +112,32 @@ impl<'db> TrackedMapEnv<'db> {
             .cloned()
     }
 
+    /// See [`Self::get_macro`] for details about Salsa integration.
+    #[salsa::tracked(returns(as_ref))]
+    pub fn get_label_path(self, db: &'db dyn BaseDb, name: InternedKey<'db>) -> Option<String> {
+        let span = profiling::tracy_client::span!("TrackedMapEnv::get_label_path");
+        span.emit_text(name.text(db));
+
+        tracing::trace!(
+            name = name.text(db),
+            self = ?self.0,
+            self.parent = ?self.parent(db).map(|parent| parent.0),
+            "get_label_path",
+        );
+
+        self.own_label_map(db)
+            .get(name.text(db))
+            .map(|opt| opt.as_ref().map(|(path, _span)| path))
+            .or_else(|| Some(self.parent(db)?.get_label_path(db, name)))
+            .flatten() // flattening at the end makes sure own_label_map can override None
+            .cloned()
+    }
+
     fn clone_to_maps(
         self,
         db: &'db dyn BaseDb,
-        macro_map: &mut FxHashMap<String, Option<MacroDefinition>>,
-        label_map: &mut FxHashMap<String, Option<String>>,
+        macro_map: &mut FxHashMap<String, Option<(MacroDefinition, Span<File>)>>,
+        label_map: &mut FxHashMap<String, Option<(String, Span<File>)>>,
     ) {
         if let Some(parent) = self.parent(db) {
             parent.clone_to_maps(db, macro_map, label_map);
@@ -106,9 +161,9 @@ impl<'db> TrackedMapEnv<'db> {
 pub struct TrackedMapEnvMut<'db> {
     pub parent: Option<TrackedMapEnv<'db>>,
     /// Map of defined macros. Inner `Option` so it can be overriden over `parent` to `None`.
-    pub own_macro_map: FxHashMap<String, Option<MacroDefinition>>,
+    pub own_macro_map: FxHashMap<String, Option<(MacroDefinition, Span<File>)>>,
     /// Map of defined labels to paths. Inner `Option` so it can be overriden over `parent` to `None`.
-    pub own_label_map: FxHashMap<String, Option<String>>,
+    pub own_label_map: FxHashMap<String, Option<(String, Span<File>)>>,
 }
 
 impl<'db> TrackedMapEnvMut<'db> {
@@ -123,7 +178,11 @@ impl<'db> TrackedMapEnvMut<'db> {
     }
 
     // Gets a macro by name
-    pub fn get_macro(&self, db: &'db dyn BaseDb, name: &str) -> Option<&MacroDefinition> {
+    pub fn get_macro(
+        &self,
+        db: &'db dyn BaseDb,
+        name: &str,
+    ) -> Option<&(MacroDefinition, Span<File>)> {
         let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_macro");
         span.emit_text(name);
 
@@ -140,8 +199,26 @@ impl<'db> TrackedMapEnvMut<'db> {
             .flatten() // flattening at the end makes sure own_map can override None
     }
 
+    // Gets a macro definition by name
+    pub fn get_macro_def(&self, db: &'db dyn BaseDb, name: &str) -> Option<&MacroDefinition> {
+        let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_macro_def");
+        span.emit_text(name);
+
+        self.own_macro_map
+            .get(name)
+            .map(|opt| opt.as_ref().map(|(def, _span)| def))
+            .or_else(|| {
+                Some(
+                    self.parent
+                        .as_ref()?
+                        .get_macro_def(db, InternedKey::new(db, name)),
+                )
+            })
+            .flatten() // flattening at the end makes sure own_map can override None
+    }
+
     // Gets a label by name
-    pub fn get_label(&self, db: &'db dyn BaseDb, name: &str) -> Option<&str> {
+    pub fn get_label(&self, db: &'db dyn BaseDb, name: &str) -> Option<&(String, Span<File>)> {
         let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_label");
         span.emit_text(name);
 
@@ -156,12 +233,30 @@ impl<'db> TrackedMapEnvMut<'db> {
                 )
             })
             .flatten() // flattening at the end makes sure own_map can override None
-            .map(String::as_str)
     }
 
-    pub fn insert_macro(&mut self, def: MacroDefinition) {
+    // Gets a label's path by name
+    pub fn get_label_path(&self, db: &'db dyn BaseDb, name: &str) -> Option<&String> {
+        let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_label_path");
+        span.emit_text(name);
+
+        self.own_label_map
+            .get(name)
+            .map(|opt| opt.as_ref().map(|(path, _span)| path))
+            .or_else(|| {
+                Some(
+                    self.parent
+                        .as_ref()?
+                        .get_label_path(db, InternedKey::new(db, name)),
+                )
+            })
+            .flatten() // flattening at the end makes sure own_map can override None
+    }
+
+    pub fn insert_macro(&mut self, def: MacroDefinition, span: Span<File>) {
         // Helper function because this clones def.name
-        self.own_macro_map.insert(def.name.clone(), Some(def));
+        self.own_macro_map
+            .insert(def.name.clone(), Some((def, span)));
     }
 
     /// Flatten ancestors to `self`, removing any indirection.
@@ -207,5 +302,3 @@ impl<'db> TrackedMapEnvMut<'db> {
         }
     }
 }
-
-// TODO: do we need something similar for DTS references and extensions?

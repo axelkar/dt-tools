@@ -91,7 +91,7 @@ pub fn eval(
 
                     let macro_ast = inner_expr.into_macro_invocation().ok()?;
                     let name: &str = &macro_ast.green_ident()?.text;
-                    Some(i64::from(env.get_macro(db, name).is_some()))
+                    Some(i64::from(env.get_macro_def(db, name).is_some()))
                 }
                 TokenKind::BitwiseNot => Some(!value()?),
                 TokenKind::LogicalNot => Some(i64::from(value()? == 0)),
@@ -102,7 +102,7 @@ pub fn eval(
         ast::Expr::MacroInvocation(macro_invocation) => {
             let ident = macro_invocation.ident()?;
             let name: &str = ident.text();
-            let Some(def) = env.get_macro(db, name) else {
+            let Some(def) = env.get_macro_def(db, name) else {
                 diag.emit(Diagnostic::new(
                     spanner(ident.text_range()),
                     Cow::Owned(format!("Macro `{name}` is not defined")),
@@ -220,7 +220,7 @@ pub fn eval(
 #[cfg(test)]
 mod tests {
     use dt_tools_analyzer::macros::MacroDefinition;
-    use dt_tools_parser::{ast::AstNode, parser::Entrypoint};
+    use dt_tools_parser::{TextRange, ast::AstNode, parser::Entrypoint};
 
     use crate::salsa::{db::BaseDb, macros::env::TrackedMapEnvMut};
 
@@ -285,9 +285,15 @@ mod tests {
 
     #[test]
     fn test_prefix_defined() {
+        let db = crate::salsa::db::BaseDatabase::default();
+        let file = db
+            .get_files()
+            .add_virtual(&db, "/main.dts".into(), String::new());
+        let span = TextRange::new(0, 0).within_file(file);
+
         let mut env = TrackedMapEnvMut::default();
         let def = MacroDefinition::parse("#define FOO").unwrap();
-        env.insert_macro(def);
+        env.insert_macro(def, span);
 
         assert_eq!(check("defined FOO", &env), Some(1));
         assert_eq!(check("defined BAR", &env), Some(0));
@@ -297,13 +303,19 @@ mod tests {
 
     #[test]
     fn test_macro() {
+        let db = crate::salsa::db::BaseDatabase::default();
+        let file = db
+            .get_files()
+            .add_virtual(&db, "/main.dts".into(), String::new());
+        let span = TextRange::new(0, 0).within_file(file);
+
         let mut env = TrackedMapEnvMut::default();
 
         let def = MacroDefinition::parse("#define FOO BAR").unwrap();
-        env.insert_macro(def);
+        env.insert_macro(def, span);
 
         let def = MacroDefinition::parse("#define BAR 42").unwrap();
-        env.insert_macro(def);
+        env.insert_macro(def, span);
 
         assert_eq!(check("FOO", &env), Some(42));
     }
@@ -312,10 +324,16 @@ mod tests {
     #[test]
     #[ignore = "overflows stack"]
     fn test_macro_self_recursion() {
+        let db = crate::salsa::db::BaseDatabase::default();
+        let file = db
+            .get_files()
+            .add_virtual(&db, "/main.dts".into(), String::new());
+        let span = TextRange::new(0, 0).within_file(file);
+
         let mut env = TrackedMapEnvMut::default();
 
         let def = MacroDefinition::parse("#define FOO FOO").unwrap();
-        env.insert_macro(def);
+        env.insert_macro(def, span);
 
         assert_eq!(check("FOO", &env), Some(42));
     }
