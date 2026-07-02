@@ -1135,16 +1135,16 @@ mod tests {
 
     /// Run the preprocessor on virtual files and snapshot MIR + diagnostics.
     ///
-    /// The main file is named "/main.dts".
+    /// The root file is named "/main.dts".
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
-    fn check_mir(main_file_contents: &str, other_files: &[(&str, &str)], expect: Expect) {
+    fn check_mir(root_file_contents: &str, other_files: &[(&str, &str)], expect: Expect) {
         let db = crate::salsa::db::BaseDatabase::default();
         IncludeDirs::new(&db, vec![]);
 
-        let main_file = db.get_files().add_virtual(
+        let root_file = db.get_files().add_virtual(
             &db,
             Utf8PathBuf::from("/main.dts"),
-            main_file_contents.to_owned(),
+            root_file_contents.to_owned(),
         );
 
         for &(path, contents) in other_files {
@@ -1152,7 +1152,7 @@ mod tests {
                 .add_virtual(&db, Utf8PathBuf::from(path), contents.to_owned());
         }
 
-        let is_overlay = crate::salsa::parse_file(&db, main_file).is_some_and(|p| {
+        let is_overlay = crate::salsa::parse_file(&db, root_file).is_some_and(|p| {
             p.parse(&db).source_file().directives().any(|dir| {
                 dir.syntax()
                     .child_tokens()
@@ -1160,9 +1160,9 @@ mod tests {
             })
         });
 
-        let (diags, _included_files) = crate::salsa::compute_diagnostics(&db, main_file);
+        let (diags, _included_files) = crate::salsa::compute_diagnostics(&db, root_file);
 
-        let result = preprocessor_eval_file(&db, main_file, None, is_overlay)
+        let result = preprocessor_eval_file(&db, root_file, None, is_overlay)
             .expect("Should be a readable file");
         let mir = result.mir(&db);
 

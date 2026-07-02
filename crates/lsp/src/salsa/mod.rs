@@ -201,40 +201,40 @@ fn check_mir_post<'db>(
 #[salsa::tracked(returns(ref))]
 pub fn compute_diagnostics<'db>(
     db: &'db dyn db::BaseDb,
-    main_file: file::File,
+    root_file: file::File,
 ) -> (Vec<Diagnostic<file::File>>, Vec<file::File>) {
     let span = profiling::tracy_client::span!("lsp::salsa::compute_file_diagnostics");
-    span.emit_text(main_file.path(db).as_str());
+    span.emit_text(root_file.path(db).as_str());
 
     let mut diagnostics = Vec::new();
 
-    if !main_file.is_readable_file(db) {
+    if !root_file.is_readable_file(db) {
         // TODO: test this with LSP. Getting rope will probably panic
         return (
             vec![Diagnostic::new(
-                dt_tools_parser::TextRange { start: 0, end: 0 }.within_file(main_file),
+                dt_tools_parser::TextRange { start: 0, end: 0 }.within_file(root_file),
                 Cow::Borrowed("File does not exist"),
                 Severity::Error,
             )],
-            vec![main_file],
+            vec![root_file],
         );
     }
 
-    if let Some(parse) = parse_file(db, main_file) {
+    if let Some(parse) = parse_file(db, root_file) {
         let parse = parse.parse(db);
 
         let diag = parking_lot::Mutex::new(&mut diagnostics);
         emit_parse_errors(parse, &diag, &mut |text_range| {
-            text_range.within_file(main_file)
+            text_range.within_file(root_file)
         });
 
-        // FIXME: main file detection
-        let is_main_file = false;
+        // FIXME: root file detection
+        let is_root_file = false;
         for mut lint in dt_tools_lint::default_lint(
             &parse.source_file(),
-            main_file.contents(db),
-            is_main_file,
-            main_file,
+            root_file.contents(db),
+            is_root_file,
+            root_file,
         ) {
             tag_diagnostic(&mut lint.diagnostic, &format!("dt-tools(lint {})", lint.id));
             diagnostics.push(lint.diagnostic);
@@ -254,7 +254,7 @@ pub fn compute_diagnostics<'db>(
     */
 
     // Detect /plugin/; in the root file.
-    let is_overlay = parse_file(db, main_file).is_some_and(|p| {
+    let is_overlay = parse_file(db, root_file).is_some_and(|p| {
         p.parse(db).source_file().directives().any(|dir| {
             dir.syntax()
                 .child_tokens()
@@ -263,7 +263,7 @@ pub fn compute_diagnostics<'db>(
     });
 
     let mut processed_files = if let Some(result) =
-        preprocessor::preprocessor_eval_file(db, main_file, None, is_overlay)
+        preprocessor::preprocessor_eval_file(db, root_file, None, is_overlay)
     {
         diagnostics.extend_from_slice(result.diagnostics(db));
 
@@ -274,7 +274,7 @@ pub fn compute_diagnostics<'db>(
         Vec::new()
     };
 
-    processed_files.push(main_file);
+    processed_files.push(root_file);
 
     diagnostics.dedup();
     processed_files.dedup();

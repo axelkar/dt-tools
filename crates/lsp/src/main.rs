@@ -55,7 +55,7 @@ pub struct Session {
     /// The file where evaluation will start from
     ///
     /// Files not (recursively) included in this file must not be analyzed
-    main_file: parking_lot::Mutex<Option<Uri>>,
+    root_file: parking_lot::Mutex<Option<Uri>>,
 
     /// Salsa database
     // TODO: no mutex...
@@ -262,13 +262,13 @@ impl LanguageServer for Backend {
         );
 
         let msg = {
-            // Set the first opened file to be the main file
-            let mut main_file = self.session.main_file.lock();
-            let new_main_file = main_file.get_or_insert_with(|| params.text_document.uri.clone());
+            // Set the first opened file to be the root file
+            let mut root_file = self.session.root_file.lock();
+            let new_root_file = root_file.get_or_insert_with(|| params.text_document.uri.clone());
 
-            // TODO: main file in Salsa?
+            // TODO: root file in Salsa?
 
-            uri_to_path(new_main_file).map(|path| format!("The main file is {path}."))
+            uri_to_path(new_root_file).map(|path| format!("The root file is {path}."))
         };
 
         // Indirection because we can't hold a lock across an await point
@@ -276,9 +276,9 @@ impl LanguageServer for Backend {
             self.client.show_message(MessageType::INFO, &msg).await;
         }
 
-        // TODO: warn files that aren't included by main_file
+        // TODO: warn files that aren't included by root_file
 
-        self.push_diagnostics_from_main_file().await;
+        self.push_diagnostics_from_root_file().await;
     }
 
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
@@ -294,7 +294,7 @@ impl LanguageServer for Backend {
             params.text_document.version,
         );
 
-        self.push_diagnostics_from_main_file().await;
+        self.push_diagnostics_from_root_file().await;
     }
     async fn did_save(&self, _: DidSaveTextDocumentParams) {
         self.client
@@ -306,10 +306,10 @@ impl LanguageServer for Backend {
         self.session.open_docs.remove(path.as_ref());
 
         let msg = {
-            let mut main_file = self.session.main_file.lock();
-            if *main_file == Some(params.text_document.uri) {
-                *main_file = None;
-                Some("The main file has been removed.")
+            let mut root_file = self.session.root_file.lock();
+            if *root_file == Some(params.text_document.uri) {
+                *root_file = None;
+                Some("The root file has been removed.")
             } else {
                 None
             }
@@ -353,16 +353,16 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
-    async fn push_diagnostics_from_main_file(&self) {
+    async fn push_diagnostics_from_root_file(&self) {
         tracing::trace!("Pushing diagnostics");
 
         // TODO: worker thread
-        let main_uri = self.session.main_file.lock().clone().unwrap();
-        let main_path = uri_to_path(&main_uri).expect("should be a real file with a path");
+        let root_uri = self.session.root_file.lock().clone().unwrap();
+        let root_path = uri_to_path(&root_uri).expect("should be a real file with a path");
 
         let diags_per_file = {
             let db = &mut *self.session.db.lock();
-            let file = db.get_files().get_file(db, &main_path);
+            let file = db.get_files().get_file(db, &root_path);
             let (diagnostics, processed_files) = crate::salsa::compute_diagnostics(db, file);
 
             // TODO: add a source field to dt-tools-diagnostic::Diagnostic or something
@@ -413,7 +413,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             resolved_client_capabilities: parking_lot::Mutex::default(),
             workspace_folders: Mutex::new(Vec::new()),
             dt_tools_workspace: parking_lot::Mutex::default(),
-            main_file: parking_lot::Mutex::new(None),
+            root_file: parking_lot::Mutex::new(None),
             db: parking_lot::Mutex::new(BaseDatabase::default()),
         }),
     });
