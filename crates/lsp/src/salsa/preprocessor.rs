@@ -181,7 +181,7 @@ fn get_pp_directive_arg_string(
         }
     };
 
-    let Some((s, rest)) = split else {
+    let Some((s, _rest)) = split else {
         diag.emit(Diagnostic::new(
             spanner(args_text_range),
             Cow::Borrowed("Missing string terminator"),
@@ -189,14 +189,6 @@ fn get_pp_directive_arg_string(
         ));
         return None;
     };
-
-    if !rest.is_empty() {
-        diag.emit(Diagnostic::new(
-            spanner(args_text_range),
-            Cow::Borrowed("Unexpected characters after include string"),
-            Severity::Warn,
-        ));
-    }
 
     Some((relative, s.to_owned()))
 }
