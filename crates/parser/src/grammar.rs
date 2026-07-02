@@ -351,6 +351,7 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     vis!(end);
 }
 
+// TODO: split this into more functions
 // TODO: from r-a: mod_contents: while !(p.at(EOF) || (p.at(T!['}']) && stop_on_r_curly)) {
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 #[expect(clippy::too_many_lines, reason = "no good way to make this shorter")]
@@ -373,6 +374,7 @@ fn item(p: &mut Parser) {
         let mut m = m;
         // parse a node or a property
 
+        // macro-substitutable name
         if p.silent_at_macro_invocation_with_args() {
             m = macro_invocation(m, p).precede(p);
         } else {
@@ -381,42 +383,34 @@ fn item(p: &mut Parser) {
 
         if p.eat(TokenKind::Colon) {
             // label
-            // TODO: include this in the DtNode or DtProperty
-            // Actually I think this _is_ included because of the precede
             m = m.complete(p, NodeKind::DtLabel).precede(p);
 
+            // Pick up remaining labels, if any
             while p.at_name() {
+                let mut m_label = p.start();
+                // macro-substitutable name
                 if p.silent_at_macro_invocation_with_args() {
-                    m = macro_invocation(m, p).precede(p);
+                    m_label = macro_invocation(m_label, p).precede(p);
                 } else {
                     p.bump_name();
                 }
 
                 if p.eat(TokenKind::Colon) {
-                    m = m.complete(p, NodeKind::DtLabel).precede(p);
-                } else if p.at(TokenKind::Ampersand) {
-                    // label + extension e.g. `bar: &foo {};`
-                    reference(p);
-                    break;
+                    m_label.complete(p, NodeKind::DtLabel);
                 } else {
+                    m_label.ignore(p);
+                    // normal node or property name
                     break;
                 }
             }
-        }
 
-        // TODO: add AtSign to NAME_SET and don't treat the unit address specially?
-        if p.at(TokenKind::AtSign) {
-            let mut m = p.start();
-            // unit address
-            p.bump();
-
-            if p.silent_at_macro_invocation_with_args() {
-                m = macro_invocation(m, p).precede(p);
-            } else if !p.eat_name() {
-                p.error().msg_expected().emit();
+            if p.at(TokenKind::Ampersand) {
+                // label + extension e.g. `bar: &foo {};`
+                reference(p);
             }
-            m.complete(p, NodeKind::UnitAddress);
         }
+
+        unit_address_opt(p);
 
         if p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon) {
             dt_property(p, m);
@@ -437,15 +431,10 @@ fn item(p: &mut Parser) {
             m.complete(p, NodeKind::ParseError);
         }
     } else if p.at(TokenKind::Ampersand) {
-        // parse a node
-
         reference(p);
 
-        if p.eat(TokenKind::AtSign) {
-            // unit address
-            // FIXME: move to reference
-            p.expect(TokenKind::Ident);
-        }
+        // FIXME: move to reference
+        unit_address_opt(p);
 
         if p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon) {
             dt_property(p, m);
@@ -523,6 +512,21 @@ fn item(p: &mut Parser) {
     vis!(end);
 }
 
+fn unit_address_opt(p: &mut Parser<'_, '_>) {
+    if p.at(TokenKind::AtSign) {
+        // unit address
+        let mut m = p.start();
+        p.bump();
+
+        if p.silent_at_macro_invocation_with_args() {
+            m = macro_invocation(m, p).precede(p);
+        } else if !p.eat_name() {
+            p.error().msg_expected().emit();
+        }
+        m.complete(p, NodeKind::UnitAddress);
+    }
+}
+
 const BEGIN_COND_SET: &[TokenKind] = &[
     TokenKind::IfndefDirective,
     TokenKind::IfdefDirective,
@@ -535,6 +539,7 @@ const CONTINUE_COND_SET: &[TokenKind] = &[
     TokenKind::ElseDirective,
 ];
 
+// TODO: move to own file
 /// Parses a preprocessor directive into a CST tree.
 ///
 /// - `inside`: Parser function for things inside a preprocessor directive. Don't put a loop inside
@@ -1106,6 +1111,82 @@ Tree:
                 RCurly@12..13 "}"
                 Semicolon@13..14 ";"
         "#]],
+        );
+    }
+
+    #[test]
+    fn labels() {
+        check(
+            "foo: &bar {};",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..13
+                  DtNode@0..13
+                    DtLabel@0..4
+                      Name@0..3 "foo"
+                      Colon@3..4 ":"
+                    Whitespace@4..5 " "
+                    DtPhandle@5..9
+                      Ampersand@5..6 "&"
+                      Name@6..9 "bar"
+                    Whitespace@9..10 " "
+                    LCurly@10..11 "{"
+                    RCurly@11..12 "}"
+                    Semicolon@12..13 ";"
+            "#]],
+        );
+
+        check(
+            "foo: bar: baz {};",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..17
+                  DtNode@0..17
+                    DtLabel@0..4
+                      Name@0..3 "foo"
+                      Colon@3..4 ":"
+                    Whitespace@4..5 " "
+                    DtLabel@5..9
+                      Name@5..8 "bar"
+                      Colon@8..9 ":"
+                    Whitespace@9..10 " "
+                    Name@10..13 "baz"
+                    Whitespace@13..14 " "
+                    LCurly@14..15 "{"
+                    RCurly@15..16 "}"
+                    Semicolon@16..17 ";"
+            "#]],
+        );
+
+        check(
+            "foo: bar(): baz {};",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..19
+                  DtNode@0..19
+                    DtLabel@0..4
+                      Name@0..3 "foo"
+                      Colon@3..4 ":"
+                    Whitespace@4..5 " "
+                    DtLabel@5..11
+                      MacroInvocation@5..10
+                        Ident@5..8 "bar"
+                        LParen@8..9 "("
+                        RParen@9..10 ")"
+                      Colon@10..11 ":"
+                    Whitespace@11..12 " "
+                    Name@12..15 "baz"
+                    Whitespace@15..16 " "
+                    LCurly@16..17 "{"
+                    RCurly@17..18 "}"
+                    Semicolon@18..19 ";"
+            "#]],
         );
     }
 

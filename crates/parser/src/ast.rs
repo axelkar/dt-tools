@@ -229,12 +229,20 @@ pub trait HasName: AstNode {
     }
 }
 
-// FIXME: This should be able to return multiple labels
+// FIXME: Remove uses of this old trait returning 0 or 1 labels
 /// Trait for [`AstNode`]s with [`DtLabel`]s
 pub trait HasLabel: AstNode {
     /// Returns the first [`DtLabel`] if it exists.
     fn label(&self) -> Option<DtLabel> {
         self.syntax().child_nodes().find_map(DtLabel::cast)
+    }
+}
+
+/// Trait for [`AstNode`]s with [`DtLabel`]s
+pub trait HasLabels: AstNode {
+    /// Returns an iterator over direct [`DtLabel`] children.
+    fn labels(&self) -> impl Iterator<Item = DtLabel> + '_ {
+        self.syntax().child_nodes().filter_map(DtLabel::cast)
     }
 }
 
@@ -391,6 +399,7 @@ impl DtProperty {
 }
 impl HasName for DtProperty {}
 impl HasLabel for DtProperty {}
+impl HasLabels for DtProperty {}
 impl HasMacroInvocation for DtProperty {}
 impl HasUnitAddress for DtProperty {}
 
@@ -748,6 +757,7 @@ impl DtNode {
 }
 impl HasName for DtNode {}
 impl HasLabel for DtNode {}
+impl HasLabels for DtNode {}
 impl HasMacroInvocation for DtNode {}
 impl HasUnitAddress for DtNode {}
 

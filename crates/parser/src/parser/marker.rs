@@ -10,7 +10,14 @@ pub struct Marker {
 
 impl Marker {
     #[cfg_attr(debug_assertions, track_caller)]
-    pub(super) fn new(pos: usize) -> Self {
+    pub(super) fn new(p: &mut Parser) -> Self {
+        let pos = p.events.len();
+        p.events.push(Event::Placeholder);
+
+        #[cfg(feature = "grammar-tracing")]
+        debug!(pos, "start node");
+
+
         Self {
             pos,
             bomb: if cfg!(debug_assertions) {
@@ -45,6 +52,16 @@ impl Marker {
         p.events.push(Event::FinishNode);
 
         CompletedMarker { pos: self.pos }
+    }
+
+    /// Ignores the marker.
+    pub fn ignore(mut self, p: &mut Parser) {
+        self.bomb.defuse();
+
+        let event_at_pos = &mut p.events[self.pos];
+        assert_eq!(*event_at_pos, Event::Placeholder);
+
+        p.events.push(Event::Placeholder);
     }
 }
 

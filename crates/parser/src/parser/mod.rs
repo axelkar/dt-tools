@@ -216,13 +216,7 @@ impl<'t, 'input> Parser<'t, 'input> {
     /// Starts a node using a [`Marker`].
     #[cfg_attr(debug_assertions, track_caller)]
     pub fn start(&mut self) -> Marker {
-        let pos = self.events.len();
-        self.events.push(Event::Placeholder);
-
-        #[cfg(feature = "grammar-tracing")]
-        debug!(pos, "start node");
-
-        Marker::new(pos)
+        Marker::new(self)
     }
 
     /// Peeks ahead at the current token's kind.
@@ -402,11 +396,19 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
 
     /// Bumps name tokens into [`TokenKind::Name`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if not at a name token.
     pub fn bump_name(&mut self) {
         self.bump_name_generic(&NAME_SET);
     }
 
     /// Bumps label name tokens into [`TokenKind::Name`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if not at a label name token.
     pub fn bump_label_name(&mut self) {
         self.bump_name_generic(&LABEL_NAME_SET);
     }
