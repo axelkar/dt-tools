@@ -134,11 +134,6 @@ pub(crate) fn lower_file<'db>(
         );
     }
 
-    super::tag_diagnostics(
-        &mut diagnostics,
-        concat!(module_path!(), "::preprocessor_eval_file"),
-    );
-
     Some(LoweredFile::new(
         db,
         env.into_immut(db),

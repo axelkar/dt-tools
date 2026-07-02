@@ -496,7 +496,12 @@ fn item(p: &mut Parser) {
         let m_params = p.start();
         if p.at(TokenKind::Ampersand) {
             reference(p);
-        } else if !p.eat_name() {
+        } else if p.silent_at_macro_invocation_with_args() {
+            macro_invocation(p.start(), p);
+            unit_address_opt(p);
+        } else if p.eat_name() {
+            unit_address_opt(p);
+        } else {
             p.error().msg_expected().emit();
         }
         m_params.complete(p, NodeKind::DirectiveArguments);
