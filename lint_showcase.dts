@@ -11,7 +11,7 @@ prop = <1>;
     MyProp = "";
     hex-value = <0xAAA>;
   };
-  foo = "bar"
+  foo = "bar";
 };
 
 &My_Label {

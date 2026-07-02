@@ -15,6 +15,8 @@ license.workspace = true
 [dependencies]
 clap = { version = "4.5.4", features = ["derive", "cargo"] }
 tracing-subscriber.workspace = true
+dt-tools-lowering.workspace = true
+parking_lot.workspace = true
 dt-tools-parser.workspace = true
 dt-tools-lint.workspace = true
 dt-tools-analyzer.workspace = true
@@ -22,6 +24,7 @@ dt-tools-workspace = { workspace = true, features = ["cli"] }
 codespan-reporting.workspace = true
 dt-tools-diagnostic = { workspace = true, features = ["codespan-reporting"] }
 camino.workspace = true
+owo-colors.workspace = true
 
 [lints]
 workspace = true

@@ -6,6 +6,7 @@ use dt_tools_parser::TextRange;
 
 use crate::{lowering::LoweredFile, macros::env::InternedKey};
 
+pub mod codespan_reporting;
 pub mod db;
 mod expr_eval;
 pub mod file;

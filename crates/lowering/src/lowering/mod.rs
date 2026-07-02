@@ -301,7 +301,7 @@ mod tests {
         let result = lower_root_file(&db, root_file).expect("Should be a readable file");
         let mir = result.mir(&db);
 
-        let mut out = mir.fmt_for_test(&db);
+        let mut out = mir.display(&db);
         if !diags.is_empty() {
             out.push_str("\n--- errors ---\n");
             for d in diags {

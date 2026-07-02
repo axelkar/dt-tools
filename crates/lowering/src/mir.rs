@@ -24,10 +24,9 @@ impl Mir {
             .extend(other.unresolved_extensions.iter().cloned());
     }
 
-    /// Format for snapshot testing.
+    /// Format MIR for display.
     #[must_use]
-    #[cfg(test)]
-    pub(crate) fn fmt_for_test(&self, db: &dyn crate::db::BaseDb) -> String {
+    pub fn display(&self, db: &dyn crate::db::BaseDb) -> String {
         use std::fmt::Write;
 
         let mut defs: Vec<_> = self.definitions.iter().collect();

@@ -11,7 +11,8 @@ license.workspace = true
 [dependencies]
 dt-tools-parser.workspace = true
 dt-tools-analyzer.workspace = true
-dt-tools-diagnostic = { workspace = true, features = ["parking_lot"] }
+dt-tools-diagnostic = { workspace = true, features = ["parking_lot", "codespan-reporting"] }
+codespan-reporting.workspace = true
 dt-tools-lint.workspace = true
 salsa.workspace = true
 camino.workspace = true
