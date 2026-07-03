@@ -78,17 +78,18 @@ impl<'t, 'input> Sink<'t, 'input> {
                     while let Some(fp) = forward_parent {
                         idx += fp;
 
-                        forward_parent = if let Event::StartNode {
-                            kind,
-                            forward_parent,
-                        } =
-                            mem::replace(&mut self.events[idx], Event::Placeholder)
-                        {
-                            kinds.push(kind);
-                            forward_parent
-                        } else {
-                            unreachable!()
-                        };
+                        forward_parent =
+                            match mem::replace(&mut self.events[idx], Event::Placeholder) {
+                                Event::StartNode {
+                                    kind,
+                                    forward_parent,
+                                } => {
+                                    kinds.push(kind);
+                                    forward_parent
+                                }
+                                Event::Placeholder => None,
+                                _ => unreachable!(),
+                            };
                     }
 
                     for kind in kinds.into_iter().rev() {

@@ -853,8 +853,27 @@ Tree:
                 Errors: []
 
                 Tree:
-                DtPhandle@0..3
-                  Name@0..3 "foo"
+                DtPhandle@0..46
+                  LCurly@0..1 "{"
+                  Slash@1..2 "/"
+                  Name@2..5 "bus"
+                  UnitAddress@5..7
+                    AtSign@5..6 "@"
+                    Name@6..7 "0"
+                  Slash@7..8 "/"
+                  Name@8..14 "padctl"
+                  UnitAddress@14..22
+                    AtSign@14..15 "@"
+                    Name@15..22 "3520000"
+                  Slash@22..23 "/"
+                  Name@23..27 "pads"
+                  Slash@27..28 "/"
+                  Name@28..32 "usb2"
+                  Slash@32..33 "/"
+                  Name@33..38 "lanes"
+                  Slash@38..39 "/"
+                  Name@39..45 "usb2-0"
+                  RCurly@45..46 "}"
             "#]],
         );
     }
