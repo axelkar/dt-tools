@@ -1,18 +1,22 @@
-use std::{
-    error::Error,
-    path::{Path, PathBuf},
-};
+use std::{path::Path, time::Instant};
 
-use camino::Utf8PathBuf;
-use dt_tools_lowering::{
-    codespan_reporting::print_diagnostics, compute_diagnostics, db::{BaseDatabase, BaseDb}, emit_parse_errors, parse_file
-};
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::{
     Parser, Subcommand,
     builder::{
         Styles,
         styling::{AnsiColor, Style},
     },
+};
+use color_eyre::eyre::{OptionExt, Result, WrapErr, eyre};
+use dt_tools_lowering::{
+    codespan_reporting::print_diagnostics,
+    compute_diagnostics,
+    db::{BaseDatabase, BaseDb},
+    emit_parse_errors,
+    includes::IncludeDirs,
+    lowering::lower_root_file,
+    parse_file,
 };
 use dt_tools_workspace::{
     Workspace, WorkspacePathFindResult,
@@ -21,6 +25,7 @@ use dt_tools_workspace::{
     },
 };
 use owo_colors::OwoColorize;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tracing_subscriber::filter::LevelFilter;
 
 fn styles() -> Styles {
@@ -57,19 +62,27 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Parse a DTS file and show lex/parse errors
-    Parse {
-        file: PathBuf,
-    },
+    Parse { file: Utf8PathBuf },
     /// Lint DTS and DTB files
     Lint {},
     /// Lower a DTS file to MIR and show diagnostics
-    Mir {
-        file: PathBuf,
+    Mir { file: Utf8PathBuf },
+    /// Check many DTS files for errors with a single Salsa database for reuse
+    CheckMany {
+        /// One or more DTS files to check
+        #[arg(required = true)]
+        files: Vec<Utf8PathBuf>,
+
+        /// Print diagnostics
+        #[arg(long = "print-diagnostics")]
+        do_print_diagnostics: bool,
     },
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let cli = dbg!(Cli::parse());
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
+    let cli = Cli::parse();
     tracing_subscriber::fmt()
         .with_max_level(if cli.verbose {
             LevelFilter::INFO
@@ -79,7 +92,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     let cwd = Utf8PathBuf::from_path_buf(Path::new(".").canonicalize()?)
-        .map_err(|_| "Current directory should be UTF-8")?;
+        .map_err(|_| eyre!("Current directory isn't UTF-8"))?;
     let res = dt_tools_workspace::Workspace::find_workspace_dir(&cwd);
     let workspace_dir = res.workspace_dir();
 
@@ -93,40 +106,39 @@ fn main() -> Result<(), Box<dyn Error>> {
         WorkspacePathFindResult::Fallback { .. } => None,
     };
 
-    let workspace = dbg!(Workspace {
+    let workspace = Workspace {
         config: CombinedConfig::merge_cli(
             Some(cli.config),
             Some(EnvConfig::from_env()?),
             toml_config.transpose()?,
         ),
-        path: workspace_dir.to_path_buf()
-    });
+        path: workspace_dir.to_path_buf(),
+    };
 
     match cli.command {
         Command::Parse { file } => cmd_parse(&file)?,
         Command::Lint {} => todo!(),
         Command::Mir { file } => cmd_mir(&file, &workspace)?,
+        Command::CheckMany {
+            files,
+            do_print_diagnostics,
+        } => cmd_check_many(&files, do_print_diagnostics, &workspace)?,
     }
 
     Ok(())
 }
 
-fn canonicalize_utf8(path: &Path) -> Result<Utf8PathBuf, Box<dyn Error>> {
-    Ok(
-        Utf8PathBuf::from_path_buf(path.canonicalize()?)
-            .map_err(|_| "File path must be valid UTF-8")?,
-    )
-}
-
-fn cmd_parse(file: &Path) -> Result<(), Box<dyn Error>> {
-    let abs_path = canonicalize_utf8(file)?;
+fn cmd_parse(file: &Utf8Path) -> Result<()> {
+    let abs_path = file
+        .canonicalize_utf8()
+        .wrap_err_with(|| format!("File {file} doesn't exist"))?;
     let db = BaseDatabase::default();
     let file = db.get_files().get_file(&db, &abs_path);
 
-    let parse = parse_file(&db, file).ok_or("File does not exist or is not readable")?;
+    let parse = parse_file(&db, file).ok_or_eyre("File does not exist or is not readable")?;
     let parse = parse.parse(&db);
 
-    eprintln!("{}", "  Parsed".green().bold());
+    println!("{}", "  Parsed".green().bold());
     print!("{}", parse.green_node.print_tree());
 
     let mut diagnostics = Vec::new();
@@ -139,17 +151,18 @@ fn cmd_parse(file: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn cmd_mir(file: &Path, workspace: &Workspace) -> Result<(), Box<dyn Error>> {
-    use dt_tools_lowering::{includes::IncludeDirs, lowering::lower_root_file};
-
-    let abs_path = canonicalize_utf8(file)?;
+fn cmd_mir(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
+    let abs_path = file
+        .canonicalize_utf8()
+        .wrap_err_with(|| format!("File {file} doesn't exist"))?;
     let db = BaseDatabase::default();
 
     let include_dirs: Vec<Utf8PathBuf> = workspace.config.include_dirs.clone();
     IncludeDirs::new(&db, include_dirs);
 
     let root_file = db.get_files().get_file(&db, &abs_path);
-    let result = lower_root_file(&db, root_file).ok_or("File does not exist or is not readable")?;
+    let result =
+        lower_root_file(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
 
     let (diagnostics, _processed_files) = compute_diagnostics(&db, root_file);
 
@@ -158,6 +171,71 @@ fn cmd_mir(file: &Path, workspace: &Workspace) -> Result<(), Box<dyn Error>> {
 
     println!("{}", "Diagnostics".red());
     if print_diagnostics(diagnostics.clone(), &db)? {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn cmd_check_many(
+    files: &[Utf8PathBuf],
+    do_print_diagnostics: bool,
+    workspace: &Workspace,
+) -> Result<()> {
+    struct FileResult {
+        passed: bool,
+    }
+
+    // One Salsa database for all files
+    let db = BaseDatabase::default();
+
+    let include_dirs: Vec<Utf8PathBuf> = workspace.config.include_dirs.clone();
+    IncludeDirs::new(&db, include_dirs);
+
+    let start = Instant::now();
+
+    let results = files
+        .into_par_iter()
+        .map_with(db, |db, file| {
+            let abs_path = file
+                .canonicalize_utf8()
+                .wrap_err_with(|| format!("File {file} doesn't exist"))?;
+            let root_file = db.get_files().get_file(db, &abs_path);
+
+            let (diagnostics, _processed_files) = compute_diagnostics(db, root_file);
+
+            let has_errors = diagnostics
+                .iter()
+                .any(|d| d.severity == dt_tools_diagnostic::Severity::Error);
+            let passed = !has_errors;
+
+            if passed {
+                println!("{} ... {}", file, "PASS".green().bold());
+            } else {
+                println!("{} ... {}", file, "FAIL".red().bold());
+                if do_print_diagnostics {
+                    print_diagnostics(diagnostics.clone(), db)?;
+                }
+            }
+
+            Ok(FileResult { passed })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let elapsed = start.elapsed();
+
+    let passed = results.iter().filter(|r| r.passed).count();
+    let failed = results.len() - passed;
+    println!("\n{}", "--- Summary ---".bold());
+    println!(
+        "{} {}: {} passed, {} failed",
+        results.len(),
+        if files.len() == 1 { "file" } else { "files" },
+        passed.green().bold(),
+        failed.red().bold(),
+    );
+    eprintln!("Took {:?}", elapsed.bright_green());
+
+    if failed > 0 {
         std::process::exit(1);
     }
     Ok(())

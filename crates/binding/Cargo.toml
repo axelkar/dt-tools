@@ -15,7 +15,7 @@ license.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 dt-tools-analyzer.workspace = true
-anyhow = { version = "1.0.71", features = ["backtrace"] }
+anyhow = { version = "1.0.103" }
 fluent-uri.workspace = true
 boon = "0.6.1"
 fs-err.workspace = true

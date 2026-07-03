@@ -25,6 +25,8 @@ codespan-reporting.workspace = true
 dt-tools-diagnostic = { workspace = true, features = ["codespan-reporting"] }
 camino.workspace = true
 owo-colors.workspace = true
+color-eyre = "0.6.5"
+rayon.workspace = true
 
 [lints]
 workspace = true
