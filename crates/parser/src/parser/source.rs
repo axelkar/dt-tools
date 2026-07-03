@@ -203,7 +203,17 @@ impl<'t, 'input> Source<'t, 'input> {
     pub(super) fn peek_kind_immediate(&mut self) -> Option<TokenKind> {
         let _span = tracy_client::span!("parser::Source::peek_kind_immediate");
 
-        assert!(self.steps < PARSER_STEP_LIMIT, "the parser seems stuck");
+        assert!(
+            self.steps < PARSER_STEP_LIMIT,
+            "the parser seems stuck! at byte {:?}. next 5 tokens: {:?}",
+            self.tokens.get(self.cursor).map(|tok| tok.text_range.start),
+            self.tokens
+                .iter()
+                .skip(self.cursor)
+                .take(5)
+                .map(|tok| tok.kind)
+                .collect::<Vec<_>>()
+        );
         self.steps += 1;
 
         #[cfg(feature = "visualize")]

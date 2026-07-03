@@ -91,8 +91,10 @@ pub(super) fn reference_noamp(p: &mut Parser) {
         {
             // TODO: better recovery
             p.expect(TokenKind::Slash);
-            if !p.eat_name() {
-                p.error().msg_expected().emit();
+            if p.eat_name() {
+                unit_address_opt(p);
+            } else {
+                p.error().msg_expected().bump_wrap_err().emit();
             }
         }
         p.expect(TokenKind::RCurly);
@@ -532,11 +534,13 @@ fn unit_address_opt(p: &mut Parser<'_, '_>) {
     }
 }
 
+/// Set to begin preprocessor conditional
 const BEGIN_COND_SET: &[TokenKind] = &[
     TokenKind::IfndefDirective,
     TokenKind::IfdefDirective,
     TokenKind::IfDirective,
 ];
+/// Set to continue preprocessor conditional
 const CONTINUE_COND_SET: &[TokenKind] = &[
     TokenKind::ElifndefDirective,
     TokenKind::ElifdefDirective,
@@ -836,6 +840,21 @@ Tree:
                   DtPhandle@6..14
                     Ampersand@6..7 "&"
                     Name@7..14 "123_foo"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn reference_unit_address() {
+        check_ep(
+            Entrypoint::ReferenceNoamp,
+            "{/bus@0/padctl@3520000/pads/usb2/lanes/usb2-0}",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                DtPhandle@0..3
+                  Name@0..3 "foo"
             "#]],
         );
     }
