@@ -118,7 +118,7 @@ pub enum TokenKind {
     #[token(",")]
     Comma,
 
-    #[regex(r"//[^\n\r]+?")]
+    #[regex(r"//[^\n\r]*?")]
     LineComment,
 
     #[regex(r#"#( |\t)*if[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
@@ -783,6 +783,7 @@ mod tests {
         check_single("/*\n * content\n **/", TokenKind::BlockComment);
         check_single("/******/", TokenKind::BlockComment);
         check_single("// hello", TokenKind::LineComment);
+        check_single("//", TokenKind::LineComment);
     }
 
     #[test]
