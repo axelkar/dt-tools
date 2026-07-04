@@ -1,4 +1,4 @@
-use std::{path::Path, time::Instant};
+use std::{mem::ManuallyDrop, path::Path, time::Instant};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{
@@ -193,9 +193,14 @@ fn cmd_check_many(
 
     let start = Instant::now();
 
+    // Leak the database because the OS frees the memory faster when the process exits than we can
+    let db = ManuallyDrop::new(db);
+
     let results = files
         .into_par_iter()
         .map_with(db, |db, file| {
+            let db = &**db;
+
             let abs_path = file
                 .canonicalize_utf8()
                 .wrap_err_with(|| format!("File {file} doesn't exist"))?;
@@ -234,6 +239,20 @@ fn cmd_check_many(
         failed.red().bold(),
     );
     eprintln!("Took {:?}", elapsed.bright_green());
+
+    println!("\n{}", "--- Current Memory Usage ---".bold());
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "We don't need high precision here"
+    )]
+    if let Some(memory_stats) = memory_stats::memory_stats() {
+        let physical_mb = memory_stats.physical_mem as f64 / 1024.0 / 1024.0;
+        let virtual_mb = memory_stats.virtual_mem as f64 / 1024.0 / 1024.0;
+        println!("Physical Memory (RSS): {physical_mb:.2} MB");
+        println!("Virtual Memory:        {virtual_mb:.2} MB");
+    } else {
+        println!("{}", "Failed to query current memory usage".red());
+    }
 
     if failed > 0 {
         std::process::exit(1);

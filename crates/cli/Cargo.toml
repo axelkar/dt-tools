@@ -27,6 +27,7 @@ camino.workspace = true
 owo-colors.workspace = true
 color-eyre = "0.6.5"
 rayon.workspace = true
+memory-stats = "1.2.0"
 
 [lints]
 workspace = true

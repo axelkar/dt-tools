@@ -36,7 +36,7 @@ pub fn rope(db: &dyn db::BaseDb, file: file::File) -> Option<ropey::Rope> {
 
 // `no_eq`: Probably faster to compare the inputs than the whole AST
 /// Returns `None` if the file doesn't exist.
-#[salsa::tracked(no_eq)]
+#[salsa::tracked(no_eq, lru = 64)]
 pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
     let span = profiling::tracy_client::span!("lsp::salsa::parse_file");
     span.emit_text(file.path(db).as_str());
@@ -225,7 +225,7 @@ fn check_mir_post<'db>(
     diagnostics
 }
 
-#[salsa::tracked(returns(ref))]
+#[salsa::tracked(returns(ref), lru = 64)]
 pub fn compute_diagnostics(
     db: &dyn db::BaseDb,
     root_file: file::File,

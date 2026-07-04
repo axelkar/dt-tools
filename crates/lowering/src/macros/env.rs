@@ -38,7 +38,7 @@ impl<'db> TrackedMapEnv<'db> {
     ///
     /// We have to clone the output value because it has to be stored in the Salsa database without
     /// referring to [`TrackedMapEnv::own_map`].
-    #[salsa::tracked(returns(as_ref))]
+    #[salsa::tracked(returns(as_ref), lru = 512)]
     pub fn get_macro(
         self,
         db: &'db dyn BaseDb,
@@ -63,7 +63,7 @@ impl<'db> TrackedMapEnv<'db> {
     }
 
     /// See [`Self::get_macro`] for details about Salsa integration.
-    #[salsa::tracked(returns(as_ref))]
+    #[salsa::tracked(returns(as_ref), lru = 512)]
     pub fn get_macro_def(
         self,
         db: &'db dyn BaseDb,
@@ -88,7 +88,7 @@ impl<'db> TrackedMapEnv<'db> {
     }
 
     /// See [`Self::get_macro`] for details about Salsa integration.
-    #[salsa::tracked(returns(as_ref))]
+    #[salsa::tracked(returns(as_ref), lru = 512)]
     pub fn get_label(
         self,
         db: &'db dyn BaseDb,
@@ -113,7 +113,7 @@ impl<'db> TrackedMapEnv<'db> {
     }
 
     /// See [`Self::get_macro`] for details about Salsa integration.
-    #[salsa::tracked(returns(as_ref))]
+    #[salsa::tracked(returns(as_ref), lru = 512)]
     pub fn get_label_path(self, db: &'db dyn BaseDb, name: InternedKey<'db>) -> Option<String> {
         let span = profiling::tracy_client::span!("TrackedMapEnv::get_label_path");
         span.emit_text(name.text(db));

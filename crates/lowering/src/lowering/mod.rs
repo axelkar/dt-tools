@@ -87,7 +87,7 @@ pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'
 }
 
 /// Lowers the CST of a single file to [`Mir`], recursing into its includes.
-#[salsa::tracked]
+#[salsa::tracked(lru = 128)]
 pub(crate) fn lower_file<'db>(
     db: &'db dyn BaseDb,
     file: File,
