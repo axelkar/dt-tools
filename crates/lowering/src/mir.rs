@@ -9,6 +9,7 @@ use crate::file::File;
 /// Uses a flat list of definitions keyed by full path. Tree assembly and merging happens at the end.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Mir {
+    // TODO: use BTreeMap<String, MirDefinition> for performance
     pub definitions: Vec<MirDefinition>,
     /// Extensions that couldn't be resolved (overlay mode only).
     pub unresolved_extensions: Vec<UnresolvedExtension>,

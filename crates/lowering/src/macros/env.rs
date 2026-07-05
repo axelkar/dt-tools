@@ -282,6 +282,7 @@ impl<'db> TrackedMapEnvMut<'db> {
 
     pub fn into_immut(self, db: &'db dyn BaseDb) -> TrackedMapEnv<'db> {
         if self.own_macro_map.is_empty()
+            && self.own_label_map.is_empty()
             && let Some(parent) = self.parent
         {
             parent
@@ -292,6 +293,7 @@ impl<'db> TrackedMapEnvMut<'db> {
 
     pub fn commit_to_immut(&mut self, db: &'db dyn BaseDb) -> TrackedMapEnv<'db> {
         if self.own_macro_map.is_empty()
+            && self.own_label_map.is_empty()
             && let Some(parent) = self.parent
         {
             parent
