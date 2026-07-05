@@ -28,6 +28,8 @@ use crate::{
 
 mod dt_node;
 mod dt_property;
+#[cfg(test)]
+mod dtc_tests;
 mod preprocessor;
 mod toplevel;
 
@@ -276,7 +278,11 @@ mod tests {
     ///
     /// The root file is named "/main.dts".
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
-    fn check_mir(root_file_contents: &str, other_files: &[(&str, &str)], expect: Expect) {
+    pub(crate) fn check_mir(
+        root_file_contents: &str,
+        other_files: &[(&str, &str)],
+        expect: Expect,
+    ) {
         let db = crate::db::BaseDatabase::default();
         IncludeDirs::new(&db, vec![]);
 
