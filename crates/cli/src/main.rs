@@ -1,4 +1,4 @@
-use std::{mem::ManuallyDrop, path::Path, time::Instant};
+use std::{mem::ManuallyDrop, path::Path, sync::Mutex, time::Instant};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{
@@ -196,6 +196,9 @@ fn cmd_check_many(
     // Leak the database because the OS frees the memory faster when the process exits than we can
     let db = ManuallyDrop::new(db);
 
+    // Lock output so a single file's status gets printed independently
+    let print_lock = Mutex::new(());
+
     let results = files
         .into_par_iter()
         .map_with(db, |db, file| {
@@ -213,12 +216,15 @@ fn cmd_check_many(
                 .any(|d| d.severity == dt_tools_diagnostic::Severity::Error);
             let passed = !has_errors;
 
-            if passed {
-                println!("{} ... {}", file, "PASS".green().bold());
-            } else {
-                println!("{} ... {}", file, "FAIL".red().bold());
-                if do_print_diagnostics {
-                    print_diagnostics(diagnostics.clone(), db)?;
+            {
+                let _guard = print_lock.lock();
+                if passed {
+                    println!("{} ... {}", file, "PASS".green().bold());
+                } else {
+                    println!("{} ... {}", file, "FAIL".red().bold());
+                    if do_print_diagnostics {
+                        print_diagnostics(diagnostics.clone(), db)?;
+                    }
                 }
             }
 
