@@ -39,7 +39,9 @@
 
 use std::{borrow::Cow, collections::HashMap};
 
-use dt_tools_parser::ast::{self, AstNode, AstToken as _, HasDtPhandle, HasLabel as _, HasName as _};
+use dt_tools_parser::ast::{
+    self, AstNode, AstToken as _, HasDtPhandle, HasLabel as _, HasName as _,
+};
 pub use prop::{
     CustomValue, CustomValueCellItem, DefinitionTree, DefinitionTreeNode, PhandleTarget,
     PropDefinition, Value, ValueFromAstError, analyze_node,

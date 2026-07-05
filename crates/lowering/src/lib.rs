@@ -3,7 +3,6 @@ use std::borrow::Cow;
 use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
 use dt_tools_parser::TextRange;
-use rustc_hash::FxHashSet;
 
 use crate::{lowering::LoweredFile, macros::env::InternedKey};
 
@@ -154,65 +153,46 @@ fn check_mir_post<'db>(
     }
     let mir = result.mir(db);
 
-    // TODO: check also path phandles like dtc
+    // TODO: also check path phandles like dtc
 
-    // FIXME: HACK: very ugly code
-
-    // We have to check phandles at the end because phandles are fine in any order.
-    let mut deleted = FxHashSet::default();
-    for def in mir.definitions.iter().rev() {
-        if deleted.contains(&def.path)
-            || deleted
-                .iter()
-                .any(|deleted| def.path.starts_with(&format!("{deleted}/")))
-        {
-            continue;
-        }
-
-        match &def.value {
-            mir::MirDefinitionValue::Property(mir_property_data) => {
-                deleted.insert(def.path.clone());
-
-                for value in &mir_property_data.values {
-                    match value {
-                        mir::MirValue::CellList(mir_cells) => {
-                            for cell in mir_cells {
-                                if let mir::MirCell::Phandle(mir::MirPhandleTarget::Label(
-                                    label_name,
-                                )) = cell
-                                    && result
-                                        .env_after(db)
-                                        .get_label(db, InternedKey::new(db, label_name))
-                                        .is_none()
-                                {
-                                    diagnostics.push(Diagnostic::new(
-                                        def.provenance.text_range.within_file(def.provenance.file),
-                                        Cow::Owned(format!("Label not found: {label_name}")),
-                                        Severity::Error,
-                                    ));
-                                }
+    // Labels are resolved at the end because forward references are valid.
+    for def in mir.iter_live_defs_under("") {
+        if let mir::MirDefinitionValue::Property(mir_property_data) = &def.value {
+            for value in &mir_property_data.values {
+                match value {
+                    mir::MirValue::CellList(mir_cells) => {
+                        for cell in mir_cells {
+                            if let mir::MirCell::Phandle(mir::MirPhandleTarget::Label(
+                                label_name,
+                            )) = cell
+                                && result
+                                    .env_after(db)
+                                    .get_label(db, InternedKey::new(db, label_name))
+                                    .is_none()
+                            {
+                                diagnostics.push(Diagnostic::new(
+                                    def.provenance.text_range.within_file(def.provenance.file),
+                                    Cow::Owned(format!("Label not found: {label_name}")),
+                                    Severity::Error,
+                                ));
                             }
                         }
-                        mir::MirValue::Phandle(mir::MirPhandleTarget::Label(label_name))
-                            if result
-                                .env_after(db)
-                                .get_label(db, InternedKey::new(db, label_name))
-                                .is_none() =>
-                        {
-                            diagnostics.push(Diagnostic::new(
-                                def.provenance.text_range.within_file(def.provenance.file),
-                                Cow::Owned(format!("Label not found: {label_name}")),
-                                Severity::Error,
-                            ));
-                        }
-                        _ => {}
                     }
+                    mir::MirValue::Phandle(mir::MirPhandleTarget::Label(label_name))
+                        if result
+                            .env_after(db)
+                            .get_label(db, InternedKey::new(db, label_name))
+                            .is_none() =>
+                    {
+                        diagnostics.push(Diagnostic::new(
+                            def.provenance.text_range.within_file(def.provenance.file),
+                            Cow::Owned(format!("Label not found: {label_name}")),
+                            Severity::Error,
+                        ));
+                    }
+                    _ => {}
                 }
             }
-            mir::MirDefinitionValue::DeletedNode | mir::MirDefinitionValue::DeletedProperty => {
-                deleted.insert(def.path.clone());
-            }
-            _ => {}
         }
     }
 

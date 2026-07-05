@@ -8,7 +8,6 @@ use std::{
     process::{Command, Stdio},
 };
 
-use camino::Utf8PathBuf;
 use expect_test::expect;
 
 use crate::{db::BaseDb, includes::IncludeDirs, lowering::lower_root_file};
@@ -65,9 +64,9 @@ fn cross_check_dtc_success(contents: &str) -> Result<(), ()> {
     let db = crate::db::BaseDatabase::default();
     IncludeDirs::new(&db, vec![]);
 
-    let root_file =
-        db.get_files()
-            .add_virtual(&db, Utf8PathBuf::from("/main.dts"), contents.to_owned());
+    let root_file = db
+        .get_files()
+        .add_virtual(&db, "/main.dts".into(), contents.to_owned());
 
     let (diags, _included_files) = crate::compute_diagnostics(&db, root_file);
     let did_fail = !diags.is_empty();

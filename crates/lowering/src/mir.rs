@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
 use dt_tools_parser::TextRange;
 
@@ -73,6 +73,58 @@ impl Mir {
             }
         }
         out
+    }
+
+    /// Returns an iterator over live/effective nodes and properties that are either `path_base` or children of it.
+    ///
+    /// Pass `""` to iterate all live definitions in the tree.
+    pub fn iter_live_defs_under(&self, path_base: &str) -> impl Iterator<Item = &MirDefinition> {
+        fn strip_base<'a>(this: &'a str, base: &str) -> Option<&'a str> {
+            if this == base {
+                Some("")
+            } else {
+                this.strip_prefix(base)
+                    .filter(|stripped| stripped.starts_with('/'))
+            }
+        }
+        fn btreeset_find_base_of<'a>(set: &BTreeSet<&'a str>, needle: &'a str) -> Option<&'a str> {
+            set.range(..=needle)
+                .rfind(|possible_base| strip_base(needle, possible_base).is_some())
+                .map(|v| &**v)
+        }
+
+        let mut deleted = BTreeSet::<&str>::new();
+
+        self.definitions
+            .iter()
+            .rev()
+            .take_while(|def| {
+                // break immediately if a parent of path_base or path_base itself is deleted
+                !(matches!(def.value, MirDefinitionValue::DeletedNode)
+                    && strip_base(path_base, &def.path).is_some())
+            })
+            .filter_map(move |def| {
+                // filter to children only
+                let stripped = strip_base(&def.path, path_base)?;
+
+                match def.value {
+                    MirDefinitionValue::Node(_) | MirDefinitionValue::Property(_)
+                        if btreeset_find_base_of(&deleted, stripped).is_none() =>
+                    {
+                        if let MirDefinitionValue::Property(_) = def.value {
+                            // Overwritten
+                            deleted.insert(stripped);
+                        }
+
+                        Some(def)
+                    }
+                    MirDefinitionValue::DeletedNode | MirDefinitionValue::DeletedProperty => {
+                        deleted.insert(stripped);
+                        None
+                    }
+                    _ => None,
+                }
+            })
     }
 }
 
@@ -194,4 +246,69 @@ pub struct UnresolvedExtension {
     /// Definitions from the extension body (paths relative to target).
     pub body: Vec<MirDefinition>,
     pub provenance: MirProvenance,
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::needless_raw_string_hashes,
+    reason = "expect-test auto update adds r#"
+)]
+mod tests {
+    use expect_test::expect;
+
+    use crate::{db::BaseDb, includes::IncludeDirs, lowering::lower_root_file};
+
+    use super::*;
+
+    #[test]
+    fn iter_live_defs_under() {
+        let contents = r"/dts-v1/;
+
+/ {
+    qux {
+        quux {
+            foo {
+                prop1 = <1>;
+            };
+        };
+    };
+};
+/ {
+    /delete-node/ qux;
+};
+/ {
+    qux {
+        quux {
+            bar {
+                prop2 = <2>;
+            };
+        };
+    };
+};
+";
+        let path_base = "/qux";
+
+        let db = crate::db::BaseDatabase::default();
+        IncludeDirs::new(&db, vec![]);
+
+        let root_file = db
+            .get_files()
+            .add_virtual(&db, "/main.dts".into(), contents.to_owned());
+
+        let result = lower_root_file(&db, root_file).expect("Should be a readable file");
+        let mir = result.mir(&db);
+
+        let new_mir = Mir {
+            definitions: Mir::iter_live_defs_under(mir, path_base).cloned().collect(),
+            unresolved_extensions: Vec::new(),
+        };
+
+        expect![[r#"
+            node   /qux /main.dts 161..261
+            node   /qux/quux /main.dts 175..254
+            node   /qux/quux/bar /main.dts 194..243
+            property = CellList([U32(2)]) /qux/quux/bar/prop2 /main.dts 216..228
+        "#]]
+        .assert_eq(&new_mir.display(&db));
+    }
 }

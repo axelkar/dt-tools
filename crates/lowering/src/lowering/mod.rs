@@ -186,8 +186,6 @@ fn resolve_macro_to_value<
     let parse = entrypoint.parse(&expanded);
 
     // TODO: use trmaps to map error ranges back to the original macro invocation site.
-    // TODO: multi-file errors!!
-
     emit_parse_errors(&parse, &diag, spanner);
 
     let red_node = parse.red_node();
@@ -268,7 +266,6 @@ fn lower_phandle<'db>(
     reason = "expect-test auto update adds r#"
 )]
 mod tests {
-    use camino::Utf8PathBuf;
     use expect_test::{Expect, expect};
 
     use super::*;
@@ -286,15 +283,13 @@ mod tests {
         let db = crate::db::BaseDatabase::default();
         IncludeDirs::new(&db, vec![]);
 
-        let root_file = db.get_files().add_virtual(
-            &db,
-            Utf8PathBuf::from("/main.dts"),
-            root_file_contents.to_owned(),
-        );
+        let root_file =
+            db.get_files()
+                .add_virtual(&db, "/main.dts".into(), root_file_contents.to_owned());
 
         for &(path, contents) in other_files {
             db.get_files()
-                .add_virtual(&db, Utf8PathBuf::from(path), contents.to_owned());
+                .add_virtual(&db, path.into(), contents.to_owned());
         }
 
         let (diags, _included_files) = crate::compute_diagnostics(&db, root_file);

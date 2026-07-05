@@ -70,12 +70,7 @@ pub(crate) fn lower_dt_node(
             lower_resolved(ctx, provenance, target_path);
         } else {
             let mut body_mir = Mir::default();
-            lower_dt_node_body_replace_mir(
-                ctx,
-                &mut body_mir,
-                "",
-                dt_node,
-            );
+            lower_dt_node_body_replace_mir(ctx, &mut body_mir, "", dt_node);
 
             if ctx.is_overlay {
                 // Overlay; we can leave the extension unresolved
@@ -125,12 +120,7 @@ pub(crate) fn lower_dt_node(
         } else {
             // Name is missing, but process so diagnostics are emitted
             let mut body_mir = Mir::default();
-            lower_dt_node_body_replace_mir(
-                ctx,
-                &mut body_mir,
-                "",
-                dt_node,
-            );
+            lower_dt_node_body_replace_mir(ctx, &mut body_mir, "", dt_node);
         }
     }
 }
@@ -154,7 +144,6 @@ pub(crate) fn collect_labels(
             if let Some((old_path, span)) = ctx.env.get_label(ctx.db, &label_name)
                 && old_path != node_path
             {
-                // TODO: MultiSpan & cross-file diagnostics
                 ctx.diag.emit(Diagnostic {
                     span: MultiSpan {
                         primary_spans: vec![label_ast.syntax().text_range().within_file(ctx.file)],

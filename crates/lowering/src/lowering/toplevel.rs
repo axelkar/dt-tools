@@ -328,7 +328,7 @@ pub(crate) fn emit_delete_directive(
                     }
                 }
                 MirPhandleTarget::Path(path) => {
-                    // TODO: dtc checks this
+                    // TODO: dtc checks path phandles here
                     path.clone()
                 }
             }
@@ -336,31 +336,13 @@ pub(crate) fn emit_delete_directive(
             return;
         };
 
-        // FIXME: HACK: ugly code
-
-        // Clear the labels too
-        let mut labels = Vec::new();
-        for def in ctx
-            .mir
-            .definitions
-            .iter()
-            .rev()
-            .filter(|def| {
-                def.path.starts_with(&format!("{target_path}/")) || def.path == target_path
-            })
-            .take_while(|def| {
-                // Until previous deletion?
-                !(def.path == target_path && def.value == MirDefinitionValue::DeletedNode)
-            })
-        {
+        // Clear the labels
+        for def in ctx.mir.iter_live_defs_under(&target_path) {
             if let MirDefinitionValue::Node(data) = &def.value {
-                labels.extend_from_slice(&data.labels);
+                for label in &data.labels {
+                    ctx.env.own_label_map.insert(label.clone(), None);
+                }
             }
-        }
-        labels.dedup();
-
-        for label in labels {
-            ctx.env.own_label_map.insert(label, None);
         }
 
         ctx.mir.definitions.push(MirDefinition {
