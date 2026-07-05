@@ -1,3 +1,8 @@
+#![expect(
+    clippy::needless_raw_string_hashes,
+    reason = "expect-test auto update adds r#"
+)]
+
 use std::{
     io::Write,
     process::{Command, Stdio},
@@ -53,7 +58,8 @@ fn run_dtc(contents: &str) -> Result<String, String> {
 }
 
 /// Returns true if it failed.
-fn cross_check_dtc_success(contents: &str) -> bool {
+#[track_caller]
+fn cross_check_dtc_success(contents: &str) -> Result<(), ()> {
     let dtc_output = run_dtc(contents);
 
     let db = crate::db::BaseDatabase::default();
@@ -97,12 +103,86 @@ fn cross_check_dtc_success(contents: &str) -> bool {
         _ => {}
     }
 
-    did_fail
+    our_result
 }
 
 #[test]
 fn empty() {
-    cross_check_dtc_success("/dts-v1/; / {};");
+    assert_eq!(cross_check_dtc_success("/dts-v1/; / {};"), Ok(()));
+}
+
+mod delete_nonexistent {
+    use super::*;
+
+    #[test]
+    fn label() {
+        let _ = cross_check_dtc_success(
+            r#"/dts-v1/;
+/ { node {}; };
+/delete-node/ &nope;
+"#,
+        );
+    }
+
+    // FIXME: we don't yet validate that the path exists
+    #[test]
+    #[should_panic = "we should fail like dtc"]
+    fn path() {
+        let _ = cross_check_dtc_success(
+            r#"/dts-v1/;
+/ { node {}; };
+/delete-node/ &{/nope};
+"#,
+        );
+    }
+
+    #[test]
+    fn name() {
+        let _ = cross_check_dtc_success(
+            r#"/dts-v1/;
+/ { /delete-node/ nope; };
+"#,
+        );
+    }
+}
+
+mod delete_double {
+    use super::*;
+
+    #[test]
+    fn label() {
+        let _ = cross_check_dtc_success(
+            r#"/dts-v1/;
+/ { lbl: node {}; };
+/delete-node/ &lbl;
+/delete-node/ &lbl;
+"#,
+        );
+    }
+
+    // FIXME: we don't yet validate that the path exists
+    #[test]
+    #[should_panic = "we should fail like dtc"]
+    fn path() {
+        let _ = cross_check_dtc_success(
+            r#"/dts-v1/;
+/ { node {}; };
+/delete-node/ &{/node};
+/delete-node/ &{/node};
+"#,
+        );
+    }
+
+    #[test]
+    fn name() {
+        let _ = cross_check_dtc_success(
+            r#"/dts-v1/;
+/ { node {}; };
+/ { /delete-node/ node; };
+/ { /delete-node/ node; };
+"#,
+        );
+    }
 }
 
 fn generate_test_dts(
@@ -186,11 +266,15 @@ fn generate_delete_tests() {
                         reference_target,
                         fate,
                     );
-                    let did_fail = cross_check_dtc_success(&dts);
+                    let our_result = cross_check_dtc_success(&dts);
 
                     // Keep track of succeeding/failing combinations
-                    if did_fail { &mut fail } else { &mut success }
-                        .push(format!("{reference_target}-{fate}"));
+                    if our_result.is_err() {
+                        &mut fail
+                    } else {
+                        &mut success
+                    }
+                    .push(format!("{reference_target}-{fate}"));
                 }
             }
         }
