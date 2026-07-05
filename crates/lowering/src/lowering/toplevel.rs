@@ -309,28 +309,13 @@ pub(crate) fn emit_delete_directive(
                 return;
             };
 
-            match &target {
-                MirPhandleTarget::Label(name) => {
-                    if let Some(path) = ctx.env.get_label_path(ctx.db, name) {
-                        path.to_owned()
-                    } else {
-                        // Couldn't resolve it.
-                        if ctx.is_overlay {
-                            // TODO: handle unresolved delete-node!
-                        } else {
-                            ctx.diag.emit(Diagnostic::new(
-                                text_range.within_file(ctx.file),
-                                Cow::Owned(format!("Label not found: {name}")),
-                                Severity::Error,
-                            ));
-                        }
-                        return;
-                    }
+            match resolve_phandle(ctx, &target, &phandle) {
+                Some(value) => value,
+                None if ctx.is_overlay => {
+                    // TODO: handle unresolved delete-node!
+                    return;
                 }
-                MirPhandleTarget::Path(path) => {
-                    // TODO: dtc checks path phandles here
-                    path.clone()
-                }
+                None => return,
             }
         } else {
             return;
@@ -361,4 +346,48 @@ pub(crate) fn emit_delete_directive(
             provenance,
         });
     }
+}
+
+/// Resolves a [`MirPhandleTarget`] to a path.
+///
+/// Returns `None` if it can't be resolved. If `ctx.is_overlay`, an error will not be emitted.
+pub(crate) fn resolve_phandle(
+    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    target: &MirPhandleTarget,
+    phandle: &ast::DtPhandle,
+) -> Option<String> {
+    Some(match &target {
+        MirPhandleTarget::Label(name) => {
+            if let Some(path) = ctx.env.get_label_path(ctx.db, name) {
+                path.to_owned()
+            } else {
+                // Couldn't resolve it.
+                if ctx.is_overlay {
+                    // TODO: handle unresolved delete-node!
+                } else {
+                    ctx.diag.emit(Diagnostic::new(
+                        phandle.syntax().text_range().within_file(ctx.file),
+                        Cow::Owned(format!("Label not found: {name}")),
+                        Severity::Error,
+                    ));
+                }
+                return None;
+            }
+        }
+        MirPhandleTarget::Path(path) => {
+            if !ctx.mir.contains_node(path) {
+                if ctx.is_overlay {
+                    // TODO: handle unresolved delete-node!
+                } else {
+                    ctx.diag.emit(Diagnostic::new(
+                        phandle.syntax().text_range().within_file(ctx.file),
+                        Cow::Owned(format!("Node at path not found: {path}")),
+                        Severity::Error,
+                    ));
+                }
+                return None;
+            }
+            path.clone()
+        }
+    })
 }

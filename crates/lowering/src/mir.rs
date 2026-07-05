@@ -126,6 +126,13 @@ impl Mir {
                 }
             })
     }
+
+    /// Returns true if `path` currently exists as a live node.
+    #[must_use]
+    pub fn contains_node(&self, path: &str) -> bool {
+        self.iter_live_defs_under(path)
+            .any(|def| def.path == path && matches!(def.value, MirDefinitionValue::Node(_)))
+    }
 }
 
 /// One source location that contributed to a definition.

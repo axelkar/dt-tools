@@ -146,14 +146,49 @@ fn check_mir_post<'db>(
     db: &'db dyn db::BaseDb,
     result: LoweredFile<'db>,
 ) -> Vec<Diagnostic<file::File>> {
+    fn check_phandle(
+        db: &dyn db::BaseDb,
+        mir: &mir::Mir,
+        result: LoweredFile<'_>,
+        def: &mir::MirDefinition,
+        target: &mir::MirPhandleTarget,
+    ) -> Option<Diagnostic<file::File>> {
+        match target {
+            mir::MirPhandleTarget::Label(name) => {
+                if result
+                    .env_after(db)
+                    .get_label(db, InternedKey::new(db, name))
+                    .is_none()
+                {
+                    Some(Diagnostic::new(
+                        def.provenance.text_range.within_file(def.provenance.file),
+                        Cow::Owned(format!("Label not found: {name}")),
+                        Severity::Error,
+                    ))
+                } else {
+                    None
+                }
+            }
+            mir::MirPhandleTarget::Path(path) => {
+                if mir.contains_node(path) {
+                    None
+                } else {
+                    Some(Diagnostic::new(
+                        def.provenance.text_range.within_file(def.provenance.file),
+                        Cow::Owned(format!("Node at path not found: {path}")),
+                        Severity::Error,
+                    ))
+                }
+            }
+        }
+    }
+
     let mut diagnostics = Vec::new();
 
     if result.is_overlay(db) {
         return Vec::new();
     }
     let mir = result.mir(db);
-
-    // TODO: also check path phandles like dtc
 
     // Labels are resolved at the end because forward references are valid.
     for def in mir.iter_live_defs_under("") {
@@ -162,33 +197,13 @@ fn check_mir_post<'db>(
                 match value {
                     mir::MirValue::CellList(mir_cells) => {
                         for cell in mir_cells {
-                            if let mir::MirCell::Phandle(mir::MirPhandleTarget::Label(
-                                label_name,
-                            )) = cell
-                                && result
-                                    .env_after(db)
-                                    .get_label(db, InternedKey::new(db, label_name))
-                                    .is_none()
-                            {
-                                diagnostics.push(Diagnostic::new(
-                                    def.provenance.text_range.within_file(def.provenance.file),
-                                    Cow::Owned(format!("Label not found: {label_name}")),
-                                    Severity::Error,
-                                ));
+                            if let mir::MirCell::Phandle(target) = cell {
+                                diagnostics.extend(check_phandle(db, mir, result, def, target));
                             }
                         }
                     }
-                    mir::MirValue::Phandle(mir::MirPhandleTarget::Label(label_name))
-                        if result
-                            .env_after(db)
-                            .get_label(db, InternedKey::new(db, label_name))
-                            .is_none() =>
-                    {
-                        diagnostics.push(Diagnostic::new(
-                            def.provenance.text_range.within_file(def.provenance.file),
-                            Cow::Owned(format!("Label not found: {label_name}")),
-                            Severity::Error,
-                        ));
+                    mir::MirValue::Phandle(target) => {
+                        diagnostics.extend(check_phandle(db, mir, result, def, target));
                     }
                     _ => {}
                 }

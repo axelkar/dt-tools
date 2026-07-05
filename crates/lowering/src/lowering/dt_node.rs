@@ -14,7 +14,7 @@ use super::{IntraFileCtx, dt_property::lower_dt_property, lower_phandle};
 use crate::{
     db::BaseDb,
     file::File,
-    lowering::toplevel::emit_delete_directive,
+    lowering::toplevel::{emit_delete_directive, resolve_phandle},
     macros::{MacroCtx, env::TrackedMapEnvMut, substitute_macro_tok},
     mir::{
         Mir, MirDefinition, MirDefinitionValue, MirNodeData, MirPhandleTarget, MirProvenance,
@@ -59,14 +59,7 @@ pub(crate) fn lower_dt_node(
             return;
         };
 
-        let target_path = match &target {
-            MirPhandleTarget::Label(name) => ctx
-                .env
-                .get_label_path(ctx.db, name)
-                .map(std::borrow::ToOwned::to_owned),
-            MirPhandleTarget::Path(path) => Some(path.clone()),
-        };
-        if let Some(ref target_path) = target_path {
+        if let Some(ref target_path) = resolve_phandle(ctx, &target, &phandle) {
             lower_resolved(ctx, provenance, target_path);
         } else {
             let mut body_mir = Mir::default();
@@ -87,12 +80,6 @@ pub(crate) fn lower_dt_node(
                         provenance,
                     });
                 }
-            } else {
-                ctx.diag.emit(Diagnostic::new(
-                    phandle.syntax().text_range().within_file(ctx.file),
-                    Cow::Owned(format!("Label not found: {target}")),
-                    Severity::Error,
-                ));
             }
         }
     } else {

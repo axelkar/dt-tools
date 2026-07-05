@@ -123,9 +123,7 @@ mod delete_nonexistent {
         );
     }
 
-    // FIXME: we don't yet validate that the path exists
     #[test]
-    #[should_panic = "we should fail like dtc"]
     fn path() {
         let _ = cross_check_dtc_success(
             r#"/dts-v1/;
@@ -159,9 +157,7 @@ mod delete_double {
         );
     }
 
-    // FIXME: we don't yet validate that the path exists
     #[test]
-    #[should_panic = "we should fail like dtc"]
     fn path() {
         let _ = cross_check_dtc_success(
             r#"/dts-v1/;

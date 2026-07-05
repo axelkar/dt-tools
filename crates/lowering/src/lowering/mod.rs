@@ -637,7 +637,7 @@ mod tests {
             expect![[r#"
 
                 --- errors ---
-                Error 11..17: Label not found: &BOGUS
+                Error 11..17: Label not found: BOGUS
             "#]],
         );
     }
@@ -656,6 +656,24 @@ mod tests {
 
                 --- errors ---
                 Error 15..28: Label not found: BOGUS [dt_tools_lowering::check_mir_post]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_undefined_path_phandle() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo = &{/bar}; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..32
+                property = Phandle(Path("/bar")) /foo /main.dts 15..29
+
+                --- errors ---
+                Error 15..29: Node at path not found: /bar [dt_tools_lowering::check_mir_post]
             "#]],
         );
     }
