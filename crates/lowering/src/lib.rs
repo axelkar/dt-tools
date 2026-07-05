@@ -154,7 +154,7 @@ fn check_mir_post<'db>(
     }
     let mir = result.mir(db);
 
-    // TODO: check also path phandles like DTC
+    // TODO: check also path phandles like dtc
 
     // We have to check phandles at the end because phandles are fine in any order.
     let mut deleted = FxHashSet::default();

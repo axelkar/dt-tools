@@ -90,7 +90,7 @@ pub fn analyze_cst(file: &ast::SourceFile, src: &str) -> Option<FileDefinition> 
         hm
     };
 
-    // DTC rules:
+    // dtc rules:
     // duplicate labels aren't allowed
     // labels can be used before and after their definition, without scope
 

@@ -52,7 +52,7 @@ impl Value {
             Self::CellList(cell_items) => {
                 JValue::Array(cell_items.into_iter().map(Cell::into_json).collect())
             }
-            // TODO: DTC outputs `!u8 [0x12, 0x34, 0x56]` for `[123456]`
+            // TODO: dtc outputs `!u8 [0x12, 0x34, 0x56]` for `[123456]`
             // This is very easily confused with a cell like
             // `[0x12, 0x34, 0x56]` from `<0x12 0x34 0x56>`, which is 4 times larger
             Self::Bytestring(bytes) => JValue::Array(

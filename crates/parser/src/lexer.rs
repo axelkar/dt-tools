@@ -812,7 +812,7 @@ mod tests {
         check_single("0o777", TokenKind::Number);
         check_single("0b00101010", TokenKind::Number);
 
-        // TODO: is this syntax in DTC? used out in the wild? in the spec?
+        // TODO: is this syntax in dtc? used out in the wild? in the spec?
         //check("123U", TokenKind::Number);
         //check("123L", TokenKind::Number);
         //check("123UL", TokenKind::Number);

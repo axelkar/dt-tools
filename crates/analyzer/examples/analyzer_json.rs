@@ -135,12 +135,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .output()
         .unwrap();
     if !dtc_out.status.success() {
-        eprintln!("DTC errored: {}", dtc_out.status);
+        eprintln!("dtc errored: {}", dtc_out.status);
         std::process::exit(1);
     }
     eprintln!(
         "{}{:?}",
-        "Ran DTC in ".fg::<Gray>(),
+        "Ran dtc in ".fg::<Gray>(),
         start.elapsed().bright_green()
     );
 
@@ -148,23 +148,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut dtc_json = yaml_to_json(serde_yaml::from_slice(&dtc_out.stdout).unwrap());
     eprintln!(
         "{}{:?}",
-        "Turned DTC output into JSON in ".fg::<Gray>(),
+        "Turned dtc output into JSON in ".fg::<Gray>(),
         start.elapsed().bright_green()
     );
 
     let Some(dtc_json) = dtc_json.as_array_mut().and_then(remove_first) else {
-        eprintln!("Invalid DTC output");
+        eprintln!("Invalid dtc output");
         std::process::exit(1);
     };
 
     if assert {
         pretty_assertions::assert_eq!(own_json, dtc_json);
     } else {
-        eprintln!("DTC output: {}", serde_json::to_string(&dtc_json).unwrap());
+        eprintln!("dtc output: {}", serde_json::to_string(&dtc_json).unwrap());
     }
     eprintln!(
         "{}{:?}",
-        "Total DTC time: ".fg::<Gray>(),
+        "Total dtc time: ".fg::<Gray>(),
         total_dtc_start.elapsed().bright_green()
     );
     Ok(())

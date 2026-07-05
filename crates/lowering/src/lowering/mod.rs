@@ -244,7 +244,7 @@ fn lower_phandle<'db>(
         // (e.g. `#define UART_1 soc/uart` and `&UART_1`).
         let name_ast = phandle.name()?;
 
-        // DTC wants extensions to be resolved from items above/before the extensions in
+        // dtc wants extensions to be resolved from items above/before the extensions in
         // non-overlay mode, but phandles are fine in any order.
 
         Some(

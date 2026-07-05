@@ -141,7 +141,7 @@ impl Session {
         let db = &mut *self.db.lock();
 
         // TODO: recommend these if there is an include error
-        // Linux kernel DTC include dirs:
+        // Linux kernel dtc include dirs:
         // - include (for #define's in header files)
         // - scripts/dtc/include-prefixes
 

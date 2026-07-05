@@ -180,7 +180,7 @@ pub(crate) fn collect_labels(
             &mut |tr| tr.within_file(ctx.file),
             &label_ast,
         ) {
-            // Check for duplicate labels (DTC: no duplicates globally).
+            // Check for duplicate labels (dtc: no duplicates globally).
             if let Some((old_path, span)) = ctx.env.get_label(ctx.db, &label_name)
                 && old_path != node_path
             {

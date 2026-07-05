@@ -107,7 +107,7 @@ impl Stage2Property {
     }
 }
 
-// DTC impl:
+// dtc impl:
 // Phandle values can be before the label definition
 // Extensions must be defined after the label definition
 
@@ -243,7 +243,7 @@ fn merge_root_node(
 
                     if let Some(Stage2Tree::Node(other)) = stage2.children.get(name) {
                         // can't mix
-                        // TODO: DTC supports node_name_vs_property_name as a warning
+                        // TODO: dtc supports node_name_vs_property_name as a warning
                         diag.emit(Diagnostic {
                             span: MultiSpan {
                                 primary_spans: vec![name_ast.syntax().text_range().within_file(())],
