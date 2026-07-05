@@ -8,9 +8,11 @@ use dt_tools_parser::{
         HasUnitAddress,
     },
     lexer::TokenKind,
+    parser::Entrypoint,
 };
 
 use super::{IntraFileCtx, dt_property::lower_dt_property, lower_phandle};
+use crate::emit_parse_errors;
 use crate::{
     db::BaseDb,
     file::File,
@@ -224,18 +226,26 @@ pub(crate) fn resolve_name_or_macro<'db, Ast: HasName + HasMacroInvocation>(
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
     ast: &Ast,
 ) -> Option<String> {
-    if let Some(name_ast) = ast.name() {
-        Some(
-            substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Implicit(&name_ast))
-                .map(|(_span, _trmaps, expanded)| expanded)
-                .unwrap_or(name_ast.syntax().text().as_str().to_owned()),
-        )
+    let (_span, _trmaps, expanded) = if let Some(name_ast) = ast.name() {
+        match substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Implicit(&name_ast)) {
+            Some(val) => val,
+            None => return Some(name_ast.syntax().text().as_str().to_owned()),
+        }
     } else if let Some(invoc) = ast.macro_invocation() {
-        substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Explicit(&invoc))
-            .map(|(_span, _trmaps, expanded)| expanded)
+        substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Explicit(&invoc))?
     } else {
-        None
-    }
+        return None;
+    };
+
+    let parse = Entrypoint::Name.parse(&expanded);
+
+    // TODO: trmaps -> spanner
+    emit_parse_errors(&parse, diag, spanner);
+
+    let ast = ast::EntryName::cast(parse.red_node())
+        .expect("Entrypoint::Name should parse to ast::EntryName");
+
+    resolve_name_or_macro(db, env, diag, spanner, &ast)
 }
 
 /// Resolves and concatenates together the name and unit address of a compatible AST node.

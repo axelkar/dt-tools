@@ -1015,3 +1015,10 @@ impl AstNode for NodeItem {
         }
     }
 }
+
+define_ast_node! {
+    /// Kind: [`NodeKind::EntryName`]
+    EntryName: EntryName;
+}
+impl HasName for EntryName {}
+impl HasMacroInvocation for EntryName {}

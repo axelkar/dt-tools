@@ -607,6 +607,24 @@ mod tests {
     }
 
     #[test]
+    fn mir_macro_node_twice() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define SUBSTITUTED BAR
+#define FOO SUBSTITUTED
+
+/ { FOO {}; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 60..74
+                node   /BAR /main.dts 64..71
+            "#]],
+        );
+    }
+
+    #[test]
     fn mir_undefined_macro() {
         check_mir(
             r#"

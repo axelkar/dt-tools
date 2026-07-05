@@ -637,7 +637,9 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
 }
 
 pub(super) fn entry_name(p: &mut Parser) {
-    if p.at_name() {
+    if p.silent_at_macro_invocation_with_args() {
+        macro_invocation(p.start(), p);
+    } else if p.at_name() {
         p.bump_name();
     } else {
         // This just quits parsing. Is this preferred?
