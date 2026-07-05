@@ -3,11 +3,14 @@ use std::borrow::Cow;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
 use dt_tools_parser::{
     TextRange,
-    ast::{self, AstNode, AstToken, HasLabels, HasMacroInvocation, HasName, HasUnitAddress},
+    ast::{
+        self, AstNode, AstToken, HasDtPhandle, HasLabels, HasMacroInvocation, HasName,
+        HasUnitAddress,
+    },
     lexer::TokenKind,
 };
 
-use super::{IntraFileCtx, dt_property::process_dt_property, lower_phandle};
+use super::{IntraFileCtx, dt_property::lower_dt_property, lower_phandle};
 use crate::{
     db::BaseDb,
     file::File,
@@ -20,7 +23,7 @@ use crate::{
 };
 
 /// Lowers an [`ast::DtNode`] and its subtree to flat [`MirDefinition`]s.
-pub(crate) fn process_dt_node(
+pub(crate) fn lower_dt_node(
     ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
     path_prefix: &str,
     dt_node: &ast::DtNode,
@@ -30,8 +33,22 @@ pub(crate) fn process_dt_node(
         text_range: dt_node.syntax().text_range(),
     };
 
+    let lower_resolved = |ctx: &mut _, provenance, node_path: &String| {
+        let labels = collect_labels(ctx, dt_node, node_path);
+
+        // Emit the node definition.
+        ctx.mir.definitions.push(MirDefinition {
+            path: node_path.clone(),
+            value: MirDefinitionValue::Node(MirNodeData { labels }),
+            provenance,
+        });
+
+        // Process the node body: subnodes and properties.
+        lower_dt_node_body(ctx, node_path, dt_node);
+    };
+
     // Handle extensions: &label { } or &{/path} { }
-    if let Some(phandle) = dt_node.extension_name() {
+    if let Some(phandle) = dt_node.dt_phandle() {
         let Some(target) = lower_phandle(
             ctx.db,
             ctx.env,
@@ -50,118 +67,71 @@ pub(crate) fn process_dt_node(
             MirPhandleTarget::Path(path) => Some(path.clone()),
         };
         if let Some(ref target_path) = target_path {
-            let labels = collect_labels(ctx, dt_node, target_path);
-
-            // Emit the node definition.
-            ctx.mir.definitions.push(MirDefinition {
-                path: target_path.clone(),
-                value: MirDefinitionValue::Node(MirNodeData { labels }),
-                provenance,
-            });
-
-            process_dt_node_body(ctx, target_path, dt_node);
-        } else if ctx.is_overlay {
-            // Overlay; we can leave the extension unresolved
-            let mut body_mir = Mir::default();
-            process_dt_node_body(
-                &mut IntraFileCtx {
-                    db: ctx.db,
-                    file: ctx.file,
-                    env: ctx.env,
-                    diag: ctx.diag,
-                    mir: &mut body_mir,
-                    is_overlay: ctx.is_overlay,
-                },
-                "",
-                dt_node,
-            );
-
-            // Propagate any nested unresolved extensions.
-            ctx.mir
-                .unresolved_extensions
-                .extend(body_mir.unresolved_extensions);
-
-            if let MirPhandleTarget::Label(label) = target {
-                ctx.mir.unresolved_extensions.push(UnresolvedExtension {
-                    label,
-                    body: body_mir.definitions,
-                    provenance: provenance.clone(),
-                });
-            }
+            lower_resolved(ctx, provenance, target_path);
         } else {
-            // DTC wants extensions to be resolved from items above/before the extensions in
-            // non-overlay mode.
-
-            // Process so diagnostics are emitted
             let mut body_mir = Mir::default();
-            process_dt_node_body(
-                &mut IntraFileCtx {
-                    db: ctx.db,
-                    file: ctx.file,
-                    env: ctx.env,
-                    diag: ctx.diag,
-                    mir: &mut body_mir,
-                    is_overlay: ctx.is_overlay,
-                },
+            lower_dt_node_body_replace_mir(
+                ctx,
+                &mut body_mir,
                 "",
                 dt_node,
             );
 
-            ctx.diag.emit(Diagnostic::new(
-                phandle.syntax().text_range().within_file(ctx.file),
-                Cow::Owned(format!("Label not found: {target}")),
-                Severity::Error,
-            ));
+            if ctx.is_overlay {
+                // Overlay; we can leave the extension unresolved
+
+                // Propagate any nested unresolved extensions.
+                ctx.mir
+                    .unresolved_extensions
+                    .extend(body_mir.unresolved_extensions);
+
+                if let MirPhandleTarget::Label(label) = target {
+                    ctx.mir.unresolved_extensions.push(UnresolvedExtension {
+                        label,
+                        body: body_mir.definitions,
+                        provenance,
+                    });
+                }
+            } else {
+                ctx.diag.emit(Diagnostic::new(
+                    phandle.syntax().text_range().within_file(ctx.file),
+                    Cow::Owned(format!("Label not found: {target}")),
+                    Severity::Error,
+                ));
+            }
         }
-        return;
-    }
-
-    let name = get_name_and_unit_addr(
-        ctx.db,
-        ctx.env,
-        ctx.diag,
-        &mut |tr| tr.within_file(ctx.file),
-        dt_node,
-    )
-    .or_else(|| {
-        // Root node
-        dt_node
-            .syntax()
-            .child_tokens()
-            .any(|tok| tok.green.kind == TokenKind::Slash)
-            .then(String::new)
-    });
-
-    if let Some(name) = name {
-        // Build the node's full path.
-        let node_path = build_path(path_prefix, &name);
-
-        let labels = collect_labels(ctx, dt_node, &node_path);
-
-        // Emit the node definition.
-        ctx.mir.definitions.push(MirDefinition {
-            path: node_path.clone(),
-            value: MirDefinitionValue::Node(MirNodeData { labels }),
-            provenance,
+    } else {
+        let name = get_name_and_unit_addr(
+            ctx.db,
+            ctx.env,
+            ctx.diag,
+            &mut |tr| tr.within_file(ctx.file),
+            dt_node,
+        )
+        .or_else(|| {
+            // Root node
+            dt_node
+                .syntax()
+                .child_tokens()
+                .any(|tok| tok.green.kind == TokenKind::Slash)
+                .then(String::new)
         });
 
-        // Process the node body: subnodes and properties.
-        process_dt_node_body(ctx, &node_path, dt_node);
-    } else {
-        // Name is missing, but process so diagnostics are emitted
-        let mut body_mir = Mir::default();
-        process_dt_node_body(
-            &mut IntraFileCtx {
-                db: ctx.db,
-                file: ctx.file,
-                env: ctx.env,
-                diag: ctx.diag,
-                mir: &mut body_mir,
-                is_overlay: ctx.is_overlay,
-            },
-            "",
-            dt_node,
-        );
+        if let Some(name) = name {
+            // Build the node's full path.
+            let node_path = build_path(path_prefix, &name);
+
+            lower_resolved(ctx, provenance, &node_path);
+        } else {
+            // Name is missing, but process so diagnostics are emitted
+            let mut body_mir = Mir::default();
+            lower_dt_node_body_replace_mir(
+                ctx,
+                &mut body_mir,
+                "",
+                dt_node,
+            );
+        }
     }
 }
 
@@ -213,8 +183,29 @@ pub(crate) fn collect_labels(
     labels
 }
 
+/// [`lower_dt_node_body`] but with [`IntraFileCtx::mir`] replaced.
+pub(crate) fn lower_dt_node_body_replace_mir(
+    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    body_mir: &mut Mir,
+    parent_node_path: &str,
+    dt_node: &ast::DtNode,
+) {
+    lower_dt_node_body(
+        &mut IntraFileCtx {
+            db: ctx.db,
+            file: ctx.file,
+            env: ctx.env,
+            diag: ctx.diag,
+            mir: body_mir,
+            is_overlay: ctx.is_overlay,
+        },
+        parent_node_path,
+        dt_node,
+    );
+}
+
 /// Processes the body of an [`ast::DtNode`].
-pub(crate) fn process_dt_node_body(
+pub(crate) fn lower_dt_node_body(
     ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
@@ -224,12 +215,12 @@ pub(crate) fn process_dt_node_body(
     for item in dt_node.node_items() {
         match item {
             ast::NodeItem::DtProperty(prop) => {
-                if let Some(def) = process_dt_property(ctx, parent_node_path, &prop) {
+                if let Some(def) = lower_dt_property(ctx, parent_node_path, &prop) {
                     ctx.mir.definitions.push(def);
                 }
             }
             ast::NodeItem::DtNode(subnode) => {
-                process_dt_node(ctx, parent_node_path, &subnode);
+                lower_dt_node(ctx, parent_node_path, &subnode);
             }
             ast::NodeItem::Directive(dir) => {
                 emit_delete_directive(ctx, parent_node_path, &dir);

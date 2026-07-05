@@ -680,10 +680,6 @@ impl DtNode {
             .any(|node| node.green.kind == NodeKind::DtPhandle)
     }
 
-    pub fn extension_name(&self) -> Option<DtPhandle> {
-        self.syntax.child_nodes().find_map(DtPhandle::cast)
-    }
-
     /// Returns true if this is not a node extension.
     ///
     /// <div class="warning">
@@ -761,6 +757,7 @@ impl HasLabel for DtNode {}
 impl HasLabels for DtNode {}
 impl HasMacroInvocation for DtNode {}
 impl HasUnitAddress for DtNode {}
+impl HasDtPhandle for DtNode {}
 
 define_ast_token! {
     /// A generic name.

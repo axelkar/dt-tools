@@ -16,7 +16,7 @@ use super::{
 use crate::{
     file::File,
     lowering::{
-        dt_node::{build_path, get_name_and_unit_addr, process_dt_node},
+        dt_node::{build_path, get_name_and_unit_addr, lower_dt_node},
         lower_file,
         preprocessor::pp_cond_directive_eval,
     },
@@ -53,7 +53,7 @@ pub(crate) fn handle_toplevel_item(
 
     match item {
         ast::ToplevelItem::Node(dt_node) => {
-            process_dt_node(ctx, "", &dt_node);
+            lower_dt_node(ctx, "", &dt_node);
         }
         ast::ToplevelItem::Directive(dir) => {
             handle_directive(
@@ -327,20 +327,16 @@ pub(crate) fn emit_delete_directive(
                         return;
                     }
                 }
-                MirPhandleTarget::Path(path) => path.clone(),
+                MirPhandleTarget::Path(path) => {
+                    // TODO: dtc checks this
+                    path.clone()
+                }
             }
         } else {
             return;
         };
 
-        // TODO: this should not error (i.e. labels should only be resolved at the end):
-        // label: node {};
-        // foo = &label;
-        // /delete-node/ &label;
-        // label: anothernode {};
-
-        // TODO: better way to do this
-        // TODO: investigate DTC behavior more
+        // FIXME: HACK: ugly code
 
         // Clear the labels too
         let mut labels = Vec::new();

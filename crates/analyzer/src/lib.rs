@@ -39,7 +39,7 @@
 
 use std::{borrow::Cow, collections::HashMap};
 
-use dt_tools_parser::ast::{self, AstNode, AstToken as _, HasLabel as _, HasName as _};
+use dt_tools_parser::ast::{self, AstNode, AstToken as _, HasDtPhandle, HasLabel as _, HasName as _};
 pub use prop::{
     CustomValue, CustomValueCellItem, DefinitionTree, DefinitionTreeNode, PhandleTarget,
     PropDefinition, Value, ValueFromAstError, analyze_node,
@@ -97,7 +97,7 @@ pub fn analyze_cst(file: &ast::SourceFile, src: &str) -> Option<FileDefinition> 
     let mut tree = analyze_node(&root_node, src)?;
     for extension in extensions {
         // TODO: path-based phandles
-        let label = extension.extension_name()?.name()?;
+        let label = extension.dt_phandle()?.name()?;
         let label = label.syntax().text().as_str();
 
         let label = if let Some(labels) = labels.get(label) {

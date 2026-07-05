@@ -20,7 +20,7 @@ use crate::{
 /// Lowers an [`ast::DtProperty`] to a [`MirDefinition`], if valid.
 ///
 /// Returns `None` if the property has no name or can't be processed.
-pub(crate) fn process_dt_property(
+pub(crate) fn lower_dt_property(
     ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
     parent_node_path: &str,
     prop: &ast::DtProperty,

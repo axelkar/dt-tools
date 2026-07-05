@@ -156,6 +156,8 @@ fn check_mir_post<'db>(
 
     // TODO: check also path phandles like dtc
 
+    // FIXME: HACK: very ugly code
+
     // We have to check phandles at the end because phandles are fine in any order.
     let mut deleted = FxHashSet::default();
     for def in mir.definitions.iter().rev() {
@@ -207,10 +209,7 @@ fn check_mir_post<'db>(
                     }
                 }
             }
-            mir::MirDefinitionValue::DeletedNode => {
-                deleted.insert(def.path.clone());
-            }
-            mir::MirDefinitionValue::DeletedProperty => {
+            mir::MirDefinitionValue::DeletedNode | mir::MirDefinitionValue::DeletedProperty => {
                 deleted.insert(def.path.clone());
             }
             _ => {}
