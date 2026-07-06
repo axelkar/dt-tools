@@ -241,27 +241,6 @@ pub fn compute_diagnostics(
         );
     }
 
-    if let Some(parse) = parse_file(db, root_file) {
-        let parse = parse.parse(db);
-
-        let diag = parking_lot::Mutex::new(&mut diagnostics);
-        emit_parse_errors(parse, &diag, &mut |text_range| {
-            text_range.within_file(root_file)
-        });
-
-        // FIXME: root file detection
-        let is_root_file = false;
-        for mut lint in dt_tools_lint::default_lint(
-            &parse.source_file(),
-            root_file.contents(db),
-            is_root_file,
-            root_file,
-        ) {
-            tag_diagnostic(&mut lint.diagnostic, &format!("dt-tools(lint {})", lint.id));
-            diagnostics.push(lint.diagnostic);
-        }
-    }
-
     // TODO: re-enable? (though preprocessor_eval_file (also TODO: rename it) will probably
     // supersede the functionality here)
     /*
@@ -285,9 +264,29 @@ pub fn compute_diagnostics(
     };
 
     processed_files.push(root_file);
+    processed_files.dedup();
+
+    for file in &processed_files {
+        if let Some(parse) = parse_file(db, *file) {
+            let parse = parse.parse(db);
+
+            let diag = parking_lot::Mutex::new(&mut diagnostics);
+            emit_parse_errors(parse, &diag, &mut |text_range| text_range.within_file(*file));
+
+            let is_root_file = *file == root_file;
+            for mut lint in dt_tools_lint::default_lint(
+                &parse.source_file(),
+                root_file.contents(db),
+                is_root_file,
+                root_file,
+            ) {
+                tag_diagnostic(&mut lint.diagnostic, &format!("dt-tools(lint {})", lint.id));
+                diagnostics.push(lint.diagnostic);
+            }
+        }
+    }
 
     diagnostics.dedup();
-    processed_files.dedup();
     (diagnostics, processed_files)
 }
 
