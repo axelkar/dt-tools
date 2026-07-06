@@ -192,9 +192,8 @@ fn dt_expr(p: &mut Parser) {
 /// Parses a Devicetree cell list.
 ///
 /// - Form: `<1>`.
-fn dt_cell_list(p: &mut Parser) -> Result<(), ()> {
+fn dt_cell_list(m: Marker, p: &mut Parser) -> Result<CompletedMarker, ()> {
     vis!(begin);
-    let m = p.start();
 
     assert!(p.eat(TokenKind::LAngle));
 
@@ -204,9 +203,8 @@ fn dt_cell_list(p: &mut Parser) -> Result<(), ()> {
     }
     p.expect(TokenKind::RAngle);
 
-    m.complete(p, NodeKind::DtCellList);
     vis!(end);
-    Ok(())
+    Ok(m.complete(p, NodeKind::DtCellList))
 }
 
 const ITEM_RECOVERY_SET: &[TokenKind] = concat_slices!(
@@ -250,10 +248,24 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
 
     while !p.at_end() {
         p.add_expected(Expected::Value);
-        if p.silent_at(TokenKind::String) {
+
+        if p.silent_at(TokenKind::BitsDirective) {
+            let m_cell_list = p.start();
+            let m = p.start();
+            p.bump();
+            p.expect(TokenKind::Number);
+            m.complete(p, NodeKind::DtsDirective);
+
+            if p.at(TokenKind::LAngle) {
+                dt_cell_list(m_cell_list, p)?;
+            } else {
+                p.error().msg_expected().bump().emit();
+                m_cell_list.complete(p, NodeKind::ParseError);
+            }
+        } else if p.silent_at(TokenKind::String) {
             p.bump();
         } else if p.silent_at(TokenKind::LAngle) {
-            dt_cell_list(p)?;
+            dt_cell_list(p.start(), p)?;
         } else if p.silent_at(TokenKind::Ampersand) {
             reference(p);
         } else if p.silent_at(TokenKind::Ident) {
@@ -292,10 +304,6 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
     }
 
     assert!(p.eat(TokenKind::Equals));
-
-    if p.eat(TokenKind::BitsDirective) {
-        p.expect(TokenKind::Number);
-    }
 
     let list_m = p.start();
     if propvalues(p, &[TokenKind::Semicolon]).is_err() {
@@ -484,7 +492,7 @@ fn item(p: &mut Parser) {
         let m_params = p.start();
         p.expect(TokenKind::Number);
         p.expect(TokenKind::Number);
-        m_params.complete(p, NodeKind::DirectiveArguments);
+        m_params.complete(p, NodeKind::DtsDirectiveArguments);
 
         p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::DtsDirective);
@@ -506,7 +514,7 @@ fn item(p: &mut Parser) {
         } else {
             p.error().msg_expected().emit();
         }
-        m_params.complete(p, NodeKind::DirectiveArguments);
+        m_params.complete(p, NodeKind::DtsDirectiveArguments);
 
         p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::DtsDirective);
@@ -822,6 +830,56 @@ Tree:
     }
 
     #[test]
+    fn bits_directive() {
+        check_ep(
+            Entrypoint::PropValues,
+            "/bits/ 64 1",
+            expect![[r#"
+                Errors: [
+                    ParseError {
+                        message: "Expected ‘<’, but found number literal",
+                        primary_text_range: TextRange {
+                            start: 10,
+                            end: 11,
+                        },
+                        span_labels: [],
+                    },
+                ]
+
+                Tree:
+                EntryPropValues@0..11
+                  ParseError@0..11
+                    DtsDirective@0..9
+                      BitsDirective@0..6 "/bits/"
+                      Whitespace@6..7 " "
+                      Number@7..9 "64"
+                    Whitespace@9..10 " "
+                    Number@10..11 "1"
+            "#]],
+        );
+
+        check_ep(
+            Entrypoint::PropValues,
+            "/bits/ 64 <1>",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                EntryPropValues@0..13
+                  DtCellList@0..13
+                    DtsDirective@0..9
+                      BitsDirective@0..6 "/bits/"
+                      Whitespace@6..7 " "
+                      Number@7..9 "64"
+                    Whitespace@9..10 " "
+                    LAngle@10..11 "<"
+                    Number@11..12 "1"
+                    RAngle@12..13 ">"
+            "#]],
+        );
+    }
+
+    #[test]
     fn references() {
         // https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#labels
         // According to the specification, labels can only match [0-9a-zA-Z_]
@@ -1086,14 +1144,14 @@ Tree:
                   DtsDirective@21..45
                     DeleteNodeDirective@21..34 "/delete-node/"
                     Whitespace@34..35 " "
-                    DirectiveArguments@35..44
+                    DtsDirectiveArguments@35..44
                       Name@35..44 "node-name"
                     Semicolon@44..45 ";"
                   Whitespace@45..46 "\n"
                   DtsDirective@46..67
                     DeleteNodeDirective@46..59 "/delete-node/"
                     Whitespace@59..60 " "
-                    DirectiveArguments@60..66
+                    DtsDirectiveArguments@60..66
                       DtPhandle@60..66
                         Ampersand@60..61 "&"
                         Name@61..66 "label"
@@ -1102,7 +1160,7 @@ Tree:
                   DtsDirective@68..99
                     MemreserveDirective@68..80 "/memreserve/"
                     Whitespace@80..81 " "
-                    DirectiveArguments@81..98
+                    DtsDirectiveArguments@81..98
                       Number@81..91 "0x10000000"
                       Whitespace@91..92 " "
                       Number@92..98 "0x4000"

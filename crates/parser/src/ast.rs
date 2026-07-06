@@ -314,7 +314,7 @@ impl SourceFile {
 define_ast_node! {
     /// A [DTS directive][1].
     ///
-    /// Kind: [`NodeKind::Directive`]
+    /// Kind: [`NodeKind::DtsDirective`]
     ///
     /// [1]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#compiler-directives
     // TODO: directive parameters
@@ -322,8 +322,8 @@ define_ast_node! {
 
     /// Node wrapping a DTS directive's arguments.
     ///
-    /// Kind: [`NodeKind::DirectiveArguments`]
-    DirectiveArguments: DirectiveArguments;
+    /// Kind: [`NodeKind::DtsDirectiveArguments`]
+    DtsDirectiveArguments: DtsDirectiveArguments;
 }
 
 impl DtsDirective {
@@ -337,17 +337,17 @@ impl DtsDirective {
             .find(|kind| kind.is_dts_directive())
     }
 
-    /// Returns the first [`DirectiveArguments`] if it exists.
-    pub fn arguments(&self) -> Option<DirectiveArguments> {
+    /// Returns the first [`DtsDirectiveArguments`] if it exists.
+    pub fn arguments(&self) -> Option<DtsDirectiveArguments> {
         self.syntax()
             .child_nodes()
-            .find_map(DirectiveArguments::cast)
+            .find_map(DtsDirectiveArguments::cast)
     }
 }
-impl HasName for DirectiveArguments {}
-impl HasUnitAddress for DirectiveArguments {}
-impl HasMacroInvocation for DirectiveArguments {}
-impl HasDtPhandle for DirectiveArguments {}
+impl HasName for DtsDirectiveArguments {}
+impl HasUnitAddress for DtsDirectiveArguments {}
+impl HasMacroInvocation for DtsDirectiveArguments {}
+impl HasDtPhandle for DtsDirectiveArguments {}
 
 define_ast_node! {
     /// A [Devicetree property][1].
@@ -543,6 +543,24 @@ define_ast_node! {
     DtCellList: DtCellList;
 }
 impl DtCellList {
+    /// Returns the number token of a `/bits/` directive.
+    #[must_use]
+    pub fn bits_number(&self) -> Option<Arc<RedToken>> {
+        self.syntax.child_nodes().find_map(|node| {
+            let dir = DtsDirective::cast(node)?;
+            if dir.kind() == Some(TokenKind::BitsDirective)
+                && let Some(tok) = dir
+                    .syntax()
+                    .child_tokens()
+                    .find(|tok| tok.green.kind == TokenKind::Number)
+            {
+                Some(tok)
+            } else {
+                None
+            }
+        })
+    }
+
     // TODO: add example
     pub fn cells(&self) -> impl Iterator<Item = Cell> + '_ {
         self.syntax.children().filter_map(Cell::cast_either)

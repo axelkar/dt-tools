@@ -41,7 +41,7 @@ pub enum NodeKind {
     /// Node wrapping a DTS directive
     DtsDirective,
     /// Node wrapping a DTS directive's arguments
-    DirectiveArguments,
+    DtsDirectiveArguments,
     /// Preprocessor conditional, which contains the preprocessor directives and the branches.
     PreprocessorConditional,
     /// Code in a preprocessor conditional's branch.
@@ -432,6 +432,7 @@ impl RedNode {
 
     /// Returns an iterator over immediate child tokens.
     pub fn child_tokens(self: &Arc<RedNode>) -> impl Iterator<Item = Arc<RedToken>> + '_ {
+        // FIXME: RedToken doesn't need Arc wrapping it
         self.children().filter_map(RedItem::into_token)
     }
 
