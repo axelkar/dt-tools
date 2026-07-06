@@ -205,6 +205,7 @@ fn resolve_macro_to_value<
         return None;
     };
 
+    // TODO: remove this closure
     lower(db, env, diag, spanner, &ast)
 }
 
@@ -349,9 +350,24 @@ mod tests {
             &[],
             expect![[r#"
                 node   / /main.dts 11..60
-                property = CellList([U32(1), U32(2), U32(3)]) /baz /main.dts 28..42
+                property = CellList(Bits32([Number(1), Number(2), Number(3)])) /baz /main.dts 28..42
                 property = String("bar") /foo /main.dts 15..27
                 property = Bytestring([171, 205]) /qux /main.dts 43..57
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_bits() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { value = /bits/ 64 <1>; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..40
+                property = CellList(Bits64([1])) /value /main.dts 15..37
             "#]],
         );
     }
@@ -384,7 +400,7 @@ mod tests {
                 node   / /main.dts 11..31
                 node labels=[LBL] /node /main.dts 15..28
                 node   /node /main.dts 32..53
-                property = CellList([U32(1)]) /node/prop /main.dts 39..50
+                property = CellList(Bits32([Number(1)])) /node/prop /main.dts 39..50
             "#]],
         );
     }
@@ -417,8 +433,8 @@ mod tests {
             expect![[r#"
                 node   / /inc.dtsi 0..22
                 node   / /main.dts 31..54
-                property = CellList([U32(2)]) /inc_prop /inc.dtsi 4..19
-                property = CellList([U32(1)]) /main_prop /main.dts 35..51
+                property = CellList(Bits32([Number(2)])) /inc_prop /inc.dtsi 4..19
+                property = CellList(Bits32([Number(1)])) /main_prop /main.dts 35..51
             "#]],
         );
     }
@@ -435,8 +451,8 @@ mod tests {
             expect![[r#"
                 node   / /inc.dtsi 0..26
                 node   / /main.dts 31..54
-                property = CellList([]) /inc_prop /inc.dtsi 4..23
-                property = CellList([U32(1)]) /main_prop /main.dts 35..51
+                property = CellList(Bits32([])) /inc_prop /inc.dtsi 4..23
+                property = CellList(Bits32([Number(1)])) /main_prop /main.dts 35..51
 
                 --- errors ---
                 Error 16..21: Macro `BOGUS` is not defined
@@ -502,7 +518,7 @@ mod tests {
             &[],
             expect![[r#"
                 node   / /main.dts 11..51
-                property = CellList([U32(1)]) /foo /main.dts 15..25
+                property = CellList(Bits32([Number(1)])) /foo /main.dts 15..25
                 delete-property /foo /main.dts 26..48
             "#]],
         );
@@ -523,7 +539,7 @@ mod tests {
             &[],
             expect![[r#"
                 node   / /main.dts 36..53
-                property = CellList([U32(1)]) /yes /main.dts 40..50
+                property = CellList(Bits32([Number(1)])) /yes /main.dts 40..50
             "#]],
         );
     }
@@ -541,7 +557,7 @@ mod tests {
             &[],
             expect![[r#"
                 node   / /main.dts 50..76
-                property = CellList([U32(42)]), String("example") /prop /main.dts 54..73
+                property = CellList(Bits32([Number(42)])), String("example") /prop /main.dts 54..73
             "#]],
         );
     }
@@ -561,7 +577,7 @@ mod tests {
                 node   / /main.dts 30..51
                 node   / /main.dts 52..73
                 node labels=[FOO] /foo /main.dts 34..48
-                property = CellList([Phandle(Label("FOO"))]) /prop /main.dts 56..70
+                property = CellList(Bits32([Phandle(Label("FOO"))])) /prop /main.dts 56..70
             "#]],
         );
     }
@@ -581,7 +597,7 @@ mod tests {
                 node   / /main.dts 30..49
                 node   / /main.dts 50..73
                 node labels=[FOO] /foo /main.dts 34..46
-                property = CellList([Phandle(Label("FOO"))]) /prop /main.dts 54..70
+                property = CellList(Bits32([Phandle(Label("FOO"))])) /prop /main.dts 54..70
             "#]],
         );
     }
@@ -634,7 +650,7 @@ mod tests {
             &[],
             expect![[r#"
                 node   / /main.dts 11..44
-                property = CellList([]) /prop /main.dts 15..28
+                property = CellList(Bits32([])) /prop /main.dts 15..28
                 property =  /prop2 /main.dts 29..41
 
                 --- errors ---
@@ -727,7 +743,7 @@ mod tests {
             &[],
             expect![[r#"
                 node   / /main.dts 11..37
-                property = CellList([]) /prop /main.dts 15..34
+                property = CellList(Bits32([])) /prop /main.dts 15..34
 
                 --- errors ---
                 Error 23..32: number 4294967296 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer
@@ -745,7 +761,7 @@ mod tests {
             &[],
             expect![[r#"
                 node   / /main.dts 11..35
-                property = CellList([U32(1), U32(4294967295)]) /prop /main.dts 15..32
+                property = CellList(Bits32([Number(1), Number(4294967295)])) /prop /main.dts 15..32
 
                 --- errors ---
                 Error 23..24: Expected cell or ‘>’, but found ‘-’ [dt-tools(syntax-error)]
@@ -763,7 +779,7 @@ mod tests {
             &[],
             expect![[r#"
                 node   / /main.dts 11..36
-                property = CellList([U32(0), U32(97)]) /prop /main.dts 15..33
+                property = CellList(Bits32([Number(0), Number(97)])) /prop /main.dts 15..33
             "#]],
         );
     }

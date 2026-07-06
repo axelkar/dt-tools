@@ -8,45 +8,52 @@ use dt_tools_parser::{
     cst::RedToken,
     lexer::TokenKind,
 };
+use num_traits::Num;
 
-use crate::{db::BaseDb, file::File, macros::env::TrackedMapEnvMut};
+use crate::{
+    db::BaseDb,
+    extra_num_traits::{Bits, Signedness},
+    file::File,
+    macros::env::TrackedMapEnvMut,
+};
 
 /// Parses an integer and emits errors.
-///
-/// # Example
-///
-/// ```ignore
-/// parse_int::<i64>(
-///     src,
-///     i64::from_str_radix,
-///     text_range,
-///     diag,
-///     "64-bit signed integer"
-/// )
-/// ```
-pub fn parse_int_tok<T: FromStr<Err = ParseIntError>>(
+pub fn parse_int_tok<
+    T: FromStr<Err = ParseIntError> + Num<FromStrRadixErr = ParseIntError> + Bits + Signedness,
+>(
     tok: &Arc<RedToken>,
     diag: &impl DiagnosticCollector<File>,
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
-    from_str_radix: impl FnOnce(&str, u32) -> Result<T, ParseIntError>,
-    type_description: &str,
 ) -> Option<T> {
-    let emit_err = |err: &ParseIntError| {
-        let msg = err.to_string().replace("target type", type_description);
+    /// Helper function that isn't monomorphized
+    fn emit_err(
+        err: &ParseIntError,
+        diag: &impl DiagnosticCollector<File>,
+        spanner: &mut impl FnMut(TextRange) -> Span<File>,
+        tok: &Arc<RedToken>,
+        bits: u32,
+        signedness: &'static str,
+    ) {
+        let msg = err
+            .to_string()
+            .replace("target type", &format!("{bits}-bit {signedness} integer"));
         diag.emit(Diagnostic::new(
             spanner(tok.text_range()),
             msg.into(),
             Severity::Error,
         ));
-    };
+    }
 
     let src = tok.text().as_str();
     if src.starts_with("0x") || src.starts_with("0X") {
         // Hexadecimal
-        from_str_radix(&src[2..], 16).inspect_err(emit_err).ok()
+        T::from_str_radix(&src[2..], 16)
     } else {
-        src.parse().inspect_err(emit_err).ok()
+        // Decimal
+        src.parse()
     }
+    .inspect_err(|err| emit_err(err, diag, spanner, tok, T::BITS, T::SIGNEDNESS))
+    .ok()
 }
 
 pub fn interpret_escaped_char_tok(
@@ -140,13 +147,7 @@ pub fn eval(
                 .child_tokens()
                 .find(|tok| tok.green.kind == TokenKind::Number)
             {
-                parse_int_tok::<i64>(
-                    &number,
-                    diag,
-                    spanner,
-                    i64::from_str_radix,
-                    "64-bit signed integer",
-                )
+                parse_int_tok::<i64>(&number, diag, spanner)
             } else if let Some(char) = literal_expr
                 .syntax()
                 .child_tokens()

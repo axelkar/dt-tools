@@ -11,6 +11,7 @@ pub mod db;
 mod expr_eval;
 pub mod file;
 // TODO: remove includes / document_deps in favor of new lowering stuff
+mod extra_num_traits;
 pub mod includes;
 pub mod lowering;
 pub mod macros;
@@ -195,9 +196,9 @@ fn check_mir_post<'db>(
         if let mir::MirDefinitionValue::Property(mir_property_data) = &def.value {
             for value in &mir_property_data.values {
                 match value {
-                    mir::MirValue::CellList(mir_cells) => {
-                        for cell in mir_cells {
-                            if let mir::MirCell::Phandle(target) = cell {
+                    mir::MirValue::CellList(mir::MirCellList::Bits32(cells)) => {
+                        for cell in cells {
+                            if let mir::MirCell32::Phandle(target) = cell {
                                 diagnostics.extend(check_phandle(db, mir, result, def, target));
                             }
                         }
@@ -271,7 +272,9 @@ pub fn compute_diagnostics(
             let parse = parse.parse(db);
 
             let diag = parking_lot::Mutex::new(&mut diagnostics);
-            emit_parse_errors(parse, &diag, &mut |text_range| text_range.within_file(*file));
+            emit_parse_errors(parse, &diag, &mut |text_range| {
+                text_range.within_file(*file)
+            });
 
             let is_root_file = *file == root_file;
             for mut lint in dt_tools_lint::default_lint(

@@ -184,7 +184,7 @@ pub enum MirValue {
     /// String value (`"hello"`).
     String(String),
     /// Cell list (`<1 2 3>`).
-    CellList(Vec<MirCell>),
+    CellList(MirCellList),
     /// Bytestring (`[ab cd ef]`).
     Bytestring(Vec<u8>),
     /// Phandle reference (`&label` or `&{/path}`).
@@ -194,36 +194,82 @@ impl fmt::Display for MirValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MirValue::String(val) => fmt::Debug::fmt(val, f),
-            MirValue::CellList(val) => {
-                f.write_str("<")?;
+            MirValue::CellList(val) => val.fmt(f),
+            MirValue::Bytestring(val) => todo!(), // TODO: display bytestrings??
+            MirValue::Phandle(val) => val.fmt(f),
+        }
+    }
+}
+
+/// Cell list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MirCellList {
+    Bits8(Vec<u8>),
+    Bits16(Vec<u16>),
+    /// Note: may contain phandles
+    Bits32(Vec<MirCell32>),
+    Bits64(Vec<u64>),
+}
+impl fmt::Display for MirCellList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("<")?;
+        match self {
+            Self::Bits8(val) => {
                 for (i, cell) in val.iter().enumerate() {
                     if i != 0 {
                         f.write_str(" ")?;
                     }
                     cell.fmt(f)?;
                 }
-                f.write_str(">")
             }
-            MirValue::Bytestring(val) => todo!(),
-            MirValue::Phandle(val) => val.fmt(f),
+            Self::Bits16(val) => {
+                for (i, cell) in val.iter().enumerate() {
+                    if i != 0 {
+                        f.write_str(" ")?;
+                    }
+                    cell.fmt(f)?;
+                }
+            }
+            Self::Bits32(val) => {
+                for (i, cell) in val.iter().enumerate() {
+                    if i != 0 {
+                        f.write_str(" ")?;
+                    }
+                    cell.fmt(f)?;
+                }
+            }
+            Self::Bits64(val) => {
+                for (i, cell) in val.iter().enumerate() {
+                    if i != 0 {
+                        f.write_str(" ")?;
+                    }
+                    cell.fmt(f)?;
+                }
+            }
         }
+        f.write_str(">")
     }
 }
 
-/// Single cell inside a cell list.
+/// Cell inside a [`MirCellList`] with 32-bit cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MirCell {
+pub enum MirCell32 {
     /// Numeric value.
-    U32(u32),
+    Number(u32),
     /// Phandle reference.
     Phandle(MirPhandleTarget),
 }
-impl fmt::Display for MirCell {
+impl fmt::Display for MirCell32 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MirCell::U32(val) => val.fmt(f),
-            MirCell::Phandle(val) => val.fmt(f),
+            Self::Number(val) => val.fmt(f),
+            Self::Phandle(val) => val.fmt(f),
         }
+    }
+}
+impl From<u32> for MirCell32 {
+    fn from(value: u32) -> Self {
+        Self::Number(value)
     }
 }
 
@@ -314,7 +360,7 @@ mod tests {
             node   /qux /main.dts 161..261
             node   /qux/quux /main.dts 175..254
             node   /qux/quux/bar /main.dts 194..243
-            property = CellList([U32(2)]) /qux/quux/bar/prop2 /main.dts 216..228
+            property = CellList(Bits32([Number(2)])) /qux/quux/bar/prop2 /main.dts 216..228
         "#]]
         .assert_eq(&new_mir.display(&db));
     }
