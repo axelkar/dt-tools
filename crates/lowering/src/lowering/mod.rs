@@ -789,4 +789,19 @@ mod tests {
             "#]],
         );
     }
+
+    #[test]
+    fn mir_omit_if_no_ref() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { /omit-if-no-ref/ foo {}; };
+"#,
+            &[],
+            expect![[r#"
+                node   / /main.dts 11..42
+                /omit-if-no-ref/ node /foo /main.dts 15..39
+            "#]],
+        );
+    }
 }

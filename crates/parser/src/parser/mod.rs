@@ -27,7 +27,7 @@ mod source;
 pub(crate) use errors::{ErrorBuilder, Expected};
 pub use errors::{ParseError, WrappedLexError};
 
-const NAME_SET: [TokenKind; 4] = [
+pub(crate) const NAME_SET: [TokenKind; 4] = [
     TokenKind::Ident,
     TokenKind::Number,
     TokenKind::Comma,

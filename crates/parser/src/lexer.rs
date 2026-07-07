@@ -149,9 +149,12 @@ pub enum TokenKind {
     #[regex(r#"#( |\t)*error[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
     ErrorDirective,
 
-    // TODO: implement bits and memreserve directives
+    // TODO: implement memreserve and omit-if-no-ref directives
     #[token("/bits/")]
     BitsDirective,
+
+    #[token("/omit-if-no-ref/")]
+    OmitIfNoRefDirective,
 
     #[token("/include/")]
     DtIncludeDirective,
@@ -291,6 +294,7 @@ impl TokenKind {
         Some(match self {
             TokenKind::Comma => ",",
             TokenKind::BitsDirective => "/bits/",
+            TokenKind::OmitIfNoRefDirective => "/omit-if-no-ref/",
             TokenKind::DtIncludeDirective => "/include/",
             TokenKind::MemreserveDirective => "/memreserve/",
             TokenKind::DeleteNodeDirective => "/delete-node/",
@@ -347,6 +351,7 @@ impl TokenKind {
         matches!(
             self,
             TokenKind::BitsDirective
+                | TokenKind::OmitIfNoRefDirective
                 | TokenKind::DtIncludeDirective
                 | TokenKind::MemreserveDirective
                 | TokenKind::DeleteNodeDirective
@@ -422,6 +427,7 @@ impl core::fmt::Display for TokenKind {
             TokenKind::IncludeDirective => "‘#include‘ preprocessor directive",
             TokenKind::ErrorDirective => "‘#error‘ preprocessor directive",
             TokenKind::BitsDirective => "‘/bits/‘",
+            TokenKind::OmitIfNoRefDirective => "‘/omit-if-no-ref/‘",
             TokenKind::DtIncludeDirective => "‘/include/‘",
             TokenKind::MemreserveDirective => "‘/memreserve/‘",
             TokenKind::DeleteNodeDirective => "‘/delete-node/‘",

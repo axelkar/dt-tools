@@ -43,7 +43,12 @@ impl Mir {
                     } else {
                         format!(" labels=[{}]", n.labels.join(", "))
                     };
-                    format!("node{labels}")
+                    let omit_if_no_ref = if n.omit_if_no_ref {
+                        "/omit-if-no-ref/ "
+                    } else {
+                        ""
+                    };
+                    format!("{omit_if_no_ref}node{labels}")
                 }
                 MirDefinitionValue::Property(p) => {
                     let vals: Vec<String> = p.values.iter().map(|v| format!("{v:?}")).collect();
@@ -170,6 +175,8 @@ pub enum MirDefinitionValue {
 pub struct MirNodeData {
     /// Label names defined on this node.
     pub labels: Vec<String>,
+    /// Whether this has `/omit-if-no-ref/`.
+    pub omit_if_no_ref: bool,
 }
 
 /// Resolved property values.

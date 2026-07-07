@@ -34,6 +34,7 @@ pub(crate) fn lower_dt_node(
         file: ctx.file,
         text_range: dt_node.syntax().text_range(),
     };
+    let omit_if_no_ref = dt_node.omit_if_no_ref();
 
     let lower_resolved = |ctx: &mut _, provenance, node_path: &String| {
         let labels = collect_labels(ctx, dt_node, node_path);
@@ -41,7 +42,10 @@ pub(crate) fn lower_dt_node(
         // Emit the node definition.
         ctx.mir.definitions.push(MirDefinition {
             path: node_path.clone(),
-            value: MirDefinitionValue::Node(MirNodeData { labels }),
+            value: MirDefinitionValue::Node(MirNodeData {
+                labels,
+                omit_if_no_ref,
+            }),
             provenance,
         });
 

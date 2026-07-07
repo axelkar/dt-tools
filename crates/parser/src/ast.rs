@@ -726,6 +726,14 @@ impl DtNode {
         !self.is_extension()
     }
 
+    /// Returns true if this has `/omit-if-no-ref/`.
+    #[must_use]
+    pub fn omit_if_no_ref(&self) -> bool {
+        self.syntax
+            .child_tokens()
+            .any(|token| token.green.kind == TokenKind::OmitIfNoRefDirective)
+    }
+
     /// Returns an iterator over [`DtNode`] ancestors.
     ///
     /// # Example

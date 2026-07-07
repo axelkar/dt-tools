@@ -7,7 +7,7 @@ use tracing::debug;
 use crate::{
     cst::NodeKind,
     lexer::TokenKind,
-    parser::{CompletedMarker, Expected, LabelName, Marker, Name, Parser, TokenMatcher},
+    parser::{CompletedMarker, Expected, LabelName, Marker, NAME_SET, Name, Parser, TokenMatcher},
 };
 
 pub(crate) mod expr;
@@ -238,12 +238,9 @@ const ITEM_RECOVERY_SET: &[TokenKind] = concat_slices!(
 [TokenKind]:
     &[
         TokenKind::Slash,
-        // Name {
-        TokenKind::Ident,
-        TokenKind::Number,
-        TokenKind::Comma,
-        TokenKind::Minus,
-        // }
+    ],
+    &NAME_SET,
+    &[
         TokenKind::Ampersand,
         TokenKind::Equals,
         TokenKind::LCurly,
@@ -319,7 +316,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
 /// The caller is expected to handle the label and name.
 ///
 /// - Form: `= "foo", <1>;` | `;`.
-fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
+fn dt_property(m: Marker, p: &mut Parser) -> CompletedMarker {
     let _span = tracy_client::span!("grammar::dt_property");
 
     vis!(begin);
@@ -404,7 +401,7 @@ fn item(p: &mut Parser) {
             .emit();
 
         let m_prop = p.start();
-        dt_property(p, m_prop);
+        dt_property(m_prop, p);
         m.complete(p, NodeKind::ParseError);
     } else if p.check(TokenKind::LCurly).silent().at() {
         let m = p.start();
@@ -433,61 +430,71 @@ fn item(p: &mut Parser) {
     vis!(end);
 }
 
-fn eat_labels_and_full_name(p: &mut Parser) -> Option<(Marker, bool)> {
-    let mut m = p.eat_starting(MacroSubstitutableName)?;
+/// Eats e.g. the labels and name of a node or property.
+///
+/// The boolean in the return value means `allow_prop`.
+fn eat_node_or_prop_prefix(p: &mut Parser) -> Option<bool> {
+    let allow_prop = !p.eat(TokenKind::OmitIfNoRefDirective);
 
-    let is_extension = if p.eat(TokenKind::Colon) {
-        // was a label
-        m = m.complete(p, NodeKind::DtLabel).precede(p);
-
-        // Pick up remaining labels and the name
-        loop {
-            if let Some(m_label) = p.eat_starting(MacroSubstitutableName) {
-                if p.eat(TokenKind::Colon) {
-                    // additional label
-                    m_label.complete(p, NodeKind::DtLabel);
-                } else {
-                    // normal node or prop name
-                    m_label.ignore(p);
-                    break false;
-                }
+    loop {
+        if let Some(m_label) = p.eat_starting(MacroSubstitutableName) {
+            if p.eat(TokenKind::Colon) {
+                // label
+                m_label.complete(p, NodeKind::DtLabel);
             } else {
-                // maybe extension e.g. `bar: &foo {};`
-                p.eat(Reference);
-
-                break true;
+                // normal node or prop name
+                if p.eat(UnitAddress) && p.check(TokenKind::Colon).silent().at() {
+                    p.error()
+                        .msg_custom(Cow::Borrowed("Label names can't contain an `@`"))
+                        .bump()
+                        .complete(m_label)
+                        .emit();
+                } else {
+                    m_label.ignore(p);
+                    return Some(allow_prop);
+                }
             }
+        } else if p.eat(Reference) {
+            // extension e.g. `bar: &foo {};`
+            return Some(false);
+        } else if p.eat(TokenKind::Slash) {
+            // root node
+            return Some(false);
+        } else {
+            return None;
         }
-    } else {
-        false
-    };
-
-    if !is_extension {
-        p.eat(UnitAddress);
     }
-
-    let allow_props = !is_extension;
-
-    Some((m, allow_props))
 }
 
 fn eat_node_or_prop(p: &mut Parser) -> bool {
-    let Some((m, allow_props)) = eat_labels_and_full_name(p)
-        .or_else(|| p.eat_starting(Reference).map(|m| (m, false)))
-        .or_else(|| p.eat_starting(TokenKind::Slash).map(|m| (m, false)))
-    else {
+    let m = p.start();
+
+    let Some(allow_prop) = eat_node_or_prop_prefix(p) else {
+        m.ignore(p);
         return false;
     };
 
-    if allow_props && (p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon)) {
-        dt_property(p, m);
+    if allow_prop && p.at(&[TokenKind::Equals, TokenKind::Semicolon]) {
+        dt_property(m, p);
+    } else if p.at(TokenKind::LCurly) {
+        dt_node_body(p, m);
     } else if p.check(TokenKind::RCurly).silent().at() {
         // TODO: what if inside a node?
         // axka 2025-04-21: I think this could just be "ignored" and left to the caller of item
 
         p.error().bump().complete(m).msg_expected().emit();
-    } else if p.at(TokenKind::LCurly) {
-        dt_node_body(p, m);
+    } else if !allow_prop
+        && p.check(&[TokenKind::Equals, TokenKind::Semicolon])
+            .silent()
+            .at()
+    {
+        p.error()
+            .msg_expected()
+            .add_hint("Property not allowed".into())
+            .emit();
+
+        dt_property(p.start(), p);
+        m.complete(p, NodeKind::ParseError);
     } else {
         p.error().msg_expected().emit();
 
@@ -1236,6 +1243,76 @@ Tree:
                 RCurly@12..13 "}"
                 Semicolon@13..14 ";"
         "#]],
+        );
+    }
+
+    #[test]
+    fn parse_omit_if_no_ref() {
+        check(
+            "/ { /omit-if-no-ref/ foo {}; };",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                SourceFile@0..31
+                  DtNode@0..31
+                    Slash@0..1 "/"
+                    Whitespace@1..2 " "
+                    LCurly@2..3 "{"
+                    Whitespace@3..4 " "
+                    DtNode@4..28
+                      OmitIfNoRefDirective@4..20 "/omit-if-no-ref/"
+                      Whitespace@20..21 " "
+                      Name@21..24 "foo"
+                      Whitespace@24..25 " "
+                      LCurly@25..26 "{"
+                      RCurly@26..27 "}"
+                      Semicolon@27..28 ";"
+                    Whitespace@28..29 " "
+                    RCurly@29..30 "}"
+                    Semicolon@30..31 ";"
+            "#]],
+        );
+
+        check(
+            "/ { /omit-if-no-ref/ foo; };",
+            expect![[r#"
+                Errors: [
+                    ParseError {
+                        message: "Expected ‘:’, ‘@’ or ‘{’, but found ‘;’",
+                        primary_text_range: TextRange {
+                            start: 24,
+                            end: 25,
+                        },
+                        span_labels: [
+                            (
+                                TextRange {
+                                    start: 24,
+                                    end: 25,
+                                },
+                                "Property not allowed",
+                            ),
+                        ],
+                    },
+                ]
+
+                Tree:
+                SourceFile@0..28
+                  DtNode@0..28
+                    Slash@0..1 "/"
+                    Whitespace@1..2 " "
+                    LCurly@2..3 "{"
+                    Whitespace@3..4 " "
+                    ParseError@4..25
+                      OmitIfNoRefDirective@4..20 "/omit-if-no-ref/"
+                      Whitespace@20..21 " "
+                      Name@21..24 "foo"
+                      DtProperty@24..25
+                        Semicolon@24..25 ";"
+                    Whitespace@25..26 " "
+                    RCurly@26..27 "}"
+                    Semicolon@27..28 ";"
+            "#]],
         );
     }
 
