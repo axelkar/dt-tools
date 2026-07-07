@@ -45,9 +45,10 @@ pub(crate) use vis;
 /// the same.
 ///
 /// e.g. `FOO(bar, 1234)`
-fn macro_invocation(m: Marker, p: &mut Parser) -> CompletedMarker {
+fn macro_invocation(p: &mut Parser) {
     let _span = tracy_client::span!("grammar::macro_invocation");
 
+    let m = p.start();
     assert!(p.eat(TokenKind::Ident));
     if p.at_immediate(TokenKind::LParen) {
         p.bump();
@@ -78,7 +79,7 @@ fn macro_invocation(m: Marker, p: &mut Parser) -> CompletedMarker {
         }
         p.expect(TokenKind::RParen);
     }
-    m.complete(p, NodeKind::MacroInvocation)
+    m.complete(p, NodeKind::MacroInvocation);
 }
 
 /// Parses a reference without the leading ampersand and a node.
@@ -99,7 +100,7 @@ pub(super) fn reference_noamp(p: &mut Parser) {
         }
         p.expect(TokenKind::RCurly);
     } else if p.silent_at_macro_invocation_with_args() {
-        macro_invocation(p.start(), p);
+        macro_invocation(p);
     } else if p.at_label_name() {
         p.bump_label_name();
     } else {
@@ -141,7 +142,7 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
         if p.silent_at_set(&[TokenKind::Number, TokenKind::Char]) {
             p.bump();
         } else if p.silent_at(TokenKind::Ident) {
-            macro_invocation(p.start(), p);
+            macro_invocation(p);
         } else if p.silent_at(TokenKind::Ampersand) {
             reference(p);
         } else if p.silent_at(TokenKind::LParen) {
@@ -269,7 +270,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
         } else if p.silent_at(TokenKind::Ampersand) {
             reference(p);
         } else if p.silent_at(TokenKind::Ident) {
-            macro_invocation(p.start(), p);
+            macro_invocation(p);
         } else if p.silent_at(TokenKind::DtBytestring) {
             p.bump();
         } else {
@@ -386,21 +387,21 @@ fn item(p: &mut Parser) {
 
         // macro-substitutable name
         if p.silent_at_macro_invocation_with_args() {
-            m = macro_invocation(m, p).precede(p);
+            macro_invocation(p);
         } else {
             p.bump_name();
         }
 
         if p.eat(TokenKind::Colon) {
-            // label
+            // was a label
             m = m.complete(p, NodeKind::DtLabel).precede(p);
 
             // Pick up remaining labels, if any
             while p.at_name() {
-                let mut m_label = p.start();
+                let m_label = p.start();
                 // macro-substitutable name
                 if p.silent_at_macro_invocation_with_args() {
-                    m_label = macro_invocation(m_label, p).precede(p);
+                    macro_invocation(p);
                 } else {
                     p.bump_name();
                 }
@@ -408,8 +409,8 @@ fn item(p: &mut Parser) {
                 if p.eat(TokenKind::Colon) {
                     m_label.complete(p, NodeKind::DtLabel);
                 } else {
-                    m_label.ignore(p);
                     // normal node or property name
+                    m_label.ignore(p);
                     break;
                 }
             }
@@ -442,9 +443,6 @@ fn item(p: &mut Parser) {
         }
     } else if p.at(TokenKind::Ampersand) {
         reference(p);
-
-        // FIXME: move to reference
-        unit_address_opt(p);
 
         if p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon) {
             dt_property(p, m);
@@ -507,7 +505,7 @@ fn item(p: &mut Parser) {
         if p.at(TokenKind::Ampersand) {
             reference(p);
         } else if p.silent_at_macro_invocation_with_args() {
-            macro_invocation(p.start(), p);
+            macro_invocation(p);
             unit_address_opt(p);
         } else if p.eat_name() {
             unit_address_opt(p);
@@ -534,7 +532,7 @@ fn unit_address_opt(p: &mut Parser<'_, '_>) {
         p.bump();
 
         if p.silent_at_macro_invocation_with_args() {
-            m = macro_invocation(m, p).precede(p);
+            macro_invocation(p);
         } else if !p.eat_name() {
             p.error().msg_expected().emit();
         }
@@ -646,7 +644,7 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
 
 pub(super) fn entry_name(p: &mut Parser) {
     if p.silent_at_macro_invocation_with_args() {
-        macro_invocation(p.start(), p);
+        macro_invocation(p);
     } else if p.at_name() {
         p.bump_name();
     } else {
@@ -1402,8 +1400,8 @@ Tree:
                   DtNode@14..27
                     Name@14..17 "FOO"
                     UnitAddress@17..23
-                      MacroInvocation@17..23
-                        AtSign@17..18 "@"
+                      AtSign@17..18 "@"
+                      MacroInvocation@18..23
                         Ident@18..21 "BAR"
                         LParen@21..22 "("
                         RParen@22..23 ")"

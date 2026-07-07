@@ -207,7 +207,7 @@ fn lhs(p: &mut Parser, defined_operator: bool) -> Result<(), ()> {
         m.complete(p, NodeKind::ParenExpr);
         res
     } else if p.at(TokenKind::Ident) {
-        macro_invocation(p.start(), p);
+        macro_invocation(p);
         Ok(())
     } else if p.at_set(&[TokenKind::Number, TokenKind::Char]) {
         // TODO: no node!
