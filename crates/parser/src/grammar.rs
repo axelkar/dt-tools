@@ -182,7 +182,7 @@ fn dt_expr(p: &mut Parser) {
 
     assert!(p.eat(TokenKind::LParen));
 
-    expr::expr(p, false);
+    let _ = expr::expr(p, false);
 
     p.expect(TokenKind::RParen);
 

@@ -8,7 +8,7 @@ use crate::{
     cst::NodeKind,
     grammar::macro_invocation,
     lexer::TokenKind,
-    parser::{CompletedMarker, Expected, Parser},
+    parser::{Expected, Parser},
 };
 
 #[derive(PartialEq)]
@@ -135,16 +135,14 @@ impl PrefixOp {
 }
 
 /// Parses an expression that should evaluate to an integer.
-pub fn expr(p: &mut Parser, defined_operator: bool) -> Option<CompletedMarker> {
+pub fn expr(p: &mut Parser, defined_operator: bool) -> Result<(), ()> {
     expr_binding_power(p, defined_operator, 0)
 }
 
-fn expr_binding_power(
-    p: &mut Parser,
-    defined_operator: bool,
-    min_bp: u8,
-) -> Option<CompletedMarker> {
-    let mut lhs = lhs(p, defined_operator)?;
+fn expr_binding_power(p: &mut Parser, defined_operator: bool, min_bp: u8) -> Result<(), ()> {
+    let mut m_infix = p.start();
+
+    lhs(p, defined_operator)?;
 
     // If None: We’re not at an operator; we don’t know what to do next, so we return and let the caller decide.
     while let Some(op) = InfixOp::at(p) {
@@ -157,33 +155,36 @@ fn expr_binding_power(
         // Eat the operator’s token.
         p.bump();
 
-        let m = lhs.precede(p);
-
         if op == InfixOp::TernaryQuestionMark {
-            if expr_binding_power(p, defined_operator, 0).is_none() {
-                lhs = m.complete(p, NodeKind::InfixExpr);
+            if expr_binding_power(p, defined_operator, 0).is_err() {
+                m_infix = m_infix.complete(p, NodeKind::InfixExpr).precede(p);
                 break;
             }
 
             if !p.expect(TokenKind::Colon) {
-                lhs = m.complete(p, NodeKind::InfixExpr);
+                // FIXME: return Err?
+                m_infix = m_infix.complete(p, NodeKind::InfixExpr).precede(p);
                 break;
             }
         }
 
-        let parsed_rhs = expr_binding_power(p, defined_operator, right_bp).is_some();
-        lhs = m.complete(p, NodeKind::InfixExpr);
+        let parsed_rhs = expr_binding_power(p, defined_operator, right_bp).is_ok();
+
+        m_infix = m_infix.complete(p, NodeKind::InfixExpr).precede(p);
 
         if !parsed_rhs {
             break;
         }
     }
 
-    Some(lhs)
+    // m.ignore() instead of (lhs as CompletedMarker).precede() so all lhses don't have to be CST nodes
+    m_infix.ignore(p);
+
+    Ok(())
 }
 
-fn lhs(p: &mut Parser, defined_operator: bool) -> Option<CompletedMarker> {
-    Some(if let Some(_op) = PrefixOp::at(p, defined_operator) {
+fn lhs(p: &mut Parser, defined_operator: bool) -> Result<(), ()> {
+    if let Some(_op) = PrefixOp::at(p, defined_operator) {
         let m = p.start();
 
         let ((), right_bp) = PrefixOp::binding_power();
@@ -191,25 +192,32 @@ fn lhs(p: &mut Parser, defined_operator: bool) -> Option<CompletedMarker> {
         // Eat the operator's token
         p.bump();
 
-        expr_binding_power(p, defined_operator, right_bp);
+        let res = expr_binding_power(p, defined_operator, right_bp);
 
-        m.complete(p, NodeKind::PrefixExpr)
+        m.complete(p, NodeKind::PrefixExpr);
+        res
     } else if p.at(TokenKind::LParen) {
         let m = p.start();
         p.bump();
 
-        expr_binding_power(p, defined_operator, 0);
+        let res = expr_binding_power(p, defined_operator, 0);
 
         p.expect(TokenKind::RParen);
 
-        m.complete(p, NodeKind::ParenExpr)
+        m.complete(p, NodeKind::ParenExpr);
+        res
     } else if p.at(TokenKind::Ident) {
-        macro_invocation(p.start(), p)
+        macro_invocation(p.start(), p);
+        Ok(())
     } else if p.at_set(&[TokenKind::Number, TokenKind::Char]) {
+        // TODO: no node!
         let m = p.start();
         p.bump();
-        m.complete(p, NodeKind::LiteralExpr)
-    } else if InfixOp::at(p).is_some_and(|op| op != InfixOp::TernaryQuestionMark) {
+        m.complete(p, NodeKind::LiteralExpr);
+        Ok(())
+    } else if let Some(op) = InfixOp::at(p)
+        && op != InfixOp::TernaryQuestionMark
+    {
         // Error recovery: missing lhs but existing op
 
         p.error()
@@ -220,23 +228,23 @@ fn lhs(p: &mut Parser, defined_operator: bool) -> Option<CompletedMarker> {
             .emit();
         let m = p.start();
         p.bump();
-        expr_binding_power(p, defined_operator, 0);
+        let _ = expr_binding_power(p, defined_operator, 0);
         m.complete(p, NodeKind::ParseError);
-        return None;
+        Err(())
     } else if p.silent_at(TokenKind::RParen) {
         // Error recovery: don't bump RParen as a parent may be expecting it
 
         p.error().msg_expected().emit();
-        return None;
+        Err(())
     } else {
         p.error().msg_expected().bump_wrap_err().emit();
-        return None;
-    })
+        Err(())
+    }
 }
 
 /// Syntax documentation: <https://gcc.gnu.org/onlinedocs/cpp/If.html>
 pub(crate) fn entry_preprocessor_conditional(p: &mut Parser) {
-    expr(p, true);
+    let _ = expr(p, true);
 }
 
 #[cfg(test)]
