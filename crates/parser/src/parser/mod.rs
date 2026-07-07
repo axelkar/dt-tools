@@ -235,7 +235,6 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// See [`Check::at`].
     pub fn at(&mut self, matcher: impl TokenMatcher) -> bool {
-        let _span = tracy_client::span!("parser::Parser::at");
         self.check(matcher).at()
     }
 
@@ -247,8 +246,13 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// See [`Check::eat`].
     pub fn eat(&mut self, matcher: impl TokenMatcher) -> bool {
-        let _span = tracy_client::span!("parser::Parser::eat");
         self.check(matcher).eat()
+    }
+
+    /// See [`Check::eat_starting`].
+    #[must_use]
+    pub fn eat_starting(&mut self, matcher: impl TokenMatcher) -> Option<Marker> {
+        self.check(matcher).eat_starting()
     }
 
     /// Bumps when `kind` is the current token's kind and errors otherwise.
@@ -442,6 +446,8 @@ impl<'p, 't, 'input, M: TokenMatcher> Check<'p, 't, 'input, M, false> {
 impl<M: TokenMatcher, const SILENT: bool> Check<'_, '_, '_, M, SILENT> {
     /// Tests whether the matcher matches.
     pub fn at(&mut self) -> bool {
+        let _span = tracy_client::span!("parser::Check::at");
+
         if !SILENT {
             self.matcher.push_expected(self.p);
         }
@@ -455,6 +461,18 @@ impl<M: TokenMatcher, const SILENT: bool> Check<'_, '_, '_, M, SILENT> {
             true
         } else {
             false
+        }
+    }
+
+    /// Same as [`Self::eat`] except starts a node between testing and consuming.
+    #[must_use]
+    pub fn eat_starting(&mut self) -> Option<Marker> {
+        if self.at() {
+            let m = self.p.start();
+            self.matcher.consume(self.p);
+            Some(m)
+        } else {
+            None
         }
     }
 }

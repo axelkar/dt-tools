@@ -88,10 +88,11 @@ pub(super) struct MacroSubstitutableName;
 
 impl TokenMatcher for MacroSubstitutableName {
     fn matches(self, p: &mut Parser) -> bool {
-        p.silent_at_macro_invocation_with_args() || Name.matches(p)
+        // Name matches both cases
+        Name.matches(p)
     }
     fn push_expected(self, p: &mut Parser) {
-        p.add_expected(Expected::Kind(TokenKind::Name));
+        Name.push_expected(p);
     }
     fn consume(self, p: &mut Parser) {
         if p.silent_at_macro_invocation_with_args() {
@@ -130,27 +131,26 @@ pub(super) fn reference_noamp(p: &mut Parser) {
     }
 }
 
-/// Parses a Devicetree reference.
-///
-/// - Form: `&foo` | `&{/path}`.
-#[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
-fn reference(p: &mut Parser) {
-    vis!(begin);
-    #[cfg(feature = "grammar-tracing")]
-    debug!("reference start");
+/// Matches a Devicetree reference.
+#[derive(Clone, Copy)]
+pub(super) struct Reference;
 
-    let m = p.start();
+impl TokenMatcher for Reference {
+    fn matches(self, p: &mut Parser) -> bool {
+        TokenKind::Ampersand.matches(p)
+    }
+    fn push_expected(self, p: &mut Parser) {
+        TokenKind::Ampersand.push_expected(p);
+    }
+    fn consume(self, p: &mut Parser) {
+        let m = p.start();
+        p.bump();
 
-    assert!(p.eat(TokenKind::Ampersand));
+        reference_noamp(p);
 
-    reference_noamp(p);
-
-    // TODO: rename everything phandle to reference
-    m.complete(p, NodeKind::DtPhandle);
-
-    #[cfg(feature = "grammar-tracing")]
-    debug!("reference end");
-    vis!(end);
+        // TODO: rename everything phandle to reference
+        m.complete(p, NodeKind::DtPhandle);
+    }
 }
 
 /// Parses cells.
@@ -161,12 +161,13 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
 
     loop {
         p.add_expected(Expected::Cell);
-        if p.check(&[TokenKind::Number, TokenKind::Char]).silent().at() {
-            p.bump();
+        if p.check(&[TokenKind::Number, TokenKind::Char])
+            .silent()
+            .eat()
+        {
         } else if p.check(TokenKind::Ident).silent().at() {
             macro_invocation(p);
-        } else if p.check(TokenKind::Ampersand).silent().at() {
-            reference(p);
+        } else if p.check(Reference).silent().eat() {
         } else if p.check(TokenKind::LParen).silent().at() {
             // Start a parantesized expression
             dt_expr(p);
@@ -291,8 +292,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
         } else if p.check(TokenKind::String).silent().eat() {
         } else if p.check(TokenKind::LAngle).silent().at() {
             dt_cell_list(p.start(), p)?;
-        } else if p.check(TokenKind::Ampersand).silent().at() {
-            reference(p);
+        } else if p.check(Reference).silent().eat() {
         } else if p.check(TokenKind::Ident).silent().at() {
             macro_invocation(p);
         } else if p.check(TokenKind::DtBytestring).silent().eat() {
@@ -387,10 +387,7 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     vis!(end);
 }
 
-// TODO: split this into more functions
-// TODO: from r-a: mod_contents: while !(p.at(EOF) || (p.at(T!['}']) && stop_on_r_curly)) {
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
-#[expect(clippy::too_many_lines, reason = "no good way to make this shorter")]
 fn item(p: &mut Parser) {
     let _span = tracy_client::span!("grammar::item");
 
@@ -398,72 +395,9 @@ fn item(p: &mut Parser) {
     #[cfg(feature = "grammar-tracing")]
     debug!("item start");
 
-    let mut m = p.start();
-    if p.eat(TokenKind::Slash) {
-        if p.at(TokenKind::LCurly) {
-            dt_node_body(p, m);
-            // node
-        } else {
-            p.error().msg_expected().complete(m).emit();
-        }
-    } else if p.eat(MacroSubstitutableName) {
-        // parse a node or a property
-
-        if p.eat(TokenKind::Colon) {
-            // was a label
-            m = m.complete(p, NodeKind::DtLabel).precede(p);
-
-            // Pick up remaining labels, if any
-            while p.at(Name) {
-                let m_label = p.start();
-                assert!(p.eat(MacroSubstitutableName));
-
-                if p.eat(TokenKind::Colon) {
-                    m_label.complete(p, NodeKind::DtLabel);
-                } else {
-                    // normal node or property name
-                    m_label.ignore(p);
-                    break;
-                }
-            }
-
-            if p.at(TokenKind::Ampersand) {
-                // label + extension e.g. `bar: &foo {};`
-                reference(p);
-            }
-        }
-
-        p.eat(UnitAddress);
-
-        if p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon) {
-            dt_property(p, m);
-        } else if p.check(TokenKind::RCurly).silent().at() {
-            // TODO: what if inside a node?
-            // axka 2025-04-21: I think this could just be "ignored" and left to the caller of item
-
-            p.error().bump().complete(m).msg_expected().emit();
-        } else if p.at(TokenKind::LCurly) {
-            dt_node_body(p, m);
-        } else {
-            p.error().msg_expected().emit();
-
-            if !p.check(ITEM_RECOVERY_SET).silent().at() && !p.at_end() {
-                p.bump();
-            }
-
-            m.complete(p, NodeKind::ParseError);
-        }
-    } else if p.at(TokenKind::Ampersand) {
-        reference(p);
-
-        if p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon) {
-            dt_property(p, m);
-        } else if p.at(TokenKind::LCurly) {
-            dt_node_body(p, m);
-        } else {
-            p.error().msg_expected().complete(m).emit();
-        }
+    if eat_node_or_prop(p) {
     } else if p.check(TokenKind::Equals).silent().at() {
+        let m = p.start();
         p.error()
             .msg_expected()
             .add_hint(Cow::Borrowed("Recovered as unnamed property"))
@@ -473,6 +407,7 @@ fn item(p: &mut Parser) {
         dt_property(p, m_prop);
         m.complete(p, NodeKind::ParseError);
     } else if p.check(TokenKind::LCurly).silent().at() {
+        let m = p.start();
         // TODO: lint & analyze unnamed nodes, remove ParseError wrap
         p.error()
             .msg_expected()
@@ -483,23 +418,102 @@ fn item(p: &mut Parser) {
         dt_node_body(p, m_node);
         m.complete(p, NodeKind::ParseError);
     } else if p.check(TokenKind::Semicolon).silent().at() {
+        let m = p.start();
         p.error().msg_custom(Cow::Borrowed("Unmatched `;`")).emit();
 
         p.bump();
         m.complete(p, NodeKind::ParseError);
-    } else if p.at(&[TokenKind::V1Directive, TokenKind::PluginDirective]) {
-        p.bump();
+    } else if eat_dts_directive(p) {
+    } else {
+        p.error().msg_expected().bump_wrap_err().emit();
+    }
+
+    #[cfg(feature = "grammar-tracing")]
+    debug!("item end");
+    vis!(end);
+}
+
+fn eat_labels_and_full_name(p: &mut Parser) -> Option<(Marker, bool)> {
+    let mut m = p.eat_starting(MacroSubstitutableName)?;
+
+    let is_extension = if p.eat(TokenKind::Colon) {
+        // was a label
+        m = m.complete(p, NodeKind::DtLabel).precede(p);
+
+        // Pick up remaining labels and the name
+        loop {
+            if let Some(m_label) = p.eat_starting(MacroSubstitutableName) {
+                if p.eat(TokenKind::Colon) {
+                    // additional label
+                    m_label.complete(p, NodeKind::DtLabel);
+                } else {
+                    // normal node or prop name
+                    m_label.ignore(p);
+                    break false;
+                }
+            } else {
+                // maybe extension e.g. `bar: &foo {};`
+                p.eat(Reference);
+
+                break true;
+            }
+        }
+    } else {
+        false
+    };
+
+    if !is_extension {
+        p.eat(UnitAddress);
+    }
+
+    let allow_props = !is_extension;
+
+    Some((m, allow_props))
+}
+
+fn eat_node_or_prop(p: &mut Parser) -> bool {
+    let Some((m, allow_props)) = eat_labels_and_full_name(p)
+        .or_else(|| p.eat_starting(Reference).map(|m| (m, false)))
+        .or_else(|| p.eat_starting(TokenKind::Slash).map(|m| (m, false)))
+    else {
+        return false;
+    };
+
+    if allow_props && (p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon)) {
+        dt_property(p, m);
+    } else if p.check(TokenKind::RCurly).silent().at() {
+        // TODO: what if inside a node?
+        // axka 2025-04-21: I think this could just be "ignored" and left to the caller of item
+
+        p.error().bump().complete(m).msg_expected().emit();
+    } else if p.at(TokenKind::LCurly) {
+        dt_node_body(p, m);
+    } else {
+        p.error().msg_expected().emit();
+
+        if !p.check(ITEM_RECOVERY_SET).silent().at() && !p.at_end() {
+            p.bump();
+        }
+
+        m.complete(p, NodeKind::ParseError);
+    }
+
+    true
+}
+
+fn eat_dts_directive(p: &mut Parser) -> bool {
+    if let Some(m) = p.eat_starting(&[TokenKind::V1Directive, TokenKind::PluginDirective]) {
         p.check(TokenKind::Semicolon)
             .expect_recoverable(ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::DtsDirective);
-    } else if p.eat(TokenKind::DtIncludeDirective) {
+    } else if let Some(m) = p.eat_starting(TokenKind::DtIncludeDirective) {
         // TODO: only match this at root
         // When an error is emitted, hint that include directives aren't supported outside the top
         // level
 
         p.expect(TokenKind::String);
         m.complete(p, NodeKind::DtsDirective);
-    } else if p.eat(TokenKind::MemreserveDirective) {
+    } else if let Some(m) = p.eat_starting(TokenKind::MemreserveDirective) {
         let m_params = p.start();
         p.expect(TokenKind::Number);
         p.expect(TokenKind::Number);
@@ -508,16 +522,14 @@ fn item(p: &mut Parser) {
         p.check(TokenKind::Semicolon)
             .expect_recoverable(ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::DtsDirective);
-    } else if p.at(&[
+    } else if let Some(m) = p.eat_starting(&[
         TokenKind::DeleteNodeDirective,
         TokenKind::DeletePropertyDirective,
     ]) {
         // TODO: error for delete-property outside of node
-        p.bump();
 
         let m_params = p.start();
-        if p.at(TokenKind::Ampersand) {
-            reference(p);
+        if p.eat(Reference) {
         } else if p.eat(MacroSubstitutableName) {
             p.eat(UnitAddress);
         } else {
@@ -529,12 +541,9 @@ fn item(p: &mut Parser) {
             .expect_recoverable(ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::DtsDirective);
     } else {
-        p.error().bump().complete(m).msg_expected().emit();
+        return false;
     }
-
-    #[cfg(feature = "grammar-tracing")]
-    debug!("item end");
-    vis!(end);
+    true
 }
 
 /// Matches a unit address.
@@ -546,15 +555,14 @@ impl TokenMatcher for UnitAddress {
         TokenKind::AtSign.matches(p)
     }
     fn push_expected(self, p: &mut Parser) {
-        p.add_expected(Expected::Kind(TokenKind::AtSign));
+        TokenKind::AtSign.push_expected(p);
     }
     fn consume(self, p: &mut Parser) {
         let m = p.start();
         p.bump();
 
-        if !p.eat(MacroSubstitutableName) {
-            p.error().msg_expected().emit();
-        }
+        p.expect(MacroSubstitutableName);
+
         m.complete(p, NodeKind::UnitAddress);
     }
 }
