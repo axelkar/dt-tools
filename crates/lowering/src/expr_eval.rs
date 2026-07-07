@@ -24,10 +24,10 @@ pub fn parse_int_tok<
     tok: &Arc<RedToken>,
     diag: &impl DiagnosticCollector<File>,
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
-) -> Option<T> {
+) -> Result<T, ()> {
     /// Helper function that isn't monomorphized
     fn emit_err(
-        err: &ParseIntError,
+        err: ParseIntError,
         diag: &impl DiagnosticCollector<File>,
         spanner: &mut impl FnMut(TextRange) -> Span<File>,
         tok: &Arc<RedToken>,
@@ -52,24 +52,21 @@ pub fn parse_int_tok<
         // Decimal
         src.parse()
     }
-    .inspect_err(|err| emit_err(err, diag, spanner, tok, T::BITS, T::SIGNEDNESS))
-    .ok()
+    .map_err(|err| emit_err(err, diag, spanner, tok, T::BITS, T::SIGNEDNESS))
 }
 
 pub fn interpret_escaped_char_tok(
     tok: &Arc<RedToken>,
     diag: &impl DiagnosticCollector<File>,
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
-) -> Option<char> {
-    interpret_escaped_char(tok.text())
-        .inspect_err(|err| {
-            diag.emit(Diagnostic::new(
-                spanner(tok.text_range()),
-                err.to_string().into(),
-                Severity::Error,
-            ));
-        })
-        .ok()
+) -> Result<char, ()> {
+    interpret_escaped_char(tok.text()).map_err(|err| {
+        diag.emit(Diagnostic::new(
+            spanner(tok.text_range()),
+            err.to_string().into(),
+            Severity::Error,
+        ));
+    })
 }
 
 // TODO: in preprocessor conditional mode, undefined macros that are used as object-like macros evaluate to zero as defined here: https://gcc.gnu.org/onlinedocs/cpp/If.html
@@ -80,34 +77,36 @@ pub fn eval(
     ast: ast::Expr,
     diag: &impl DiagnosticCollector<File>,
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
-) -> Option<i64> {
+) -> Result<i64, ()> {
     match ast {
         ast::Expr::PrefixExpr(prefix_expr) => {
-            let mut value = || eval(db, env, prefix_expr.expr()?, diag, spanner);
-            match prefix_expr.op()? {
+            let mut value = || eval(db, env, prefix_expr.expr().ok_or(())?, diag, spanner);
+            match prefix_expr.op().ok_or(())? {
                 TokenKind::Plus => value(),
-                TokenKind::Minus => Some(-value()?),
+                TokenKind::Minus => Ok(-value()?),
                 TokenKind::Ident => {
                     // `defined` operator
-                    let inner_expr = prefix_expr.expr()?;
+                    let inner_expr = prefix_expr.expr().ok_or(())?;
 
                     let inner_expr = match inner_expr.into_paren_expr() {
-                        Ok(paren_expr) => paren_expr.expr()?,
+                        Ok(paren_expr) => paren_expr.expr().ok_or(())?,
                         Err(inner_expr) => inner_expr,
                     };
 
-                    let macro_ast = inner_expr.into_macro_invocation().ok()?;
-                    let name: &str = &macro_ast.green_ident()?.text;
-                    Some(i64::from(env.get_macro_def(db, name).is_some()))
+                    let macro_ast = inner_expr.into_macro_invocation().ok().ok_or(())?;
+                    let name: &str = &macro_ast.green_ident().ok_or(())?.text;
+                    Ok(i64::from(env.get_macro_def(db, name).is_some()))
                 }
-                TokenKind::BitwiseNot => Some(!value()?),
-                TokenKind::LogicalNot => Some(i64::from(value()? == 0)),
-                _ => None,
+                TokenKind::BitwiseNot => Ok(!value()?),
+                TokenKind::LogicalNot => Ok(i64::from(value()? == 0)),
+                _ => Err(()),
             }
         }
-        ast::Expr::ParenExpr(paren_expr) => eval(db, env, paren_expr.expr()?, diag, spanner),
+        ast::Expr::ParenExpr(paren_expr) => {
+            eval(db, env, paren_expr.expr().ok_or(())?, diag, spanner)
+        }
         ast::Expr::MacroInvocation(macro_invocation) => {
-            let ident = macro_invocation.ident()?;
+            let ident = macro_invocation.ident().ok_or(())?;
             let name: &str = ident.text();
             let Some(def) = env.get_macro_def(db, name) else {
                 diag.emit(Diagnostic::new(
@@ -115,11 +114,13 @@ pub fn eval(
                     Cow::Owned(format!("Macro `{name}` is not defined")),
                     Severity::Error,
                 ));
-                return None;
+                return Err(());
             };
 
             // TODO: error handling
-            let (_trmaps, s) = substitute_macro_ast(Some(&macro_invocation), def).ok()?;
+            let (_trmaps, s) = substitute_macro_ast(Some(&macro_invocation), def)
+                .ok()
+                .ok_or(())?;
 
             let parse = dt_tools_parser::parser::Entrypoint::PreprocessorConditional.parse(&s);
 
@@ -130,12 +131,16 @@ pub fn eval(
                     Severity::Error,
                 ));
                 // TODO: trmaps and error handling
-                return None;
+                return Err(());
             }
 
             // TODO: prevent infinite recursion...
 
-            let expr_ast = parse.red_node().child_nodes().find_map(ast::Expr::cast)?;
+            let expr_ast = parse
+                .red_node()
+                .child_nodes()
+                .find_map(ast::Expr::cast)
+                .ok_or(())?;
 
             // FIXME: diag needs trmaps
             // TODO: wrap spanner!
@@ -155,36 +160,44 @@ pub fn eval(
             {
                 let val = interpret_escaped_char_tok(&char, diag, spanner)?;
 
-                Some(val as i64)
+                Ok(val as i64)
             } else {
-                None
+                Err(())
             }
         }
         ast::Expr::InfixExpr(infix_expr) => {
             let mut iter = infix_expr.syntax().children();
-            let lhs = iter.find_map(|child| ast::Expr::cast(child.as_node()?.clone()))?;
+            let lhs = iter
+                .find_map(|child| ast::Expr::cast(child.as_node()?.clone()))
+                .ok_or(())?;
 
             let op = iter
                 .by_ref()
                 .filter_map(dt_tools_parser::cst::TreeItem::into_token)
-                .find(|tok| !tok.green.kind.is_trivia())?;
+                .find(|tok| !tok.green.kind.is_trivia())
+                .ok_or(())?;
 
             let mhs = if op.green.kind == TokenKind::QuestionMark {
-                let mhs = iter.find_map(|child| ast::Expr::cast(child.as_node()?.clone()))?;
+                let mhs = iter
+                    .find_map(|child| ast::Expr::cast(child.as_node()?.clone()))
+                    .ok_or(())?;
                 iter.by_ref()
                     .filter_map(dt_tools_parser::cst::TreeItem::into_token)
-                    .find(|tok| tok.green.kind == TokenKind::Colon)?;
+                    .find(|tok| tok.green.kind == TokenKind::Colon)
+                    .ok_or(())?;
                 Some(mhs)
             } else {
                 None
             };
 
-            let rhs = iter.find_map(|child| ast::Expr::cast(child.as_node()?.clone()))?;
+            let rhs = iter
+                .find_map(|child| ast::Expr::cast(child.as_node()?.clone()))
+                .ok_or(())?;
 
             let lhs_value = eval(db, env, lhs, diag, spanner)?;
             let rhs_value = || eval(db, env, rhs, diag, spanner);
 
-            Some(match op.green.kind {
+            Ok(match op.green.kind {
                 TokenKind::Plus => lhs_value + rhs_value()?,
                 TokenKind::Minus => lhs_value - rhs_value()?,
                 TokenKind::Asterisk => lhs_value * rhs_value()?,
@@ -206,13 +219,13 @@ pub fn eval(
                 TokenKind::QuestionMark => {
                     let cond = lhs_value != 0;
                     if cond {
-                        let mhs = mhs?;
+                        let mhs = mhs.ok_or(())?;
                         eval(db, env, mhs, diag, spanner)?
                     } else {
                         rhs_value()?
                     }
                 }
-                _ => return None,
+                _ => return Err(()),
             })
         }
     }
@@ -225,7 +238,7 @@ mod tests {
 
     use crate::{db::BaseDb, macros::env::TrackedMapEnvMut};
 
-    fn check(input: &str, env: &TrackedMapEnvMut) -> Option<i64> {
+    fn check(input: &str, env: &TrackedMapEnvMut) -> Result<i64, ()> {
         let db = crate::db::BaseDatabase::default();
 
         let parse = Entrypoint::PreprocessorConditional.parse(input);
@@ -253,35 +266,35 @@ mod tests {
     #[test]
     fn test_literal() {
         let env = TrackedMapEnvMut::default();
-        assert_eq!(check("42", &env), Some(42));
+        assert_eq!(check("42", &env), Ok(42));
     }
 
     #[test]
     fn test_paren() {
         let env = TrackedMapEnvMut::default();
-        assert_eq!(check("(1 + 2) * 3", &env), Some(9));
+        assert_eq!(check("(1 + 2) * 3", &env), Ok(9));
     }
 
     #[test]
     fn test_infix() {
         let env = TrackedMapEnvMut::default();
-        assert_eq!(check("21 + 21", &env), Some(42));
-        assert_eq!(check("21 * 2", &env), Some(42));
-        assert_eq!(check("1 + 2 * 3", &env), Some(7));
+        assert_eq!(check("21 + 21", &env), Ok(42));
+        assert_eq!(check("21 * 2", &env), Ok(42));
+        assert_eq!(check("1 + 2 * 3", &env), Ok(7));
     }
 
     #[test]
     fn test_prefix() {
         let env = TrackedMapEnvMut::default();
-        assert_eq!(check("!42", &env), Some(0));
-        assert_eq!(check("~42", &env), Some(!42));
+        assert_eq!(check("!42", &env), Ok(0));
+        assert_eq!(check("~42", &env), Ok(!42));
     }
 
     #[test]
     fn test_ternary() {
         let env = TrackedMapEnvMut::default();
-        assert_eq!(check("1 ? 2 : 3", &env), Some(2));
-        assert_eq!(check("0 ? 2 : 3", &env), Some(3));
+        assert_eq!(check("1 ? 2 : 3", &env), Ok(2));
+        assert_eq!(check("0 ? 2 : 3", &env), Ok(3));
     }
 
     #[test]
@@ -296,10 +309,10 @@ mod tests {
         let def = MacroDefinition::parse("#define FOO").unwrap();
         env.insert_macro(def, span);
 
-        assert_eq!(check("defined FOO", &env), Some(1));
-        assert_eq!(check("defined BAR", &env), Some(0));
-        assert_eq!(check("defined(FOO)", &env), Some(1));
-        assert_eq!(check("defined(BAR)", &env), Some(0));
+        assert_eq!(check("defined FOO", &env), Ok(1));
+        assert_eq!(check("defined BAR", &env), Ok(0));
+        assert_eq!(check("defined(FOO)", &env), Ok(1));
+        assert_eq!(check("defined(BAR)", &env), Ok(0));
     }
 
     #[test]
@@ -318,7 +331,7 @@ mod tests {
         let def = MacroDefinition::parse("#define BAR 42").unwrap();
         env.insert_macro(def, span);
 
-        assert_eq!(check("FOO", &env), Some(42));
+        assert_eq!(check("FOO", &env), Ok(42));
     }
 
     // TODO: shouldn't ever overflow stack?
@@ -336,6 +349,6 @@ mod tests {
         let def = MacroDefinition::parse("#define FOO FOO").unwrap();
         env.insert_macro(def, span);
 
-        assert_eq!(check("FOO", &env), Some(42));
+        assert_eq!(check("FOO", &env), Ok(42));
     }
 }

@@ -139,7 +139,7 @@ pub(crate) fn pp_cond_directive_eval(
     file: File,
     directive: &ast::PreprocessorDirective,
     diag: &impl DiagnosticCollector<File>,
-) -> Option<bool> {
+) -> Result<bool, ()> {
     let input = directive.syntax().text();
 
     let directive_text_range = directive.syntax().text_range();
@@ -150,7 +150,7 @@ pub(crate) fn pp_cond_directive_eval(
             Cow::Borrowed("Internal compiler error: preprocessor directive should have a name"),
             Severity::Warn,
         ));
-        return None;
+        return Err(());
     };
 
     let (mut condition, mut condition_text_range) =
@@ -182,7 +182,7 @@ pub(crate) fn pp_cond_directive_eval(
         }
 
         // Else branch is always enabled
-        return Some(true);
+        return Ok(true);
     }
 
     let parse = dt_tools_parser::parser::Entrypoint::PreprocessorConditional.parse(&condition);
@@ -195,9 +195,10 @@ pub(crate) fn pp_cond_directive_eval(
 
     let expr_ast = RedNode::new_offset(Arc::new(parse.green_node), condition_text_range.start)
         .child_nodes()
-        .find_map(ast::Expr::cast)?;
+        .find_map(ast::Expr::cast)
+        .ok_or(())?;
 
     let val = expr_eval::eval(db, env, expr_ast, &diag, &mut |tr| tr.within_file(file))?;
 
-    Some(val != 0)
+    Ok(val != 0)
 }

@@ -51,7 +51,7 @@ pub(crate) fn lower_dt_node(
 
     // Handle extensions: &label { } or &{/path} { }
     if let Some(phandle) = dt_node.dt_phandle() {
-        let Some(target) = lower_phandle(
+        let Ok(target) = lower_phandle(
             ctx.db,
             ctx.env,
             ctx.diag,
@@ -61,7 +61,7 @@ pub(crate) fn lower_dt_node(
             return;
         };
 
-        if let Some(ref target_path) = resolve_phandle(ctx, &target, &phandle) {
+        if let Ok(ref target_path) = resolve_phandle(ctx, &target, &phandle) {
             lower_resolved(ctx, provenance, target_path);
         } else {
             let mut body_mir = Mir::default();
@@ -92,16 +92,17 @@ pub(crate) fn lower_dt_node(
             &mut |tr| tr.within_file(ctx.file),
             dt_node,
         )
-        .or_else(|| {
+        .or_else(|()| {
             // Root node
             dt_node
                 .syntax()
                 .child_tokens()
                 .any(|tok| tok.green.kind == TokenKind::Slash)
                 .then(String::new)
+                .ok_or(())
         });
 
-        if let Some(name) = name {
+        if let Ok(name) = name {
             // Build the node's full path.
             let node_path = build_path(path_prefix, &name);
 
@@ -122,7 +123,7 @@ pub(crate) fn collect_labels(
 ) -> Vec<String> {
     let mut labels: Vec<String> = Vec::new();
     for label_ast in dt_node.labels() {
-        if let Some(label_name) = resolve_name_or_macro(
+        if let Ok(label_name) = resolve_name_or_macro(
             ctx.db,
             ctx.env,
             ctx.diag,
@@ -193,7 +194,7 @@ pub(crate) fn lower_dt_node_body(
     for item in dt_node.node_items() {
         match item {
             ast::NodeItem::DtProperty(prop) => {
-                if let Some(def) = lower_dt_property(ctx, parent_node_path, &prop) {
+                if let Ok(def) = lower_dt_property(ctx, parent_node_path, &prop) {
                     ctx.mir.definitions.push(def);
                 }
             }
@@ -225,16 +226,17 @@ pub(crate) fn resolve_name_or_macro<'db, Ast: HasName + HasMacroInvocation>(
     diag: &impl DiagnosticCollector<File>,
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
     ast: &Ast,
-) -> Option<String> {
+) -> Result<String, ()> {
     let (_span, _trmaps, expanded) = if let Some(name_ast) = ast.name() {
-        match substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Implicit(&name_ast)) {
+        match substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Implicit(&name_ast))? {
             Some(val) => val,
-            None => return Some(name_ast.syntax().text().as_str().to_owned()),
+            None => return Ok(name_ast.syntax().text().as_str().to_owned()),
         }
     } else if let Some(invoc) = ast.macro_invocation() {
         substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Explicit(&invoc))?
+            .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro")
     } else {
-        return None;
+        return Err(());
     };
 
     let parse = Entrypoint::Name.parse(&expanded);
@@ -255,12 +257,13 @@ pub(crate) fn get_name_and_unit_addr<'db, Ast: HasName + HasMacroInvocation + Ha
     diag: &impl DiagnosticCollector<File>,
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
     ast: &Ast,
-) -> Option<String> {
+) -> Result<String, ()> {
     let without_unit_addr = resolve_name_or_macro(db, env, diag, spanner, ast);
 
     let unit_addr = ast
         .unit_address()
-        .and_then(|ast| resolve_name_or_macro(db, env, diag, spanner, &ast));
+        .map(|ast| resolve_name_or_macro(db, env, diag, spanner, &ast))
+        .transpose()?;
 
     without_unit_addr.map(|without_unit_addr| {
         if let Some(unit_addr) = unit_addr {

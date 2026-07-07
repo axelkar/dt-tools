@@ -18,17 +18,17 @@ pub enum MacroCtx<'a> {
 
 /// Resolves and substitutes a macro.
 ///
-/// Returns `None` if the macro doesn't exist or there is some other error.
+/// Returns `Ok(None)` if the macro doesn't exist and the macro reference is implicit.
 pub fn substitute_macro_tok<'db>(
     db: &'db dyn BaseDb,
     env: &mut TrackedMapEnvMut<'db>,
     diag: &impl DiagnosticCollector<File>,
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
     macro_ctx: &MacroCtx,
-) -> Option<(Span<File>, Vec<TextRangeMap>, String)> {
+) -> Result<Option<(Span<File>, Vec<TextRangeMap>, String)>, ()> {
     let (name, span) = match &macro_ctx {
         MacroCtx::Explicit(inv) => (
-            inv.green_ident()?.text.as_str(),
+            inv.green_ident().ok_or(())?.text.as_str(),
             spanner(inv.syntax().text_range()),
         ),
         MacroCtx::Implicit(tok) => (
@@ -39,15 +39,16 @@ pub fn substitute_macro_tok<'db>(
 
     let Some(def) = env.get_macro_def(db, name) else {
         let is_explicit_macro = matches!(macro_ctx, MacroCtx::Explicit(_));
-        if is_explicit_macro {
+        return if is_explicit_macro {
             diag.emit(Diagnostic::new(
                 span,
                 Cow::Owned(format!("Macro `{name}` is not defined")),
                 Severity::Error,
             ));
-        }
-
-        return None;
+            Err(())
+        } else {
+            Ok(None)
+        };
     };
 
     match substitute_macro_ast(
@@ -57,10 +58,10 @@ pub fn substitute_macro_tok<'db>(
         },
         def,
     ) {
-        Ok((trmaps, expanded)) => Some((span, trmaps, expanded)),
+        Ok((trmaps, expanded)) => Ok(Some((span, trmaps, expanded))),
         Err(err) => {
             diag.emit(Diagnostic::new(span, Cow::Owned(err), Severity::Error));
-            None
+            Err(())
         }
     }
 }

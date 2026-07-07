@@ -159,7 +159,7 @@ struct IntraFileCtx<'a, 'db, D: DiagnosticCollector<File>> {
 
 /// Resolves and substitutes a macro and reparses the result.
 ///
-/// Returns `None` if the macro doesn't exist or there is some other error.
+/// Returns `Ok(None)` if the macro doesn't exist and the macro reference is implicit.
 fn resolve_macro_to_value<
     'db,
     AstType: AstNodeOrToken,
@@ -179,9 +179,12 @@ fn resolve_macro_to_value<
         &D,
         &mut Spanner,
         &AstType,
-    ) -> Option<MirType>,
-) -> Option<MirType> {
-    let (span, _trmaps, expanded) = substitute_macro_tok(db, env, diag, spanner, macro_ctx)?;
+    ) -> Result<MirType, ()>,
+) -> Result<Option<MirType>, ()> {
+    let Some((span, _trmaps, expanded)) = substitute_macro_tok(db, env, diag, spanner, macro_ctx)?
+    else {
+        return Ok(None);
+    };
 
     let parse = entrypoint.parse(&expanded);
 
@@ -202,11 +205,11 @@ fn resolve_macro_to_value<
             )),
             Severity::Error,
         ));
-        return None;
+        return Err(());
     };
 
     // TODO: remove this closure
-    lower(db, env, diag, spanner, &ast)
+    Ok(Some(lower(db, env, diag, spanner, &ast)?))
 }
 
 /// Lowers an [`ast::DtPhandle`] to a [`MirPhandleTarget`], if valid.
@@ -216,12 +219,12 @@ fn lower_phandle<'db>(
     diag: &impl DiagnosticCollector<File>,
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
     phandle: &ast::DtPhandle,
-) -> Option<MirPhandleTarget> {
+) -> Result<MirPhandleTarget, ()> {
     use dt_tools_parser::parser::Entrypoint;
 
     if let Some(macro_inv) = phandle.macro_invocation() {
         // If the phandle has a macro invocation (e.g. `&MACRO(...)`), resolve it.
-        resolve_macro_to_value(
+        Ok(resolve_macro_to_value(
             db,
             env,
             diag,
@@ -229,35 +232,38 @@ fn lower_phandle<'db>(
             &MacroCtx::Explicit(&macro_inv),
             Entrypoint::ReferenceNoamp,
             lower_phandle,
-        )
+        )?
+        .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro"))
     } else if phandle.is_path() {
         // &{/path/to/node}
-        // NOTE: very naive, just strips the prefix/suffix from the source text.
+        // FIXME: very naive, just strips the prefix/suffix from the source text.
         // A proper implementation would use the CST structure.
         let raw = phandle.syntax().green.text();
-        let inner = raw.strip_prefix("&{")?.strip_suffix('}')?;
+        let inner = raw
+            .strip_prefix("&{")
+            .ok_or(())?
+            .strip_suffix('}')
+            .ok_or(())?;
 
-        Some(MirPhandleTarget::Path(inner.to_owned()))
+        Ok(MirPhandleTarget::Path(inner.to_owned()))
     } else {
         // No explicit macro invocation, but the name itself might still be a macro
         // (e.g. `#define UART_1 soc/uart` and `&UART_1`).
-        let name_ast = phandle.name()?;
+        let name_ast = phandle.name().ok_or(())?;
 
         // dtc wants extensions to be resolved from items above/before the extensions in
         // non-overlay mode, but phandles are fine in any order.
 
-        Some(
-            resolve_macro_to_value(
-                db,
-                env,
-                diag,
-                spanner,
-                &MacroCtx::Implicit(&name_ast),
-                Entrypoint::ReferenceNoamp,
-                lower_phandle,
-            )
-            .unwrap_or(MirPhandleTarget::Label(name_ast.syntax().text().to_owned())),
-        )
+        Ok(resolve_macro_to_value(
+            db,
+            env,
+            diag,
+            spanner,
+            &MacroCtx::Implicit(&name_ast),
+            Entrypoint::ReferenceNoamp,
+            lower_phandle,
+        )?
+        .unwrap_or(MirPhandleTarget::Label(name_ast.syntax().text().to_owned())))
     }
 }
 

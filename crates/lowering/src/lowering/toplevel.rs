@@ -71,7 +71,7 @@ pub(crate) fn handle_toplevel_item(
             let Some((_dir, branch)) =
                 preprocessor_conditional.branches().find(|(dir, _branch)| {
                     pp_cond_directive_eval(ctx.db, ctx.env, ctx.file, dir, &ctx.diag)
-                        .is_some_and(|val| val)
+                        .is_ok_and(|val| val)
                 })
             else {
                 return;
@@ -290,7 +290,7 @@ pub(crate) fn emit_delete_directive(
     };
 
     if kind == Some(TokenKind::DeleteNodeDirective) {
-        let target_path = if let Some(name) = get_name_and_unit_addr(
+        let target_path = if let Ok(name) = get_name_and_unit_addr(
             ctx.db,
             ctx.env,
             ctx.diag,
@@ -299,7 +299,7 @@ pub(crate) fn emit_delete_directive(
         ) {
             build_path(path_prefix, &name)
         } else if let Some(phandle) = args.dt_phandle() {
-            let Some(target) = lower_phandle(
+            let Ok(target) = lower_phandle(
                 ctx.db,
                 ctx.env,
                 ctx.diag,
@@ -310,12 +310,12 @@ pub(crate) fn emit_delete_directive(
             };
 
             match resolve_phandle(ctx, &target, &phandle) {
-                Some(value) => value,
-                None if ctx.is_overlay => {
+                Ok(value) => value,
+                Err(()) if ctx.is_overlay => {
                     // TODO: handle unresolved delete-node!
                     return;
                 }
-                None => return,
+                Err(()) => return,
             }
         } else {
             return;
@@ -350,13 +350,13 @@ pub(crate) fn emit_delete_directive(
 
 /// Resolves a [`MirPhandleTarget`] to a path.
 ///
-/// Returns `None` if it can't be resolved. If `ctx.is_overlay`, an error will not be emitted.
+/// Returns `Err(())` if it can't be resolved. If `ctx.is_overlay`, an error will not be emitted.
 pub(crate) fn resolve_phandle(
     ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
     target: &MirPhandleTarget,
     phandle: &ast::DtPhandle,
-) -> Option<String> {
-    Some(match &target {
+) -> Result<String, ()> {
+    Ok(match &target {
         MirPhandleTarget::Label(name) => {
             if let Some(path) = ctx.env.get_label_path(ctx.db, name) {
                 path.to_owned()
@@ -371,7 +371,7 @@ pub(crate) fn resolve_phandle(
                         Severity::Error,
                     ));
                 }
-                return None;
+                return Err(());
             }
         }
         MirPhandleTarget::Path(path) => {
@@ -385,7 +385,7 @@ pub(crate) fn resolve_phandle(
                         Severity::Error,
                     ));
                 }
-                return None;
+                return Err(());
             }
             path.clone()
         }
