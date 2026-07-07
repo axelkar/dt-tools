@@ -48,6 +48,12 @@ pub fn parse_int_tok<
     if src.starts_with("0x") || src.starts_with("0X") {
         // Hexadecimal
         T::from_str_radix(&src[2..], 16)
+    } else if src.starts_with("0b") || src.starts_with("0B") {
+        // Binary
+        T::from_str_radix(&src[2..], 2)
+    } else if src.starts_with("0o") || src.starts_with("0O") {
+        // Octal
+        T::from_str_radix(&src[2..], 8)
     } else {
         // Decimal
         src.parse()
