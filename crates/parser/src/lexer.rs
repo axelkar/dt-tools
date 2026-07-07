@@ -211,9 +211,9 @@ pub enum TokenKind {
     // I would have wanted to do [0-1_]*[0-1][0-1_]* but it isn't possible without backtracking.
     // Maybe I should write a callback
     #[regex("[0-9][0-9_]*((u|i)(8|16|32|64|128))?")]
-    #[regex("0b[0-1_]+((u|i)(8|16|32|64|128))?")]
-    #[regex("0o[0-7_]+((u|i)(8|16|32|64|128))?")]
-    #[regex("0x[0-9a-fA-F_]+((u|i)(8|16|32|64|128))?")]
+    #[regex("0(b|B)[0-1_]+((u|i)(8|16|32|64|128))?")]
+    #[regex("0(o|O)[0-7_]+((u|i)(8|16|32|64|128))?")]
+    #[regex("0(x|X)[0-9a-fA-F_]+((u|i)(8|16|32|64|128))?")]
     Number,
 
     #[token("[", callback = lex_bytestring)]
