@@ -17,6 +17,8 @@ pub enum Expected {
     Value,
     Cell,
     LabelName,
+    InfixOperator,
+    PrefixOperator,
     Eof,
 }
 impl core::fmt::Display for Expected {
@@ -28,6 +30,8 @@ impl core::fmt::Display for Expected {
             Expected::Value => f.write_str("value"),
             Expected::Cell => f.write_str("cell"),
             Expected::LabelName => f.write_str("label name"),
+            Expected::InfixOperator => f.write_str("infix operator"),
+            Expected::PrefixOperator => f.write_str("prefix operator"),
             Expected::Eof => f.write_str("end-of-file"),
         }
     }

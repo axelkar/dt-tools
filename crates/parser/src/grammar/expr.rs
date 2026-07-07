@@ -36,46 +36,28 @@ enum InfixOp {
 
 impl InfixOp {
     fn at(p: &mut Parser) -> Option<Self> {
-        Some(if p.at(TokenKind::Plus) {
-            Self::Add
-        } else if p.at(TokenKind::Minus) {
-            Self::Sub
-        } else if p.at(TokenKind::Asterisk) {
-            Self::Mul
-        } else if p.at(TokenKind::Slash) {
-            Self::Div
-        } else if p.at(TokenKind::Modulo) {
-            Self::Mod
-        } else if p.at(TokenKind::Ampersand) {
-            Self::BitwiseAnd
-        } else if p.at(TokenKind::BitwiseOr) {
-            Self::BitwiseOr
-        } else if p.at(TokenKind::BitwiseXor) {
-            Self::BitwiseXor
-        } else if p.at(TokenKind::BitwiseShl) {
-            Self::BitwiseShl
-        } else if p.at(TokenKind::BitwiseShr) {
-            Self::BitwiseShr
-        } else if p.at(TokenKind::LogicalAnd) {
-            Self::LogicalAnd
-        } else if p.at(TokenKind::LogicalOr) {
-            Self::LogicalOr
-        } else if p.at(TokenKind::LAngle) {
-            Self::Lt
-        } else if p.at(TokenKind::RAngle) {
-            Self::Gt
-        } else if p.at(TokenKind::RelationalLtEq) {
-            Self::LtEq
-        } else if p.at(TokenKind::RelationalGtEq) {
-            Self::GtEq
-        } else if p.at(TokenKind::RelationalEq) {
-            Self::Eq
-        } else if p.at(TokenKind::RelationalNeq) {
-            Self::Neq
-        } else if p.at(TokenKind::QuestionMark) {
-            Self::TernaryQuestionMark
-        } else {
-            return None;
+        p.add_expected(Expected::InfixOperator);
+        Some(match p.peek()? {
+            TokenKind::Plus => Self::Add,
+            TokenKind::Minus => Self::Sub,
+            TokenKind::Asterisk => Self::Mul,
+            TokenKind::Slash => Self::Div,
+            TokenKind::Modulo => Self::Mod,
+            TokenKind::Ampersand => Self::BitwiseAnd,
+            TokenKind::BitwiseOr => Self::BitwiseOr,
+            TokenKind::BitwiseXor => Self::BitwiseXor,
+            TokenKind::BitwiseShl => Self::BitwiseShl,
+            TokenKind::BitwiseShr => Self::BitwiseShr,
+            TokenKind::LogicalAnd => Self::LogicalAnd,
+            TokenKind::LogicalOr => Self::LogicalOr,
+            TokenKind::LAngle => Self::Lt,
+            TokenKind::RAngle => Self::Gt,
+            TokenKind::RelationalLtEq => Self::LtEq,
+            TokenKind::RelationalGtEq => Self::GtEq,
+            TokenKind::RelationalEq => Self::Eq,
+            TokenKind::RelationalNeq => Self::Neq,
+            TokenKind::QuestionMark => Self::TernaryQuestionMark,
+            _ => return None,
         })
     }
     /// See also [`PrefixOp::binding_power`].
@@ -110,21 +92,17 @@ enum PrefixOp {
 
 impl PrefixOp {
     fn at(p: &mut Parser, defined_operator: bool) -> Option<Self> {
-        Some(if p.at(TokenKind::Plus) {
-            Self::UnaryPlus
-        } else if p.at(TokenKind::Minus) {
-            Self::Neg
-        } else if defined_operator && {
+        p.add_expected(Expected::PrefixOperator);
+        if defined_operator {
             p.add_expected(Expected::PreprocessorDefinedOperator);
-            p.silent_at(TokenKind::Ident) && p.text() == Some("defined")
-        } {
-            Self::Defined
-        } else if p.at(TokenKind::BitwiseNot) {
-            Self::BitwiseNot
-        } else if p.at(TokenKind::LogicalNot) {
-            Self::LogicalNot
-        } else {
-            return None;
+        }
+        Some(match p.peek()? {
+            TokenKind::Plus => Self::UnaryPlus,
+            TokenKind::Minus => Self::Neg,
+            TokenKind::Ident if defined_operator && p.text() == Some("defined") => Self::Defined,
+            TokenKind::BitwiseNot => Self::BitwiseNot,
+            TokenKind::LogicalNot => Self::LogicalNot,
+            _ => return None,
         })
     }
     /// See also [`InfixOp::binding_power`].
@@ -396,7 +374,7 @@ mod tests {
             expect![[r#"
                 Errors: [
                     ParseError {
-                        message: "Expected ‘+’, ‘-’, ‘*’, ‘/’, ‘%’, ‘&’, ‘|’, ‘^‘, ‘<<’, ‘>>’, ‘&&‘, ‘||‘, ‘<’, ‘>’, ‘<=‘, ‘>=‘, ‘==‘, ‘!=‘, ‘?‘ or end-of-file, but found number literal",
+                        message: "Expected infix operator or end-of-file, but found number literal",
                         primary_text_range: TextRange {
                             start: 2,
                             end: 3,
