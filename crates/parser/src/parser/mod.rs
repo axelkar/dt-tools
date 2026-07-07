@@ -141,7 +141,7 @@ impl Entrypoint {
                     NodeKind::SourceFile
                 }
                 Self::Name => {
-                    grammar::eat_macro_substitutable_name(p);
+                    grammar::entry_name(p);
                     NodeKind::EntryName
                 }
                 Self::ReferenceNoamp => {
@@ -233,12 +233,10 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.source.peek_kind()
     }
 
-    /// Returns true if `kind` is the current token's kind.
-    pub fn at(&mut self, kind: TokenKind) -> bool {
+    /// See [`Check::at`].
+    pub fn at(&mut self, matcher: impl TokenMatcher) -> bool {
         let _span = tracy_client::span!("parser::Parser::at");
-
-        self.expected.push(Expected::Kind(kind));
-        self.peek() == Some(kind)
+        self.check(matcher).at()
     }
 
     /// Returns true if `kind` is the current token's kind.
@@ -247,79 +245,19 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.peek_immediate() == Some(kind)
     }
 
-    /// Bumps and returns true if `kind` is the current token's kind.
-    ///
-    /// Basically a combination of [`Parser::at`] and [`Parser::bump`]
-    pub fn eat(&mut self, kind: TokenKind) -> bool {
+    /// See [`Check::eat`].
+    pub fn eat(&mut self, matcher: impl TokenMatcher) -> bool {
         let _span = tracy_client::span!("parser::Parser::eat");
-
-        if self.at(kind) {
-            self.bump();
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Returns true if `kind` is the current token's kind.
-    ///
-    /// - This does not add `kind` to `expected_kinds`.
-    ///
-    /// Use for error recovery or with [`Parser::add_expected`]
-    pub fn silent_at(&mut self, kind: TokenKind) -> bool {
-        self.peek() == Some(kind)
-    }
-
-    /// Returns true if the current token's kind is in `set`.
-    pub fn at_set(&mut self, set: &[TokenKind]) -> bool {
-        let _span = tracy_client::span!("parser::Parser::at_set");
-
-        self.expected.reserve(set.len());
-        for kind in set {
-            self.expected.push(Expected::Kind(*kind));
-        }
-        self.peek().is_some_and(|k| set.contains(&k))
-    }
-
-    /// Returns true if the current token's kind is in `set`.
-    ///
-    /// - This doesn't add `set` to `expected_kinds`.
-    pub fn silent_at_set(&mut self, set: &[TokenKind]) -> bool {
-        let _span = tracy_client::span!("parser::Parser::silent_at_set");
-
-        self.peek().is_some_and(|k| set.contains(&k))
+        self.check(matcher).eat()
     }
 
     /// Bumps when `kind` is the current token's kind and errors otherwise.
     ///
     /// Returns true if a token was bumped.
-    pub fn expect(&mut self, kind: TokenKind) -> bool {
+    pub fn expect(&mut self, matcher: impl TokenMatcher) -> bool {
         #[cfg(feature = "grammar-tracing")]
         debug!(?kind, "expect");
-
-        if self.at(kind) {
-            self.bump();
-            true
-        } else {
-            self.error().msg_expected().emit();
-            false
-        }
-    }
-
-    /// Errors when the current token's kind isn't `kind` and bumps when not at `recovery_set`.
-    ///
-    /// Use this when you know that `recovery_set` will be bumped.
-    pub fn expect_recoverable(&mut self, kind: TokenKind, recovery_set: &[TokenKind]) {
-        #[cfg(feature = "grammar-tracing")]
-        debug!(?kind, ?recovery_set, "expect_recoverable");
-
-        if self.at(kind) {
-            self.bump();
-        } else if self.silent_at_set(recovery_set) {
-            self.error().msg_expected().emit();
-        } else {
-            self.error().msg_expected().bump_wrap_err().emit();
-        }
+        self.check(matcher).expect()
     }
 
     /// Returns an error builder, which will report the current token (the one that is tested by
@@ -369,45 +307,15 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.source.range()
     }
 
-    /// Returns true if at a label name token.
-    pub fn at_label_name(&mut self) -> bool {
-        self.expected.push(Expected::LabelName);
-        self.silent_at_set(&LABEL_NAME_SET)
-    }
-
-    /// Returns true if at a name token.
-    pub fn at_name(&mut self) -> bool {
-        self.expected.push(Expected::Kind(TokenKind::Name));
-        self.silent_at_set(&NAME_SET)
-    }
-
     /// Returns true if at a macro invocation with arguments.
     pub fn silent_at_macro_invocation_with_args(&mut self) -> bool {
-        self.silent_at(TokenKind::Ident)
+        self.check(TokenKind::Ident).silent().at()
             && self.source.peek_immediate_next_kind() == Some(TokenKind::LParen)
     }
 
     #[inline]
     pub fn add_expected(&mut self, expected: Expected) {
         self.expected.push(expected);
-    }
-
-    /// Bumps name tokens into [`TokenKind::Name`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if not at a name token.
-    pub fn bump_name(&mut self) {
-        self.bump_name_generic(&NAME_SET);
-    }
-
-    /// Bumps label name tokens into [`TokenKind::Name`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if not at a label name token.
-    pub fn bump_label_name(&mut self) {
-        self.bump_name_generic(&LABEL_NAME_SET);
     }
 
     pub fn text(&mut self) -> Option<&str> {
@@ -421,7 +329,7 @@ impl<'t, 'input> Parser<'t, 'input> {
         #[cfg(feature = "grammar-tracing")]
         tracing::info!("bump_name_generic");
 
-        assert!(self.silent_at_set(set));
+        assert!(self.check(set).silent().at());
 
         // Make sure no trivia tokens get into the combined token
         self.source.skip_trivia();
@@ -445,21 +353,6 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.expected.clear();
     }
 
-    /// Bumps and returns true if at a name token.
-    ///
-    /// Basically a combination of [`Parser::at_name`] and [`Parser::bump_name`]
-    pub fn eat_name(&mut self) -> bool {
-        #[cfg(feature = "grammar-tracing")]
-        debug!("eat_name");
-
-        if self.at_name() {
-            self.bump_name();
-            true
-        } else {
-            false
-        }
-    }
-
     /// Returns true if at the end-of-file.
     pub fn at_end(&mut self) -> bool {
         self.peek().is_none()
@@ -478,6 +371,158 @@ impl<'t, 'input> Parser<'t, 'input> {
 
         assert!(self.source.next_token().is_some(), "Tried to bump at EOF");
         self.events.push(Event::AddToken);
+    }
+
+    /// Returns a token check builder with the given matcher.
+    ///
+    /// Defaults to expected-tracking mode; use [`Check::silent()`] to opt out.
+    #[must_use]
+    pub fn check<M: TokenMatcher>(&mut self, matcher: M) -> Check<'_, 't, 'input, M, false> {
+        Check { p: self, matcher }
+    }
+}
+
+/// Types that can match and consume tokens from the parser.
+pub(crate) trait TokenMatcher: Copy {
+    /// Returns true if the current token matches this matcher.
+    ///
+    /// Does NOT push to the expected list.
+    fn matches(self, p: &mut Parser) -> bool;
+
+    /// Push expected entries for error messages.
+    fn push_expected(self, p: &mut Parser);
+
+    /// Consume the matched token(s). Only called after `matches` returned true.
+    fn consume(self, p: &mut Parser);
+}
+
+/// Builder returned by [`Parser::check()`].
+pub(crate) struct Check<'p, 't, 'input, M: TokenMatcher, const SILENT: bool> {
+    p: &'p mut Parser<'t, 'input>,
+    matcher: M,
+}
+
+impl<'p, 't, 'input, M: TokenMatcher> Check<'p, 't, 'input, M, false> {
+    /// Tests and consumes, or emits an error.
+    pub fn expect(&mut self) -> bool {
+        if self.eat() {
+            true
+        } else {
+            self.p.error().msg_expected().emit();
+            false
+        }
+    }
+
+    /// Same as [`Self::expect()`] except bumps when not at `recovery`.
+    ///
+    /// Use this when you know that `recovery` will be bumped.
+    pub fn expect_recoverable(&mut self, recovery: impl TokenMatcher) -> bool {
+        if self.eat() {
+            true
+        } else {
+            if recovery.matches(self.p) {
+                self.p.error().msg_expected().emit();
+            } else {
+                self.p.error().msg_expected().bump_wrap_err().emit();
+            }
+            false
+        }
+    }
+
+    /// Switch to silent mode (no expected-list pollution).
+    #[must_use]
+    pub fn silent(self) -> Check<'p, 't, 'input, M, true> {
+        Check {
+            p: self.p,
+            matcher: self.matcher,
+        }
+    }
+}
+
+impl<M: TokenMatcher, const SILENT: bool> Check<'_, '_, '_, M, SILENT> {
+    /// Tests whether the matcher matches.
+    pub fn at(&mut self) -> bool {
+        if !SILENT {
+            self.matcher.push_expected(self.p);
+        }
+        self.matcher.matches(self.p)
+    }
+
+    /// Tests and consumes.
+    pub fn eat(&mut self) -> bool {
+        if self.at() {
+            self.matcher.consume(self.p);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl TokenMatcher for TokenKind {
+    fn matches(self, p: &mut Parser) -> bool {
+        p.peek() == Some(self)
+    }
+    fn push_expected(self, p: &mut Parser) {
+        p.add_expected(Expected::Kind(self));
+    }
+    fn consume(self, p: &mut Parser) {
+        p.bump();
+    }
+}
+
+impl TokenMatcher for &[TokenKind] {
+    fn matches(self, p: &mut Parser) -> bool {
+        p.peek().is_some_and(|k| self.contains(&k))
+    }
+    fn push_expected(self, p: &mut Parser) {
+        p.expected.extend(self.iter().copied().map(Expected::Kind));
+    }
+    fn consume(self, p: &mut Parser) {
+        p.bump();
+    }
+}
+impl<const N: usize> TokenMatcher for &[TokenKind; N] {
+    fn matches(self, p: &mut Parser) -> bool {
+        p.peek().is_some_and(|k| self.contains(&k))
+    }
+    fn push_expected(self, p: &mut Parser) {
+        p.expected.extend(self.iter().copied().map(Expected::Kind));
+    }
+    fn consume(self, p: &mut Parser) {
+        p.bump();
+    }
+}
+
+/// Matches a devicetree name token.
+#[derive(Clone, Copy)]
+pub(crate) struct Name;
+
+impl TokenMatcher for Name {
+    fn matches(self, p: &mut Parser) -> bool {
+        NAME_SET.matches(p)
+    }
+    fn push_expected(self, p: &mut Parser) {
+        p.add_expected(Expected::Kind(TokenKind::Name));
+    }
+    fn consume(self, p: &mut Parser) {
+        p.bump_name_generic(&NAME_SET);
+    }
+}
+
+/// Matches a devicetree label name token.
+#[derive(Clone, Copy)]
+pub(crate) struct LabelName;
+
+impl TokenMatcher for LabelName {
+    fn matches(self, p: &mut Parser) -> bool {
+        LABEL_NAME_SET.matches(p)
+    }
+    fn push_expected(self, p: &mut Parser) {
+        p.add_expected(Expected::LabelName);
+    }
+    fn consume(self, p: &mut Parser) {
+        p.bump_name_generic(&LABEL_NAME_SET);
     }
 }
 

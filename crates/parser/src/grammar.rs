@@ -7,7 +7,7 @@ use tracing::debug;
 use crate::{
     cst::NodeKind,
     lexer::TokenKind,
-    parser::{CompletedMarker, Expected, Marker, Parser},
+    parser::{CompletedMarker, Expected, LabelName, Marker, Name, Parser, TokenMatcher},
 };
 
 pub(crate) mod expr;
@@ -45,7 +45,7 @@ pub(crate) use vis;
 /// the same.
 ///
 /// e.g. `FOO(bar, 1234)`
-fn macro_invocation(p: &mut Parser) {
+pub(super) fn macro_invocation(p: &mut Parser) {
     let _span = tracy_client::span!("grammar::macro_invocation");
 
     let m = p.start();
@@ -82,6 +82,26 @@ fn macro_invocation(p: &mut Parser) {
     m.complete(p, NodeKind::MacroInvocation);
 }
 
+/// Matches a macro invocation with args, or a plain name.
+#[derive(Clone, Copy)]
+pub(super) struct MacroSubstitutableName;
+
+impl TokenMatcher for MacroSubstitutableName {
+    fn matches(self, p: &mut Parser) -> bool {
+        p.silent_at_macro_invocation_with_args() || Name.matches(p)
+    }
+    fn push_expected(self, p: &mut Parser) {
+        p.add_expected(Expected::Kind(TokenKind::Name));
+    }
+    fn consume(self, p: &mut Parser) {
+        if p.silent_at_macro_invocation_with_args() {
+            macro_invocation(p);
+        } else {
+            Name.consume(p);
+        }
+    }
+}
+
 /// Parses a reference without the leading ampersand and a node.
 pub(super) fn reference_noamp(p: &mut Parser) {
     if p.eat(TokenKind::LCurly) {
@@ -89,13 +109,13 @@ pub(super) fn reference_noamp(p: &mut Parser) {
 
         while !p.at(TokenKind::RCurly)
             && !p.at_end()
-            && !p.silent_at_set(CONTINUE_COND_SET)
-            && !p.silent_at(TokenKind::EndifDirective)
+            && !p.check(CONTINUE_COND_SET).silent().at()
+            && !p.check(TokenKind::EndifDirective).silent().at()
         {
             // TODO: better recovery
             p.expect(TokenKind::Slash);
-            if p.eat_name() {
-                eat_unit_address(p);
+            if p.eat(Name) {
+                p.eat(UnitAddress);
             } else {
                 p.error().msg_expected().bump_wrap_err().emit();
             }
@@ -104,8 +124,7 @@ pub(super) fn reference_noamp(p: &mut Parser) {
     } else if p.silent_at_macro_invocation_with_args() {
         // macro-substitutable name
         macro_invocation(p);
-    } else if p.at_label_name() {
-        p.bump_label_name();
+    } else if p.eat(LabelName) {
     } else {
         p.error().msg_expected().bump_wrap_err().emit();
     }
@@ -142,13 +161,13 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
 
     loop {
         p.add_expected(Expected::Cell);
-        if p.silent_at_set(&[TokenKind::Number, TokenKind::Char]) {
+        if p.check(&[TokenKind::Number, TokenKind::Char]).silent().at() {
             p.bump();
-        } else if p.silent_at(TokenKind::Ident) {
+        } else if p.check(TokenKind::Ident).silent().at() {
             macro_invocation(p);
-        } else if p.silent_at(TokenKind::Ampersand) {
+        } else if p.check(TokenKind::Ampersand).silent().at() {
             reference(p);
-        } else if p.silent_at(TokenKind::LParen) {
+        } else if p.check(TokenKind::LParen).silent().at() {
             // Start a parantesized expression
             dt_expr(p);
         } else if (AT_EOF && {
@@ -157,10 +176,13 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
         }) || (!AT_EOF && p.at(TokenKind::RAngle))
         {
             break;
-        } else if p.silent_at_set(&[TokenKind::Semicolon, TokenKind::LCurly, TokenKind::RCurly])
+        } else if p
+            .check(&[TokenKind::Semicolon, TokenKind::LCurly, TokenKind::RCurly])
+            .silent()
+            .at()
             || p.at_end()
-            || p.silent_at_set(CONTINUE_COND_SET)
-            || p.silent_at(TokenKind::EndifDirective)
+            || p.check(CONTINUE_COND_SET).silent().at()
+            || p.check(TokenKind::EndifDirective).silent().at()
         {
             p.error().msg_expected().emit();
             return Err(());
@@ -253,7 +275,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
     while !p.at_end() {
         p.add_expected(Expected::Value);
 
-        if p.silent_at(TokenKind::BitsDirective) {
+        if p.check(TokenKind::BitsDirective).silent().at() {
             let m_cell_list = p.start();
             let m = p.start();
             p.bump();
@@ -266,27 +288,25 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
                 p.error().msg_expected().bump().emit();
                 m_cell_list.complete(p, NodeKind::ParseError);
             }
-        } else if p.silent_at(TokenKind::String) {
-            p.bump();
-        } else if p.silent_at(TokenKind::LAngle) {
+        } else if p.check(TokenKind::String).silent().eat() {
+        } else if p.check(TokenKind::LAngle).silent().at() {
             dt_cell_list(p.start(), p)?;
-        } else if p.silent_at(TokenKind::Ampersand) {
+        } else if p.check(TokenKind::Ampersand).silent().at() {
             reference(p);
-        } else if p.silent_at(TokenKind::Ident) {
+        } else if p.check(TokenKind::Ident).silent().at() {
             macro_invocation(p);
-        } else if p.silent_at(TokenKind::DtBytestring) {
-            p.bump();
+        } else if p.check(TokenKind::DtBytestring).silent().eat() {
         } else {
             p.error().msg_expected().bump_wrap_err().emit();
             break;
         }
 
         if p.eat(TokenKind::Comma) {
-        } else if p.at_set(ending_kinds) {
+        } else if p.at(ending_kinds) {
             // This is here and not in the while loop's head to add them to the `expected` list,
             // for the proper error message.
             break;
-        } else if p.silent_at_set(PROPERTY_VALUE_RECOVERY_SET) {
+        } else if p.check(PROPERTY_VALUE_RECOVERY_SET).silent().at() {
             // Missing comma but can be recovered
             p.error().msg_expected().emit();
         } else {
@@ -316,7 +336,8 @@ fn dt_property(p: &mut Parser, m: Marker) -> CompletedMarker {
     }
     list_m.complete(p, NodeKind::PropValueList);
 
-    p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
+    p.check(TokenKind::Semicolon)
+        .expect_recoverable(ITEM_RECOVERY_SET);
 
     vis!(end);
     m.complete(p, NodeKind::DtProperty)
@@ -356,7 +377,8 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
 
     p.expect(TokenKind::RCurly);
 
-    p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
+    p.check(TokenKind::Semicolon)
+        .expect_recoverable(ITEM_RECOVERY_SET);
 
     m.complete(p, NodeKind::DtNode);
 
@@ -384,7 +406,7 @@ fn item(p: &mut Parser) {
         } else {
             p.error().msg_expected().complete(m).emit();
         }
-    } else if eat_macro_substitutable_name(p) {
+    } else if p.eat(MacroSubstitutableName) {
         // parse a node or a property
 
         if p.eat(TokenKind::Colon) {
@@ -392,9 +414,9 @@ fn item(p: &mut Parser) {
             m = m.complete(p, NodeKind::DtLabel).precede(p);
 
             // Pick up remaining labels, if any
-            while p.at_name() {
+            while p.at(Name) {
                 let m_label = p.start();
-                assert!(eat_macro_substitutable_name(p));
+                assert!(p.eat(MacroSubstitutableName));
 
                 if p.eat(TokenKind::Colon) {
                     m_label.complete(p, NodeKind::DtLabel);
@@ -411,11 +433,11 @@ fn item(p: &mut Parser) {
             }
         }
 
-        eat_unit_address(p);
+        p.eat(UnitAddress);
 
         if p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon) {
             dt_property(p, m);
-        } else if p.silent_at(TokenKind::RCurly) {
+        } else if p.check(TokenKind::RCurly).silent().at() {
             // TODO: what if inside a node?
             // axka 2025-04-21: I think this could just be "ignored" and left to the caller of item
 
@@ -425,7 +447,7 @@ fn item(p: &mut Parser) {
         } else {
             p.error().msg_expected().emit();
 
-            if !p.silent_at_set(ITEM_RECOVERY_SET) && !p.at_end() {
+            if !p.check(ITEM_RECOVERY_SET).silent().at() && !p.at_end() {
                 p.bump();
             }
 
@@ -441,7 +463,7 @@ fn item(p: &mut Parser) {
         } else {
             p.error().msg_expected().complete(m).emit();
         }
-    } else if p.silent_at(TokenKind::Equals) {
+    } else if p.check(TokenKind::Equals).silent().at() {
         p.error()
             .msg_expected()
             .add_hint(Cow::Borrowed("Recovered as unnamed property"))
@@ -450,7 +472,7 @@ fn item(p: &mut Parser) {
         let m_prop = p.start();
         dt_property(p, m_prop);
         m.complete(p, NodeKind::ParseError);
-    } else if p.silent_at(TokenKind::LCurly) {
+    } else if p.check(TokenKind::LCurly).silent().at() {
         // TODO: lint & analyze unnamed nodes, remove ParseError wrap
         p.error()
             .msg_expected()
@@ -460,14 +482,15 @@ fn item(p: &mut Parser) {
         let m_node = p.start();
         dt_node_body(p, m_node);
         m.complete(p, NodeKind::ParseError);
-    } else if p.silent_at(TokenKind::Semicolon) {
+    } else if p.check(TokenKind::Semicolon).silent().at() {
         p.error().msg_custom(Cow::Borrowed("Unmatched `;`")).emit();
 
         p.bump();
         m.complete(p, NodeKind::ParseError);
-    } else if p.at_set(&[TokenKind::V1Directive, TokenKind::PluginDirective]) {
+    } else if p.at(&[TokenKind::V1Directive, TokenKind::PluginDirective]) {
         p.bump();
-        p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
+        p.check(TokenKind::Semicolon)
+            .expect_recoverable(ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::DtsDirective);
     } else if p.eat(TokenKind::DtIncludeDirective) {
         // TODO: only match this at root
@@ -482,9 +505,10 @@ fn item(p: &mut Parser) {
         p.expect(TokenKind::Number);
         m_params.complete(p, NodeKind::DtsDirectiveArguments);
 
-        p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
+        p.check(TokenKind::Semicolon)
+            .expect_recoverable(ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::DtsDirective);
-    } else if p.at_set(&[
+    } else if p.at(&[
         TokenKind::DeleteNodeDirective,
         TokenKind::DeletePropertyDirective,
     ]) {
@@ -494,14 +518,15 @@ fn item(p: &mut Parser) {
         let m_params = p.start();
         if p.at(TokenKind::Ampersand) {
             reference(p);
-        } else if eat_macro_substitutable_name(p) {
-            eat_unit_address(p);
+        } else if p.eat(MacroSubstitutableName) {
+            p.eat(UnitAddress);
         } else {
             p.error().msg_expected().emit();
         }
         m_params.complete(p, NodeKind::DtsDirectiveArguments);
 
-        p.expect_recoverable(TokenKind::Semicolon, ITEM_RECOVERY_SET);
+        p.check(TokenKind::Semicolon)
+            .expect_recoverable(ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::DtsDirective);
     } else {
         p.error().bump().complete(m).msg_expected().emit();
@@ -512,33 +537,25 @@ fn item(p: &mut Parser) {
     vis!(end);
 }
 
-/// Eats a unit address.
-///
-/// Returns true if something was bumped.
-fn eat_unit_address(p: &mut Parser<'_, '_>) -> bool {
-    if p.at(TokenKind::AtSign) {
+/// Matches a unit address.
+#[derive(Clone, Copy)]
+pub(super) struct UnitAddress;
+
+impl TokenMatcher for UnitAddress {
+    fn matches(self, p: &mut Parser) -> bool {
+        TokenKind::AtSign.matches(p)
+    }
+    fn push_expected(self, p: &mut Parser) {
+        p.add_expected(Expected::Kind(TokenKind::AtSign));
+    }
+    fn consume(self, p: &mut Parser) {
         let m = p.start();
         p.bump();
 
-        if !eat_macro_substitutable_name(p) {
+        if !p.eat(MacroSubstitutableName) {
             p.error().msg_expected().emit();
         }
         m.complete(p, NodeKind::UnitAddress);
-        true
-    } else {
-        false
-    }
-}
-
-/// Eats a macro-substitutable name.
-///
-/// Returns true if something was bumped.
-pub(super) fn eat_macro_substitutable_name(p: &mut Parser) -> bool {
-    if p.silent_at_macro_invocation_with_args() {
-        macro_invocation(p);
-        true
-    } else {
-        p.eat_name()
     }
 }
 
@@ -562,14 +579,14 @@ const CONTINUE_COND_SET: &[TokenKind] = &[
 /// - `inside`: Parser function for things inside a preprocessor directive. Don't put a loop inside
 ///   it, don't explicitly run [`preprocessor_directive`] and don't explicitly handle tokens that
 ///   end a preprocessor conditional branch, as they are all done automatically.
-fn preprocessor_directive(p: &mut Parser, inside: impl Fn(&mut Parser)) -> bool {
+fn preprocessor_directive(p: &mut Parser, inside: fn(&mut Parser)) -> bool {
     // TODO: this inside nodes
 
-    fn cond_branches_and_end(p: &mut Parser, inside: impl Fn(&mut Parser)) {
+    fn cond_branches_and_end(p: &mut Parser, inside: fn(&mut Parser)) {
         let mut m_branch = p.start();
 
-        while !p.silent_at(TokenKind::EndifDirective) && !p.at_end() {
-            if p.silent_at_set(CONTINUE_COND_SET) {
+        while !p.check(TokenKind::EndifDirective).silent().at() && !p.at_end() {
+            if p.check(CONTINUE_COND_SET).silent().at() {
                 m_branch.complete(p, NodeKind::PreprocessorBranch);
                 p.bump();
                 m_branch = p.start();
@@ -585,19 +602,19 @@ fn preprocessor_directive(p: &mut Parser, inside: impl Fn(&mut Parser)) -> bool 
 
     p.add_expected(Expected::PreprocessorDirective);
 
-    if p.silent_at_set(BEGIN_COND_SET) {
+    if p.check(BEGIN_COND_SET).silent().at() {
         let m_cond = p.start();
         p.bump();
         cond_branches_and_end(p, inside);
         m_cond.complete(p, NodeKind::PreprocessorConditional);
         true
-    } else if p.silent_at(TokenKind::EndifDirective) {
+    } else if p.check(TokenKind::EndifDirective).silent().at() {
         p.error()
             .bump_wrap_err()
             .msg_custom(Cow::Borrowed("Unmatched `#endif`"))
             .emit();
         true
-    } else if p.silent_at_set(CONTINUE_COND_SET) {
+    } else if p.check(CONTINUE_COND_SET).silent().at() {
         p.error()
             .msg_custom(Cow::Borrowed(
                 "Preprocessor conditional continuation without preceding `#if` or equivalent.",
@@ -609,13 +626,17 @@ fn preprocessor_directive(p: &mut Parser, inside: impl Fn(&mut Parser)) -> bool 
         cond_branches_and_end(p, inside);
         m_err.complete(p, NodeKind::ParseError);
         true
-    } else if p.silent_at_set(&[
-        TokenKind::UndefDirective,
-        TokenKind::PragmaDirective,
-        TokenKind::DefineDirective,
-        TokenKind::IncludeDirective,
-        TokenKind::ErrorDirective,
-    ]) {
+    } else if p
+        .check(&[
+            TokenKind::UndefDirective,
+            TokenKind::PragmaDirective,
+            TokenKind::DefineDirective,
+            TokenKind::IncludeDirective,
+            TokenKind::ErrorDirective,
+        ])
+        .silent()
+        .at()
+    {
         p.bump();
         true
     } else {
@@ -626,7 +647,7 @@ fn preprocessor_directive(p: &mut Parser, inside: impl Fn(&mut Parser)) -> bool 
 pub(super) fn entry_sourcefile(p: &mut Parser) {
     fn toplevel_item(p: &mut Parser) {
         if preprocessor_directive(p, toplevel_item) {
-        } else if p.silent_at(TokenKind::RCurly) {
+        } else if p.check(TokenKind::RCurly).silent().at() {
             p.error().msg_custom(Cow::Borrowed("Unmatched `}`")).emit();
 
             let e = p.start();
@@ -642,6 +663,10 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
     while !p.at_end() {
         toplevel_item(p);
     }
+}
+
+pub(super) fn entry_name(p: &mut Parser) -> bool {
+    p.eat(MacroSubstitutableName)
 }
 
 #[cfg(test)]

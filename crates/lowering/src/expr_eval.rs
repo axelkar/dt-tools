@@ -27,7 +27,7 @@ pub fn parse_int_tok<
 ) -> Result<T, ()> {
     /// Helper function that isn't monomorphized
     fn emit_err(
-        err: ParseIntError,
+        err: &ParseIntError,
         diag: &impl DiagnosticCollector<File>,
         spanner: &mut impl FnMut(TextRange) -> Span<File>,
         tok: &Arc<RedToken>,
@@ -52,7 +52,7 @@ pub fn parse_int_tok<
         // Decimal
         src.parse()
     }
-    .map_err(|err| emit_err(err, diag, spanner, tok, T::BITS, T::SIGNEDNESS))
+    .map_err(|err| emit_err(&err, diag, spanner, tok, T::BITS, T::SIGNEDNESS))
 }
 
 pub fn interpret_escaped_char_tok(

@@ -187,7 +187,7 @@ fn lhs(p: &mut Parser, defined_operator: bool) -> Result<(), ()> {
     } else if p.at(TokenKind::Ident) {
         macro_invocation(p);
         Ok(())
-    } else if p.at_set(&[TokenKind::Number, TokenKind::Char]) {
+    } else if p.at(&[TokenKind::Number, TokenKind::Char]) {
         // TODO: no node!
         let m = p.start();
         p.bump();
@@ -209,7 +209,7 @@ fn lhs(p: &mut Parser, defined_operator: bool) -> Result<(), ()> {
         let _ = expr_binding_power(p, defined_operator, 0);
         m.complete(p, NodeKind::ParseError);
         Err(())
-    } else if p.silent_at(TokenKind::RParen) {
+    } else if p.check(TokenKind::RParen).silent().at() {
         // Error recovery: don't bump RParen as a parent may be expecting it
 
         p.error().msg_expected().emit();
