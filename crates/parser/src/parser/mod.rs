@@ -27,7 +27,6 @@ mod source;
 pub(crate) use errors::{ErrorBuilder, Expected};
 pub use errors::{ParseError, WrappedLexError};
 
-// TODO: axka style naming naming lints
 const NAME_SET: [TokenKind; 4] = [
     TokenKind::Ident,
     TokenKind::Number,
@@ -142,7 +141,7 @@ impl Entrypoint {
                     NodeKind::SourceFile
                 }
                 Self::Name => {
-                    grammar::entry_name(p);
+                    grammar::eat_macro_substitutable_name(p);
                     NodeKind::EntryName
                 }
                 Self::ReferenceNoamp => {
@@ -384,7 +383,6 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Returns true if at a macro invocation with arguments.
     pub fn silent_at_macro_invocation_with_args(&mut self) -> bool {
-        // TODO: don't peek the next token after the current one
         self.silent_at(TokenKind::Ident)
             && self.source.peek_immediate_next_kind() == Some(TokenKind::LParen)
     }
@@ -463,7 +461,6 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
 
     /// Returns true if at the end-of-file.
-    // TODO: Rust-analyzer has a token for EOF, should I?
     pub fn at_end(&mut self) -> bool {
         self.peek().is_none()
     }

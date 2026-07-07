@@ -85,6 +85,8 @@ fn macro_invocation(p: &mut Parser) {
 /// Parses a reference without the leading ampersand and a node.
 pub(super) fn reference_noamp(p: &mut Parser) {
     if p.eat(TokenKind::LCurly) {
+        // path reference
+
         while !p.at(TokenKind::RCurly)
             && !p.at_end()
             && !p.silent_at_set(CONTINUE_COND_SET)
@@ -93,13 +95,14 @@ pub(super) fn reference_noamp(p: &mut Parser) {
             // TODO: better recovery
             p.expect(TokenKind::Slash);
             if p.eat_name() {
-                unit_address_opt(p);
+                eat_unit_address(p);
             } else {
                 p.error().msg_expected().bump_wrap_err().emit();
             }
         }
         p.expect(TokenKind::RCurly);
     } else if p.silent_at_macro_invocation_with_args() {
+        // macro-substitutable name
         macro_invocation(p);
     } else if p.at_label_name() {
         p.bump_label_name();
@@ -373,7 +376,7 @@ fn item(p: &mut Parser) {
     #[cfg(feature = "grammar-tracing")]
     debug!("item start");
 
-    let m = p.start();
+    let mut m = p.start();
     if p.eat(TokenKind::Slash) {
         if p.at(TokenKind::LCurly) {
             dt_node_body(p, m);
@@ -381,16 +384,8 @@ fn item(p: &mut Parser) {
         } else {
             p.error().msg_expected().complete(m).emit();
         }
-    } else if p.at_name() {
-        let mut m = m;
+    } else if eat_macro_substitutable_name(p) {
         // parse a node or a property
-
-        // macro-substitutable name
-        if p.silent_at_macro_invocation_with_args() {
-            macro_invocation(p);
-        } else {
-            p.bump_name();
-        }
 
         if p.eat(TokenKind::Colon) {
             // was a label
@@ -399,12 +394,7 @@ fn item(p: &mut Parser) {
             // Pick up remaining labels, if any
             while p.at_name() {
                 let m_label = p.start();
-                // macro-substitutable name
-                if p.silent_at_macro_invocation_with_args() {
-                    macro_invocation(p);
-                } else {
-                    p.bump_name();
-                }
+                assert!(eat_macro_substitutable_name(p));
 
                 if p.eat(TokenKind::Colon) {
                     m_label.complete(p, NodeKind::DtLabel);
@@ -421,7 +411,7 @@ fn item(p: &mut Parser) {
             }
         }
 
-        unit_address_opt(p);
+        eat_unit_address(p);
 
         if p.at(TokenKind::Equals) || p.at(TokenKind::Semicolon) {
             dt_property(p, m);
@@ -504,11 +494,8 @@ fn item(p: &mut Parser) {
         let m_params = p.start();
         if p.at(TokenKind::Ampersand) {
             reference(p);
-        } else if p.silent_at_macro_invocation_with_args() {
-            macro_invocation(p);
-            unit_address_opt(p);
-        } else if p.eat_name() {
-            unit_address_opt(p);
+        } else if eat_macro_substitutable_name(p) {
+            eat_unit_address(p);
         } else {
             p.error().msg_expected().emit();
         }
@@ -525,18 +512,33 @@ fn item(p: &mut Parser) {
     vis!(end);
 }
 
-fn unit_address_opt(p: &mut Parser<'_, '_>) {
+/// Eats a unit address.
+///
+/// Returns true if something was bumped.
+fn eat_unit_address(p: &mut Parser<'_, '_>) -> bool {
     if p.at(TokenKind::AtSign) {
-        // unit address
-        let mut m = p.start();
+        let m = p.start();
         p.bump();
 
-        if p.silent_at_macro_invocation_with_args() {
-            macro_invocation(p);
-        } else if !p.eat_name() {
+        if !eat_macro_substitutable_name(p) {
             p.error().msg_expected().emit();
         }
         m.complete(p, NodeKind::UnitAddress);
+        true
+    } else {
+        false
+    }
+}
+
+/// Eats a macro-substitutable name.
+///
+/// Returns true if something was bumped.
+pub(super) fn eat_macro_substitutable_name(p: &mut Parser) -> bool {
+    if p.silent_at_macro_invocation_with_args() {
+        macro_invocation(p);
+        true
+    } else {
+        p.eat_name()
     }
 }
 
@@ -639,17 +641,6 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
 
     while !p.at_end() {
         toplevel_item(p);
-    }
-}
-
-pub(super) fn entry_name(p: &mut Parser) {
-    if p.silent_at_macro_invocation_with_args() {
-        macro_invocation(p);
-    } else if p.at_name() {
-        p.bump_name();
-    } else {
-        // This just quits parsing. Is this preferred?
-        p.error().msg_expected().bump_wrap_err().emit();
     }
 }
 
