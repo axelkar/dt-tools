@@ -274,7 +274,7 @@ pub fn analyze_file<F: Clone>(
         .syntax()
         .children()
         //.par_bridge()
-        .filter_map(ast::ToplevelItem::cast_either)
+        .filter_map(ast::Item::cast_either)
         .filter_map(|item| {
             let _span = span.clone().entered();
             maybe_analyze_toplevel(item, src, file.clone(), diag)
@@ -289,13 +289,13 @@ pub fn analyze_file<F: Clone>(
 
 #[expect(clippy::too_many_lines, reason = "no good way to make this shorter")]
 fn maybe_analyze_toplevel<F: Clone>(
-    item: ast::ToplevelItem,
+    item: ast::Item,
     src: &str,
     file: F,
     diag: &(impl DiagnosticCollector<F> + Sync),
 ) -> Option<AnalyzedToplevel> {
     match item {
-        ast::ToplevelItem::Node(node) => {
+        ast::Item::DtNode(node) => {
             let mut labels = FxHashMap::default();
             gather_labels(&node, src, &mut |name, def| {
                 labels.insert(name.to_owned(), def);
@@ -311,7 +311,7 @@ fn maybe_analyze_toplevel<F: Clone>(
                 labels,
             }))
         }
-        ast::ToplevelItem::Directive(dir) => {
+        ast::Item::DtsDirective(dir) => {
             let mut iter = dir.syntax().child_tokens();
 
             // Skip until DtIncludeDirective is found, return None if it isn't found
@@ -337,9 +337,7 @@ fn maybe_analyze_toplevel<F: Clone>(
                 relative: true,
             }))
         }
-        ast::ToplevelItem::PreprocessorDirective(dir)
-            if dir.kind() == TokenKind::IncludeDirective =>
-        {
+        ast::Item::PreprocessorDirective(dir) if dir.kind() == TokenKind::IncludeDirective => {
             Some(AnalyzedToplevel::Include(
                 match AnalyzedInclude::pp_parse(
                     dir.syntax().text_range(),
@@ -359,9 +357,7 @@ fn maybe_analyze_toplevel<F: Clone>(
                 },
             ))
         }
-        ast::ToplevelItem::PreprocessorDirective(dir)
-            if dir.kind() == TokenKind::DefineDirective =>
-        {
+        ast::Item::PreprocessorDirective(dir) if dir.kind() == TokenKind::DefineDirective => {
             Some(AnalyzedToplevel::MacroDefinition {
                 text_range: dir.syntax().text_range(),
                 parsed: match MacroDefinition::parse(dir.syntax().text()) {
@@ -383,7 +379,7 @@ fn maybe_analyze_toplevel<F: Clone>(
             })
         }
 
-        ast::ToplevelItem::PreprocessorConditional(cond) => {
+        ast::Item::PreprocessorConditional(cond) => {
             Some(AnalyzedToplevel::PreprocessorConditional {
                 text_range: cond.syntax().text_range(),
                 branches: cond
@@ -398,7 +394,7 @@ fn maybe_analyze_toplevel<F: Clone>(
                                 .syntax()
                                 .children()
                                 //.par_bridge()
-                                .filter_map(ast::ToplevelItem::cast_either)
+                                .filter_map(ast::Item::cast_either)
                                 .filter_map(|item| {
                                     let _span = span.clone().entered();
                                     maybe_analyze_toplevel(item, src, file.clone(), diag)

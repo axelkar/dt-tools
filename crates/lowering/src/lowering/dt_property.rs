@@ -28,13 +28,20 @@ use crate::{
 // TODO: get rid of `impl DiagnosticCollector` and `impl FnMut(TextRange) -> Span<File>` because they cause monomorphization
 
 /// Lowers an [`ast::DtProperty`] to a [`MirDefinition`], if valid.
-///
-/// Returns `None` if the property has no name or can't be processed.
 pub(crate) fn lower_dt_property(
     ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
     parent_node_path: &str,
     prop: &ast::DtProperty,
-) -> Result<MirDefinition, ()> {
+) -> Result<(), ()> {
+    if parent_node_path.is_empty() {
+        ctx.diag.emit(Diagnostic::new(
+            prop.syntax().text_range().within_file(ctx.file),
+            "Property must be defined inside a node".into(),
+            Severity::Error,
+        ));
+        return Err(());
+    }
+
     let mut values = Vec::new();
     for value_ast in prop.values() {
         if let Ok(value) = lower_prop_value(
@@ -63,11 +70,12 @@ pub(crate) fn lower_dt_property(
         text_range,
     };
 
-    Ok(MirDefinition {
+    ctx.mir.definitions.push(MirDefinition {
         path,
         value: MirDefinitionValue::Property(MirPropertyData { values }),
         provenance,
-    })
+    });
+    Ok(())
 }
 
 /// Lowers an [`ast::PropValue`] to a [`MirValue`], if valid.
@@ -157,7 +165,7 @@ enum BitsSize {
 impl BitsSize {
     /// Parse a number token after `/bits/` into a [`BitsSize`], defaulting to 32-bit.
     ///
-    /// Returns `None` on unrecoverable parse errors (invalid number, unsupported bits).
+    /// Returns `Err(())` on unrecoverable parse errors (invalid number, unsupported bits).
     fn from_token(
         bits_number_tok: Option<&Arc<RedToken>>,
         diag: &impl DiagnosticCollector<File>,
@@ -411,5 +419,166 @@ impl LowerCell for MirCell32 {
         _spanner: &mut impl FnMut(TextRange) -> Span<File>,
     ) -> Result<Self, ()> {
         Ok(MirCell32::Phandle(target))
+    }
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::needless_raw_string_hashes,
+    reason = "expect-test auto update adds r#"
+)]
+mod tests {
+    use expect_test::expect;
+
+    use crate::lowering::tests::check_mir;
+
+    #[test]
+    fn mir_properties() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo = "bar"; baz = <1 2 3>; qux = [ab cd]; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..60
+                property = CellList(Bits32([Number(1), Number(2), Number(3)])) /baz /main.dts 28..42
+                property = String("bar") /foo /main.dts 15..27
+                property = Bytestring([171, 205]) /qux /main.dts 43..57
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_bits() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { value = /bits/ 64 <1>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..40
+                property = CellList(Bits64([1])) /value /main.dts 15..37
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_undefined_label_phandle() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo = &BOGUS; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..31
+                property = Phandle(Label("BOGUS")) /foo /main.dts 15..28
+
+                --- errors ---
+                Error 15..28: Label not found: BOGUS [dt_tools_lowering::check_mir_post]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_undefined_path_phandle() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo = &{/bar}; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..32
+                property = Phandle(Path("/bar")) /foo /main.dts 15..29
+
+                --- errors ---
+                Error 15..29: Node at path not found: /bar [dt_tools_lowering::check_mir_post]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_num_out_of_bounds() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { prop = <(1 << 32)>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..37
+                property = CellList(Bits32([])) /prop /main.dts 15..34
+
+                --- errors ---
+                Error 23..32: number 4294967296 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_num_negative() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { prop = <-1 (-1)>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..35
+                property = CellList(Bits32([Number(1), Number(4294967295)])) /prop /main.dts 15..32
+
+                --- errors ---
+                Error 23..24: Expected cell or ‘>’, but found ‘-’ [dt-tools(syntax-error)]
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_char() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { prop = <'\0' 'a'>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..36
+                property = CellList(Bits32([Number(0), Number(97)])) /prop /main.dts 15..33
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_err_property_outside_node() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { };
+
+#if 1
+foo = "baz";
+#endif
+bar = "baz";
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..17
+
+                --- errors ---
+                Error 25..37: Property must be defined inside a node
+                Error 45..57: Property must be defined inside a node
+            "#]],
+        );
     }
 }

@@ -20,24 +20,7 @@ pub struct DtcStyle;
 
 impl<F: std::fmt::Debug + Clone> EarlyLintPass<F> for DtcStyle {
     fn check_document(&mut self, cx: &mut crate::EarlyContext<'_, F>, file: &ast::SourceFile) {
-        for prop in file.properties() {
-            cx.add_lint_from_cst(
-                LintId::DtcStyle,
-                "Properties must not be defined outside nodes",
-                Severity::Error,
-                prop.syntax().text_range(),
-            );
-        }
-
         for node in file.nodes() {
-            if !node.is_root() && !node.is_extension() {
-                cx.add_lint_from_cst(
-                    LintId::DtcStyle,
-                    "Subnodes must be defined inside other nodes",
-                    Severity::Error,
-                    node.syntax().text_range(),
-                );
-            }
             self.check_node(cx, &node);
         }
     }

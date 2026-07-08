@@ -149,7 +149,7 @@ pub enum TokenKind {
     #[regex(r#"#( |\t)*error[^\n\\"'/]*"#, callback = lex_preprocessor_directive)]
     ErrorDirective,
 
-    // TODO: implement memreserve and omit-if-no-ref directives
+    // TODO: implement memreserve directive
     #[token("/bits/")]
     BitsDirective,
 

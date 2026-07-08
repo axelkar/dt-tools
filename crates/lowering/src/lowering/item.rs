@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use dt_tools_analyzer::macros::MacroDefinition;
-use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
+use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
 use dt_tools_parser::{
     ast,
     ast::{AstNode, AstNodeOrToken, AstToken, HasDtPhandle, HasName},
@@ -17,6 +17,7 @@ use crate::{
     file::File,
     lowering::{
         dt_node::{build_path, get_name_and_unit_addr, lower_dt_node},
+        dt_property::lower_dt_property,
         lower_file,
         preprocessor::pp_cond_directive_eval,
     },
@@ -37,37 +38,28 @@ fn possible_include_paths_utf8<'a, P: AsRef<Utf8Path>>(
         .map(move |base_path| base_path.join(path))
 }
 
-/// Handles [`ast::ToplevelItem`]s in the lowering process.
+/// Lowers an [`ast::Item`] to [`MirDefinition`]s.
 #[expect(clippy::too_many_lines, reason = "hard to make this shorter")]
-pub(crate) fn handle_toplevel_item(
+pub(crate) fn lower_item(
     ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
-    parent_dir_path: &Utf8Path,
-    include_dirs: &[Utf8PathBuf],
-    processed_files: &mut Vec<File>,
-    includes: &mut Vec<(File, Span<File>)>,
-    item: ast::ToplevelItem,
+    parent_node_path: &str,
+    item: ast::Item,
 ) {
     let files = ctx.db.get_files();
 
     let text_range = item.syntax_item().text_range();
 
     match item {
-        ast::ToplevelItem::Node(dt_node) => {
-            lower_dt_node(ctx, "", &dt_node);
+        ast::Item::DtNode(dt_node) => {
+            lower_dt_node(ctx, parent_node_path, &dt_node);
         }
-        ast::ToplevelItem::Directive(dir) => {
-            handle_directive(
-                ctx,
-                processed_files,
-                includes,
-                "",
-                &dir,
-                include_dirs,
-                parent_dir_path,
-                files,
-            );
+        ast::Item::DtProperty(dt_property) => {
+            let _ = lower_dt_property(ctx, parent_node_path, &dt_property);
         }
-        ast::ToplevelItem::PreprocessorConditional(preprocessor_conditional) => {
+        ast::Item::DtsDirective(dir) => {
+            handle_directive(ctx, parent_node_path, &dir, files);
+        }
+        ast::Item::PreprocessorConditional(preprocessor_conditional) => {
             let Some((_dir, branch)) =
                 preprocessor_conditional.branches().find(|(dir, _branch)| {
                     pp_cond_directive_eval(ctx.db, ctx.env, ctx.file, dir, &ctx.diag)
@@ -77,17 +69,10 @@ pub(crate) fn handle_toplevel_item(
                 return;
             };
             for item in branch.items() {
-                handle_toplevel_item(
-                    ctx,
-                    parent_dir_path,
-                    include_dirs,
-                    processed_files,
-                    includes,
-                    item,
-                );
+                lower_item(ctx, parent_node_path, item);
             }
         }
-        ast::ToplevelItem::PreprocessorDirective(dir) => match dir.kind() {
+        ast::Item::PreprocessorDirective(dir) => match dir.kind() {
             TokenKind::PragmaDirective => {
                 // TODO: implement #pragma
                 ctx.diag.emit(Diagnostic::new(
@@ -140,8 +125,8 @@ pub(crate) fn handle_toplevel_item(
                 let Some(include_file) = possible_include_paths_utf8(
                     relative,
                     &include_path,
-                    parent_dir_path,
-                    include_dirs,
+                    ctx.parent_dir_path,
+                    ctx.include_dirs,
                 )
                 .map(|path| files.get_file(ctx.db, &path))
                 .find(|file| file.is_readable_file(ctx.db)) else {
@@ -153,14 +138,16 @@ pub(crate) fn handle_toplevel_item(
                     return;
                 };
 
-                processed_files.push(include_file);
-                includes.push((include_file, text_range.within_file(ctx.file)));
+                ctx.processed_files.push(include_file);
+                ctx.includes
+                    .push((include_file, text_range.within_file(ctx.file)));
 
                 let result = lower_file(
                     ctx.db,
                     include_file,
                     Some(std::mem::take(ctx.env).into_immut(ctx.db)),
                     ctx.is_overlay(),
+                    parent_node_path.to_owned(),
                 )
                 .expect("The file should exist, its existence is confirmed above");
 
@@ -170,8 +157,9 @@ pub(crate) fn handle_toplevel_item(
                     .diagnostics(ctx.db)
                     .iter()
                     .for_each(|diagnostic| ctx.diag.emit(diagnostic.clone()));
-                processed_files.extend_from_slice(result.processed_files(ctx.db));
-                includes.extend_from_slice(result.includes(ctx.db));
+                ctx.processed_files
+                    .extend_from_slice(result.processed_files(ctx.db));
+                ctx.includes.extend_from_slice(result.includes(ctx.db));
 
                 // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
                 ctx.env.flatten_ancestors(ctx.db);
@@ -198,12 +186,8 @@ pub(crate) fn handle_toplevel_item(
 /// Handles an [`ast::DtsDirective`] like `/include/`, `/delete-node/` or `/delete-property/`.
 pub(crate) fn handle_directive(
     ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
-    processed_files: &mut Vec<File>,
-    includes: &mut Vec<(File, Span<File>)>,
-    path_prefix: &str,
+    parent_node_path: &str,
     dir: &ast::DtsDirective,
-    include_dirs: &[Utf8PathBuf],
-    parent_dir_path: &Utf8Path,
     files: &crate::file::Files,
 ) {
     let kind = dir.kind();
@@ -232,7 +216,7 @@ pub(crate) fn handle_directive(
             };
 
         let Some(include_file) =
-            possible_include_paths_utf8(true, &include_path, parent_dir_path, include_dirs)
+            possible_include_paths_utf8(true, &include_path, ctx.parent_dir_path, ctx.include_dirs)
                 .map(|path| files.get_file(ctx.db, &path))
                 .find(|f| f.is_readable_file(ctx.db))
         else {
@@ -244,8 +228,8 @@ pub(crate) fn handle_directive(
             return;
         };
 
-        processed_files.push(include_file);
-        includes.push((
+        ctx.processed_files.push(include_file);
+        ctx.includes.push((
             include_file,
             dir.syntax().text_range().within_file(ctx.file),
         ));
@@ -255,6 +239,7 @@ pub(crate) fn handle_directive(
             include_file,
             Some(std::mem::take(ctx.env).into_immut(ctx.db)),
             ctx.is_overlay(),
+            parent_node_path.to_owned(),
         )
         .expect("file exists");
 
@@ -264,14 +249,15 @@ pub(crate) fn handle_directive(
             .diagnostics(ctx.db)
             .iter()
             .for_each(|diagnostic| ctx.diag.emit(diagnostic.clone()));
-        processed_files.extend_from_slice(result.processed_files(ctx.db));
-        includes.extend_from_slice(result.includes(ctx.db));
+        ctx.processed_files
+            .extend_from_slice(result.processed_files(ctx.db));
+        ctx.includes.extend_from_slice(result.includes(ctx.db));
 
         // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
         ctx.env.flatten_ancestors(ctx.db);
     } else if kind == Some(TokenKind::V1Directive) {
         ctx.mir.definitions.push(MirDefinition {
-            path: path_prefix.to_owned(),
+            path: parent_node_path.to_owned(),
             value: MirDefinitionValue::V1Directive,
             provenance: MirProvenance {
                 file: ctx.file,
@@ -280,7 +266,7 @@ pub(crate) fn handle_directive(
         });
     } else if kind == Some(TokenKind::PluginDirective) {
         ctx.mir.definitions.push(MirDefinition {
-            path: path_prefix.to_owned(),
+            path: parent_node_path.to_owned(),
             value: MirDefinitionValue::PluginDirective,
             provenance: MirProvenance {
                 file: ctx.file,
@@ -288,14 +274,14 @@ pub(crate) fn handle_directive(
             },
         });
     } else {
-        emit_delete_directive(ctx, path_prefix, dir);
+        emit_delete_directive(ctx, parent_node_path, dir);
     }
 }
 
 /// Optionally emit [`MirDefinitionValue::DeletedNode`] or [`MirDefinitionValue::DeletedProperty`] from an [`ast::DtsDirective`].
 pub(crate) fn emit_delete_directive(
     ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
-    path_prefix: &str,
+    parent_node_path: &str,
     dir: &ast::DtsDirective,
 ) {
     let kind = dir.kind();
@@ -315,7 +301,7 @@ pub(crate) fn emit_delete_directive(
             &mut |tr| tr.within_file(ctx.file),
             &args,
         ) {
-            build_path(path_prefix, &name)
+            build_path(parent_node_path, &name)
         } else if let Some(phandle) = args.dt_phandle() {
             let Ok(target) = lower_phandle(
                 ctx.db,
@@ -356,7 +342,7 @@ pub(crate) fn emit_delete_directive(
     } else if kind == Some(TokenKind::DeletePropertyDirective)
         && let Some(name_tok) = args.name()
     {
-        let target_path = build_path(path_prefix, name_tok.syntax().text().as_str());
+        let target_path = build_path(parent_node_path, name_tok.syntax().text().as_str());
 
         ctx.mir.definitions.push(MirDefinition {
             path: target_path,
@@ -408,4 +394,187 @@ pub(crate) fn resolve_phandle(
             path.clone()
         }
     })
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::needless_raw_string_hashes,
+    reason = "expect-test auto update adds r#"
+)]
+mod tests {
+    use expect_test::expect;
+
+    use crate::lowering::tests::check_mir;
+
+    #[test]
+    fn mir_include_preprocessor() {
+        check_mir(
+            r#"
+/dts-v1/;
+#include "inc.dtsi"
+/ { main_prop = <1>; };
+"#,
+            &[("/inc.dtsi", r#"/ { inc_prop = <2>; };"#)],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /inc.dtsi 0..22
+                node   / /main.dts 31..54
+                property = CellList(Bits32([Number(2)])) /inc_prop /inc.dtsi 4..19
+                property = CellList(Bits32([Number(1)])) /main_prop /main.dts 35..51
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_include_preprocessor_error() {
+        check_mir(
+            r#"
+/dts-v1/;
+#include "inc.dtsi"
+/ { main_prop = <1>; };
+"#,
+            &[("/inc.dtsi", r#"/ { inc_prop = <BOGUS>; };"#)],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /inc.dtsi 0..26
+                node   / /main.dts 31..54
+                property = CellList(Bits32([])) /inc_prop /inc.dtsi 4..23
+                property = CellList(Bits32([Number(1)])) /main_prop /main.dts 35..51
+
+                --- errors ---
+                Error 16..21: Macro `BOGUS` is not defined
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_delete_node_by_name() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo {}; /delete-node/ foo; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..44
+                node   /foo /main.dts 15..22
+                delete-node /foo /main.dts 23..41
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_delete_node_by_label() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo: bar {}; /delete-node/ &foo; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..50
+                node labels=[foo] /bar /main.dts 15..27
+                delete-node /bar /main.dts 28..47
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_delete_node_by_path() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo {}; /delete-node/ &{/foo}; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..48
+                node   /foo /main.dts 15..22
+                delete-node /foo /main.dts 23..45
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_delete_property() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo = <1>; /delete-property/ foo; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..51
+                property = CellList(Bits32([Number(1)])) /foo /main.dts 15..25
+                delete-property /foo /main.dts 26..48
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_conditional_ifdef() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define FLAG
+#ifdef FLAG
+/ { yes = <1>; };
+#else
+/ { no = <2>; };
+#endif
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 36..53
+                property = CellList(Bits32([Number(1)])) /yes /main.dts 40..50
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_conditional_inside_node() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define FLAG
+
+/ {
+#ifdef FLAG
+    yes = <1>;
+#else
+    no = <2>;
+#endif
+};
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 25..85
+                property = CellList(Bits32([Number(1)])) /yes /main.dts 45..55
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_include_inside_node() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ {
+#include "inc.dtsi"
+};
+"#,
+            &[("/inc.dtsi", r#"inc_prop = <2>;"#)],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+                node   / /main.dts 11..37
+                property = CellList(Bits32([Number(2)])) /inc_prop /inc.dtsi 0..15
+            "#]],
+        );
+    }
 }

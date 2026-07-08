@@ -6,11 +6,13 @@ use tracing::debug;
 
 use crate::{
     cst::NodeKind,
+    grammar::preprocessor_directive::{BEGIN_COND_SET, CONTINUE_COND_SET},
     lexer::TokenKind,
     parser::{CompletedMarker, Expected, LabelName, Marker, NAME_SET, Name, Parser, TokenMatcher},
 };
 
 pub(crate) mod expr;
+mod preprocessor_directive;
 
 macro_rules! vis {
     (begin) => {
@@ -415,12 +417,11 @@ fn item(p: &mut Parser) {
         dt_node_body(p, m_node);
         m.complete(p, NodeKind::ParseError);
     } else if p.check(TokenKind::Semicolon).silent().at() {
-        let m = p.start();
-        p.error().msg_custom(Cow::Borrowed("Unmatched `;`")).emit();
-
-        p.bump();
-        m.complete(p, NodeKind::ParseError);
-    } else if eat_dts_directive(p) {
+        p.error()
+            .msg_custom(Cow::Borrowed("Unmatched `;`"))
+            .bump_wrap_err()
+            .emit();
+    } else if eat_dts_directive(p) || preprocessor_directive::eat_preprocessor_directive(p, item) {
     } else {
         p.error().msg_expected().bump_wrap_err().emit();
     }
@@ -508,6 +509,7 @@ fn eat_node_or_prop(p: &mut Parser) -> bool {
     true
 }
 
+/// Note: only directives wrapped by [`NodeKind::DtsDirective`].
 fn eat_dts_directive(p: &mut Parser) -> bool {
     if let Some(m) = p.eat_starting(&[TokenKind::V1Directive, TokenKind::PluginDirective]) {
         p.check(TokenKind::Semicolon)
@@ -574,95 +576,11 @@ impl TokenMatcher for UnitAddress {
     }
 }
 
-/// Set to begin preprocessor conditional
-const BEGIN_COND_SET: &[TokenKind] = &[
-    TokenKind::IfndefDirective,
-    TokenKind::IfdefDirective,
-    TokenKind::IfDirective,
-];
-/// Set to continue preprocessor conditional
-const CONTINUE_COND_SET: &[TokenKind] = &[
-    TokenKind::ElifndefDirective,
-    TokenKind::ElifdefDirective,
-    TokenKind::ElifDirective,
-    TokenKind::ElseDirective,
-];
-
-// TODO: move to own file
-/// Parses a preprocessor directive into a CST tree.
-///
-/// - `inside`: Parser function for things inside a preprocessor directive. Don't put a loop inside
-///   it, don't explicitly run [`preprocessor_directive`] and don't explicitly handle tokens that
-///   end a preprocessor conditional branch, as they are all done automatically.
-fn preprocessor_directive(p: &mut Parser, inside: fn(&mut Parser)) -> bool {
-    // TODO: this inside nodes
-
-    fn cond_branches_and_end(p: &mut Parser, inside: fn(&mut Parser)) {
-        let mut m_branch = p.start();
-
-        while !p.check(TokenKind::EndifDirective).silent().at() && !p.at_end() {
-            if p.check(CONTINUE_COND_SET).silent().at() {
-                m_branch.complete(p, NodeKind::PreprocessorBranch);
-                p.bump();
-                m_branch = p.start();
-            } else {
-                inside(p);
-            }
-        }
-
-        m_branch.complete(p, NodeKind::PreprocessorBranch);
-
-        p.expect(TokenKind::EndifDirective);
-    }
-
-    p.add_expected(Expected::PreprocessorDirective);
-
-    if p.check(BEGIN_COND_SET).silent().at() {
-        let m_cond = p.start();
-        p.bump();
-        cond_branches_and_end(p, inside);
-        m_cond.complete(p, NodeKind::PreprocessorConditional);
-        true
-    } else if p.check(TokenKind::EndifDirective).silent().at() {
-        p.error()
-            .bump_wrap_err()
-            .msg_custom(Cow::Borrowed("Unmatched `#endif`"))
-            .emit();
-        true
-    } else if p.check(CONTINUE_COND_SET).silent().at() {
-        p.error()
-            .msg_custom(Cow::Borrowed(
-                "Preprocessor conditional continuation without preceding `#if` or equivalent.",
-            ))
-            .emit();
-
-        let m_err = p.start();
-        p.bump();
-        cond_branches_and_end(p, inside);
-        m_err.complete(p, NodeKind::ParseError);
-        true
-    } else if p
-        .check(&[
-            TokenKind::UndefDirective,
-            TokenKind::PragmaDirective,
-            TokenKind::DefineDirective,
-            TokenKind::IncludeDirective,
-            TokenKind::ErrorDirective,
-        ])
-        .silent()
-        .at()
-    {
-        p.bump();
-        true
-    } else {
-        false
-    }
-}
-
 pub(super) fn entry_sourcefile(p: &mut Parser) {
-    fn toplevel_item(p: &mut Parser) {
-        if preprocessor_directive(p, toplevel_item) {
-        } else if p.check(TokenKind::RCurly).silent().at() {
+    let _span = tracy_client::span!("grammar::entry_sourcefile");
+
+    while !p.at_end() {
+        if p.check(TokenKind::RCurly).silent().at() {
             p.error().msg_custom(Cow::Borrowed("Unmatched `}`")).emit();
 
             let e = p.start();
@@ -671,12 +589,6 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
         } else {
             item(p);
         }
-    }
-
-    let _span = tracy_client::span!("grammar::entry_sourcefile");
-
-    while !p.at_end() {
-        toplevel_item(p);
     }
 }
 

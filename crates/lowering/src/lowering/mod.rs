@@ -5,6 +5,7 @@
 
 use std::borrow::Cow;
 
+use camino::{Utf8Path, Utf8PathBuf};
 use dt_tools_analyzer::macros::SubstitutedBody;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
 use dt_tools_parser::{
@@ -30,8 +31,8 @@ mod dt_node;
 mod dt_property;
 #[cfg(test)]
 mod dtc_tests;
+mod item;
 mod preprocessor;
-mod toplevel;
 
 /// Result of lowering a single file and its includes.
 #[salsa::tracked]
@@ -76,9 +77,14 @@ pub struct LoweredFile<'db> {
 ///
 /// Will panic if [`IncludeDirs`] hasn't been defined.
 pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'_>> {
-    lower_file(db, root_file, None, false)
+    lower_file(db, root_file, None, false, String::new())
 }
 
+#[allow(clippy::allow_attributes, reason = "expect doesn't work properly here")]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Salsa doesn't allow &str as a tracked function parameter"
+)]
 /// Lowers the CST of a single file to [`Mir`], recursing into its includes.
 #[salsa::tracked(lru = 128)]
 pub(crate) fn lower_file<'db>(
@@ -86,6 +92,7 @@ pub(crate) fn lower_file<'db>(
     file: File,
     parent_env: Option<TrackedMapEnv<'db>>,
     parent_is_overlay: bool,
+    parent_node_path: String,
 ) -> Option<LoweredFile<'db>> {
     let span = profiling::tracy_client::span!("lsp::salsa::lowering::lower_file");
     span.emit_text(file.path(db).as_str());
@@ -112,19 +119,17 @@ pub(crate) fn lower_file<'db>(
         diag: &diag,
         mir: &mut mir,
         parent_is_overlay,
+        parent_dir_path,
+        include_dirs,
+        processed_files: &mut processed_files,
+        includes: &mut includes,
     };
 
     // TODO: PERF: split into phases with includes and after includes for Salsa tracking
+    // TODO: PERF: flatten includes only at the root file boundary?
 
     for item in file_ast.items() {
-        toplevel::handle_toplevel_item(
-            &mut ctx,
-            parent_dir_path,
-            include_dirs,
-            &mut processed_files,
-            &mut includes,
-            item,
-        );
+        item::lower_item(&mut ctx, &parent_node_path, item);
     }
 
     let is_overlay = ctx.is_overlay();
@@ -148,6 +153,10 @@ struct IntraFileCtx<'a, 'db, D: DiagnosticCollector<File>> {
     diag: &'a D,
     mir: &'a mut Mir,
     parent_is_overlay: bool,
+    parent_dir_path: &'a Utf8Path,
+    include_dirs: &'a [Utf8PathBuf],
+    processed_files: &'a mut Vec<File>,
+    includes: &'a mut Vec<(File, Span<File>)>,
 }
 impl<D: DiagnosticCollector<File>> IntraFileCtx<'_, '_, D> {
     /// Returns true if this is currently in overlay mode.
@@ -278,7 +287,7 @@ fn lower_phandle<'db>(
     clippy::needless_raw_string_hashes,
     reason = "expect-test auto update adds r#"
 )]
-mod tests {
+pub(crate) mod tests {
     use expect_test::{Expect, expect};
 
     use super::*;
@@ -351,223 +360,6 @@ mod tests {
             expect![[r#"
                 dts-v1  /main.dts 1..10
                 node   / /main.dts 11..16
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_properties() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { foo = "bar"; baz = <1 2 3>; qux = [ab cd]; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..60
-                property = CellList(Bits32([Number(1), Number(2), Number(3)])) /baz /main.dts 28..42
-                property = String("bar") /foo /main.dts 15..27
-                property = Bytestring([171, 205]) /qux /main.dts 43..57
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_bits() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { value = /bits/ 64 <1>; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..40
-                property = CellList(Bits64([1])) /value /main.dts 15..37
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_label() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { LBL: node {}; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..31
-                node labels=[LBL] /node /main.dts 15..28
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_extension() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { LBL: node {}; };
-&LBL { prop = <1>; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..31
-                node labels=[LBL] /node /main.dts 15..28
-                node   /node /main.dts 32..53
-                property = CellList(Bits32([Number(1)])) /node/prop /main.dts 39..50
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_extension_unresolved() {
-        check_mir(
-            r#"
-/dts-v1/;
-/plugin/;
-&UNKNOWN { prop = <1>; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                plugin  /main.dts 11..20
-                --- unresolved ---
-                  label=UNKNOWN (1 definitions)
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_include_preprocessor() {
-        check_mir(
-            r#"
-/dts-v1/;
-#include "inc.dtsi"
-/ { main_prop = <1>; };
-"#,
-            &[("/inc.dtsi", r#"/ { inc_prop = <2>; };"#)],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /inc.dtsi 0..22
-                node   / /main.dts 31..54
-                property = CellList(Bits32([Number(2)])) /inc_prop /inc.dtsi 4..19
-                property = CellList(Bits32([Number(1)])) /main_prop /main.dts 35..51
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_include_preprocessor_error() {
-        check_mir(
-            r#"
-/dts-v1/;
-#include "inc.dtsi"
-/ { main_prop = <1>; };
-"#,
-            &[("/inc.dtsi", r#"/ { inc_prop = <BOGUS>; };"#)],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /inc.dtsi 0..26
-                node   / /main.dts 31..54
-                property = CellList(Bits32([])) /inc_prop /inc.dtsi 4..23
-                property = CellList(Bits32([Number(1)])) /main_prop /main.dts 35..51
-
-                --- errors ---
-                Error 16..21: Macro `BOGUS` is not defined
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_delete_node_by_name() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { foo {}; /delete-node/ foo; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..44
-                node   /foo /main.dts 15..22
-                delete-node /foo /main.dts 23..41
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_delete_node_by_label() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { foo: bar {}; /delete-node/ &foo; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..50
-                node labels=[foo] /bar /main.dts 15..27
-                delete-node /bar /main.dts 28..47
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_delete_node_by_path() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { foo {}; /delete-node/ &{/foo}; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..48
-                node   /foo /main.dts 15..22
-                delete-node /foo /main.dts 23..45
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_delete_property() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { foo = <1>; /delete-property/ foo; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..51
-                property = CellList(Bits32([Number(1)])) /foo /main.dts 15..25
-                delete-property /foo /main.dts 26..48
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_conditional_ifdef() {
-        check_mir(
-            r#"
-/dts-v1/;
-#define FLAG
-#ifdef FLAG
-/ { yes = <1>; };
-#else
-/ { no = <2>; };
-#endif
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 36..53
-                property = CellList(Bits32([Number(1)])) /yes /main.dts 40..50
             "#]],
         );
     }
@@ -690,153 +482,6 @@ mod tests {
                 --- errors ---
                 Error 23..26: Macro `VAL` is not defined
                 Error 37..40: Macro `VAL` is not defined
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_undefined_label_extension() {
-        check_mir(
-            r#"
-/dts-v1/;
-&BOGUS { };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-
-                --- errors ---
-                Error 11..17: Label not found: BOGUS
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_undefined_label_phandle() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { foo = &BOGUS; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..31
-                property = Phandle(Label("BOGUS")) /foo /main.dts 15..28
-
-                --- errors ---
-                Error 15..28: Label not found: BOGUS [dt_tools_lowering::check_mir_post]
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_undefined_path_phandle() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { foo = &{/bar}; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..32
-                property = Phandle(Path("/bar")) /foo /main.dts 15..29
-
-                --- errors ---
-                Error 15..29: Node at path not found: /bar [dt_tools_lowering::check_mir_post]
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_duplicate_label() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { foo: bar {}; };
-/ { foo: baz {}; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..30
-                node   / /main.dts 31..50
-                node labels=[foo] /bar /main.dts 15..27
-                node   /baz /main.dts 35..47
-
-                --- errors ---
-                Warn 35..39: Duplicate label `foo`
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_num_out_of_bounds() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { prop = <(1 << 32)>; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..37
-                property = CellList(Bits32([])) /prop /main.dts 15..34
-
-                --- errors ---
-                Error 23..32: number 4294967296 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_num_negative() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { prop = <-1 (-1)>; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..35
-                property = CellList(Bits32([Number(1), Number(4294967295)])) /prop /main.dts 15..32
-
-                --- errors ---
-                Error 23..24: Expected cell or ‘>’, but found ‘-’ [dt-tools(syntax-error)]
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_char() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { prop = <'\0' 'a'>; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..36
-                property = CellList(Bits32([Number(0), Number(97)])) /prop /main.dts 15..33
-            "#]],
-        );
-    }
-
-    #[test]
-    fn mir_omit_if_no_ref() {
-        check_mir(
-            r#"
-/dts-v1/;
-/ { /omit-if-no-ref/ foo {}; };
-"#,
-            &[],
-            expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..42
-                /omit-if-no-ref/ node /foo /main.dts 15..39
             "#]],
         );
     }
