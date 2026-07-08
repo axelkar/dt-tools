@@ -211,6 +211,20 @@ impl<'t, 'input> Parser<'t, 'input> {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn run_single_token<T>(
+        token_kind: TokenKind,
+        f: impl FnOnce(&mut Parser) -> T,
+    ) -> T {
+        let tokens = [crate::lexer::Token {
+            kind: Ok(token_kind),
+            text: "",
+            text_range: TextRange { start: 0, end: 1 },
+        }];
+        let mut p = Parser::new(Source::new(&tokens));
+        f(&mut p)
+    }
+
     /// Starts a node using a [`Marker`].
     #[cfg_attr(debug_assertions, track_caller)]
     pub fn start(&mut self) -> Marker {

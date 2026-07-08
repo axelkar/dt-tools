@@ -189,6 +189,12 @@ pub(super) fn cells<const AT_END: bool>(p: &mut Parser) -> Result<(), ()> {
         {
             p.error().msg_expected().emit();
             return Err(());
+        } else if p.check(expr::OPERATORS_SET).silent().at() {
+            p.error()
+                .msg_expected()
+                .add_hint("Wrap expressions in parenthesis".into())
+                .bump_wrap_err()
+                .emit();
         } else {
             p.error().msg_expected().bump_wrap_err().emit();
         }
@@ -755,7 +761,15 @@ Tree:
                             start: 3,
                             end: 4,
                         },
-                        span_labels: [],
+                        span_labels: [
+                            (
+                                TextRange {
+                                    start: 3,
+                                    end: 4,
+                                },
+                                "Wrap expressions in parenthesis",
+                            ),
+                        ],
                     },
                 ]
 

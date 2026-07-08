@@ -106,6 +106,7 @@ pub enum LexError {
 
 /// The kind of a token
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[logos(error = LexError)]
 pub enum TokenKind {
     #[regex("[ \t\r\n]+")]

@@ -4,12 +4,65 @@
 
 use std::borrow::Cow;
 
+use constcat::concat_slices;
+
 use crate::{
     cst::NodeKind,
     grammar::macro_invocation,
     lexer::TokenKind,
     parser::{Expected, Parser},
 };
+
+pub(super) const OPERATORS_SET: &[TokenKind] = concat_slices!(
+[TokenKind]:
+    &INFIX_OPERATORS_SET,
+    &PREFIX_OPERATORS_SET,
+    &[TokenKind::Colon]
+);
+pub(super) const INFIX_OPERATORS_SET: &[TokenKind] = &[
+    TokenKind::Plus,
+    TokenKind::Minus,
+    TokenKind::Asterisk,
+    TokenKind::Slash,
+    TokenKind::Modulo,
+    TokenKind::Ampersand,
+    TokenKind::BitwiseOr,
+    TokenKind::BitwiseXor,
+    TokenKind::BitwiseShl,
+    TokenKind::BitwiseShr,
+    TokenKind::LogicalAnd,
+    TokenKind::LogicalOr,
+    TokenKind::LAngle,
+    TokenKind::RAngle,
+    TokenKind::RelationalLtEq,
+    TokenKind::RelationalGtEq,
+    TokenKind::RelationalEq,
+    TokenKind::RelationalNeq,
+    TokenKind::QuestionMark,
+];
+pub(super) const PREFIX_OPERATORS_SET: &[TokenKind] = &[
+    TokenKind::Plus,
+    TokenKind::Minus,
+    TokenKind::BitwiseNot,
+    TokenKind::LogicalNot,
+];
+
+#[cfg(test)]
+#[test]
+fn keep_sets_in_sync() {
+    use strum::IntoEnumIterator;
+
+    for token_kind in TokenKind::iter() {
+        assert_eq!(
+            Parser::run_single_token(token_kind, InfixOp::at).is_some(),
+            INFIX_OPERATORS_SET.contains(&token_kind)
+        );
+        assert_eq!(
+            Parser::run_single_token(token_kind, |p| PrefixOp::at(p, false)).is_some(),
+            PREFIX_OPERATORS_SET.contains(&token_kind)
+        );
+    }
+}
 
 #[derive(PartialEq)]
 enum InfixOp {
