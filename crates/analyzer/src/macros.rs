@@ -473,7 +473,7 @@ impl MacroDefinition {
     }
 
     #[expect(clippy::too_many_lines, reason = "Hard to make this shorter")]
-    fn substitute(&self, arguments: &[String]) -> (Vec<TextRangeMap>, String) {
+    fn substitute(&self, arguments: &[String]) -> SubstitutedBody {
         let mut s = String::new();
         let mut iter = self.body_tokens.iter().peekable();
         let mut push_ws = false;
@@ -589,7 +589,10 @@ impl MacroDefinition {
             }
             push_ws = true;
         }
-        (trmaps, s)
+        SubstitutedBody {
+            source_mappings: trmaps,
+            substituted_text: s,
+        }
     }
 }
 
@@ -661,7 +664,13 @@ impl TextRangeMapTo {
 //
 // https://gcc.gnu.org/onlinedocs/gcc-3.4.3/cpp/Argument-Prescan.html
 
-/// Substitutes a macro, directly from its AST.
+/// Substituted macro body from [`substitute_macro`].
+pub struct SubstitutedBody {
+    pub source_mappings: Vec<TextRangeMap>,
+    pub substituted_text: String,
+}
+
+/// Substitutes a macro's arguments.
 ///
 /// If the `ast` parameter is set to `None`, it is assumed that it's an object-like macro and not
 /// a function-like macro.
@@ -670,25 +679,32 @@ impl TextRangeMapTo {
 ///
 /// Returns an error if the number of arguments given doesn't match the number of parameters in the
 /// macro definition.
-pub fn substitute_macro_ast(
+pub fn substitute_macro(
     ast: Option<&ast::MacroInvocation>,
     def: &MacroDefinition,
-) -> Result<(Vec<TextRangeMap>, String), String> {
-    let arguments = ast.map(|ast| {
-        ast.arguments()
-            .map(|arg| {
-                arg.green
-                    .child_tokens()
-                    .map(|tok| tok.text.as_str())
-                    .collect()
-            })
-            .collect::<Vec<String>>()
-    });
+) -> Result<SubstitutedBody, String> {
+    let arguments = ast
+        .map(|ast| {
+            ast.arguments()
+                .map(|arg| {
+                    arg.green
+                        .child_tokens()
+                        .map(|tok| tok.text.as_str())
+                        .collect()
+                })
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
 
-    if def.params.len() != arguments.as_ref().map_or(0, std::vec::Vec::len) {
-        return Err("ERROR: invalid argument length".to_owned());
+    // TODO: vararg macros
+    if def.params.len() != arguments.len() {
+        return Err(format!(
+            "Invalid argument length. Got {}, expected {}.",
+            arguments.len(),
+            def.params.len()
+        ));
     }
-    let out = def.substitute(arguments.as_ref().map_or(&[], |args| args));
+    let out = def.substitute(&arguments);
     Ok(out)
 }
 
@@ -748,9 +764,6 @@ fn stringify(input: &str) -> String {
     result
 }
 
-// TODO: validate number of arguments!
-// TODO: vararg macros??
-
 #[cfg(test)]
 #[expect(
     clippy::needless_raw_string_hashes,
@@ -793,12 +806,15 @@ mod tests {
         trmaps_expect: Expect,
     ) {
         let def = MacroDefinition::parse(def_input).unwrap();
-        let (text_range_maps, output) = def.substitute(arguments);
+        let SubstitutedBody {
+            source_mappings,
+            substituted_text,
+        } = def.substitute(arguments);
 
-        output_expect.assert_eq(&output);
+        output_expect.assert_eq(&substituted_text);
 
         let mut trmaps_str = String::new();
-        for trmap in text_range_maps {
+        for trmap in source_mappings {
             trmap.test_fmt(&mut trmaps_str).ok();
             trmaps_str.push('\n');
         }

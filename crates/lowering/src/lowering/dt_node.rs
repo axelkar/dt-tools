@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use dt_tools_analyzer::macros::SubstitutedBody;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
 use dt_tools_parser::{
     TextRange,
@@ -232,7 +233,13 @@ pub(crate) fn resolve_name_or_macro<'db, Ast: HasName + HasMacroInvocation>(
     spanner: &mut impl FnMut(TextRange) -> Span<File>,
     ast: &Ast,
 ) -> Result<String, ()> {
-    let (_span, _trmaps, expanded) = if let Some(name_ast) = ast.name() {
+    let (
+        _span,
+        SubstitutedBody {
+            source_mappings: _,
+            substituted_text,
+        },
+    ) = if let Some(name_ast) = ast.name() {
         match substitute_macro_tok(db, env, diag, spanner, &MacroCtx::Implicit(&name_ast))? {
             Some(val) => val,
             None => return Ok(name_ast.syntax().text().as_str().to_owned()),
@@ -244,7 +251,7 @@ pub(crate) fn resolve_name_or_macro<'db, Ast: HasName + HasMacroInvocation>(
         return Err(());
     };
 
-    let parse = Entrypoint::Name.parse(&expanded);
+    let parse = Entrypoint::Name.parse(&substituted_text);
 
     // TODO: trmaps -> spanner
     emit_parse_errors(&parse, diag, spanner);

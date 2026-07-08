@@ -1,8 +1,7 @@
 use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
-    ast::{self, AstNode, AstNodeOrToken, HasLabel as _},
+    ast::{self, AstNode, HasLabel as _},
     cst::NodeKind,
-    lexer::TokenKind,
 };
 
 use crate::{EarlyLintPass, LintId};

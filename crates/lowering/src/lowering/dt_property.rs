@@ -131,16 +131,18 @@ pub(crate) fn lower_prop_value<'db>(
             let target = lower_phandle(db, env, diag, spanner, phandle)?;
             Ok(MirValue::Phandle(target))
         }
-        ast::PropValue::Macro(macro_inv) => Ok(resolve_macro_to_value(
-            db,
-            env,
-            diag,
-            spanner,
-            &MacroCtx::Explicit(macro_inv),
-            Entrypoint::PropValues,
-            lower_prop_value,
-        )?
-        .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro")),
+        ast::PropValue::Macro(macro_inv) => {
+            let ast = resolve_macro_to_value(
+                db,
+                env,
+                diag,
+                spanner,
+                &MacroCtx::Explicit(macro_inv),
+                Entrypoint::PropValues,
+            )?
+            .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
+            Ok(lower_prop_value(db, env, diag, spanner, &ast)?)
+        }
     }
 }
 
@@ -316,16 +318,19 @@ fn lower_cell<'db, T: LowerCell>(
                 Err(())
             }
         }
-        ast::Cell::Macro(macro_inv) => Ok(resolve_macro_to_value(
-            db,
-            env,
-            diag,
-            spanner,
-            &MacroCtx::Explicit(macro_inv),
-            Entrypoint::Cells,
-            |db, env, diag, spanner, cell| lower_cell::<T>(db, env, diag, spanner, cell),
-        )?
-        .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro")),
+        ast::Cell::Macro(macro_inv) => {
+            let ast = resolve_macro_to_value(
+                db,
+                env,
+                diag,
+                spanner,
+                &MacroCtx::Explicit(macro_inv),
+                Entrypoint::Cells,
+            )?
+            .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
+
+            Ok(lower_cell::<T>(db, env, diag, spanner, &ast)?)
+        }
     }
 }
 

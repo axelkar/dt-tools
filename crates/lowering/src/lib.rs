@@ -4,13 +4,12 @@ use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, MultiSpan, Severity, Span, SpanLabel};
 use dt_tools_parser::TextRange;
 
-use crate::{lowering::LoweredFile, macros::env::InternedKey};
-
 pub mod codespan_reporting;
 pub mod db;
 mod expr_eval;
 pub mod file;
 // TODO: remove includes / document_deps in favor of new lowering stuff
+mod check_mir_post;
 mod extra_num_traits;
 pub mod includes;
 pub mod lowering;
@@ -26,7 +25,7 @@ pub struct Parse<'db> {
 
 // `no_eq`: Always changes when `file.contents` changes
 /// Returns `None` if the file doesn't exist.
-#[salsa::tracked(no_eq, returns(ref))]
+#[salsa::tracked(no_eq, returns(ref), lru = 64)]
 pub fn rope(db: &dyn db::BaseDb, file: file::File) -> Option<ropey::Rope> {
     if !file.is_readable_file(db) {
         return None;
@@ -142,131 +141,6 @@ pub fn emit_parse_errors(
     false
 }
 
-#[salsa::tracked]
-fn check_mir_post<'db>(
-    db: &'db dyn db::BaseDb,
-    result: LoweredFile<'db>,
-) -> Vec<Diagnostic<file::File>> {
-    fn check_phandle(
-        db: &dyn db::BaseDb,
-        mir: &mir::Mir,
-        result: LoweredFile<'_>,
-        def: &mir::MirDefinition,
-        target: &mir::MirPhandleTarget,
-    ) -> Option<Diagnostic<file::File>> {
-        match target {
-            mir::MirPhandleTarget::Label(name) => {
-                if result
-                    .env_after(db)
-                    .get_label(db, InternedKey::new(db, name))
-                    .is_none()
-                {
-                    Some(Diagnostic::new(
-                        def.provenance.text_range.within_file(def.provenance.file),
-                        Cow::Owned(format!("Label not found: {name}")),
-                        Severity::Error,
-                    ))
-                } else {
-                    None
-                }
-            }
-            mir::MirPhandleTarget::Path(path) => {
-                if mir.contains_node(path) {
-                    None
-                } else {
-                    Some(Diagnostic::new(
-                        def.provenance.text_range.within_file(def.provenance.file),
-                        Cow::Owned(format!("Node at path not found: {path}")),
-                        Severity::Error,
-                    ))
-                }
-            }
-        }
-    }
-
-    let mut diagnostics = Vec::new();
-
-    if result.is_overlay(db) {
-        return Vec::new();
-    }
-    let mir = result.mir(db);
-
-    // Labels are resolved at the end because forward references are valid.
-    for def in mir.iter_live_defs_under("") {
-        if let mir::MirDefinitionValue::Property(mir_property_data) = &def.value {
-            for value in &mir_property_data.values {
-                match value {
-                    mir::MirValue::CellList(mir::MirCellList::Bits32(cells)) => {
-                        for cell in cells {
-                            if let mir::MirCell32::Phandle(target) = cell {
-                                diagnostics.extend(check_phandle(db, mir, result, def, target));
-                            }
-                        }
-                    }
-                    mir::MirValue::Phandle(target) => {
-                        diagnostics.extend(check_phandle(db, mir, result, def, target));
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    // Validate the existence and order of /dts-v1/; and /plugin/;
-    let mut dts_v1: Option<mir::MirProvenance> = None;
-    let mut overlay_mode: Option<mir::MirProvenance> = None;
-    for def in &mir.definitions {
-        match def.value {
-            mir::MirDefinitionValue::V1Directive => {
-                dts_v1 = Some(def.provenance.clone());
-            }
-            mir::MirDefinitionValue::PluginDirective => {
-                if dts_v1.is_none() {
-                    diagnostics.push(Diagnostic::new(
-                        def.provenance.text_range.within_file(def.provenance.file),
-                        "`/plugin/;` before `/dts-v1/;`".into(),
-                        Severity::Error,
-                    ));
-                } else if let Some(prev_def) = &overlay_mode {
-                    diagnostics.push(Diagnostic {
-                        span: MultiSpan {
-                            primary_spans: vec![
-                                def.provenance.text_range.within_file(def.provenance.file),
-                            ],
-                            span_labels: vec![SpanLabel {
-                                span: prev_def.text_range.within_file(prev_def.file),
-                                msg: "Previous definition here".into(),
-                            }],
-                        },
-                        msg: "`/plugin/;` twice".into(),
-                        severity: Severity::Error,
-                    });
-                }
-                overlay_mode = Some(def.provenance.clone());
-            }
-            mir::MirDefinitionValue::Node(_)
-            | mir::MirDefinitionValue::Property(_)
-            | mir::MirDefinitionValue::DeletedNode
-            | mir::MirDefinitionValue::DeletedProperty => {
-                if dts_v1.is_none() {
-                    diagnostics.push(Diagnostic::new(
-                        def.provenance.text_range.within_file(def.provenance.file),
-                        "Definition before /dts-v1/;".into(),
-                        Severity::Error,
-                    ));
-                }
-            }
-        }
-    }
-
-    tag_diagnostics(
-        &mut diagnostics,
-        concat!(module_path!(), "::check_mir_post"),
-    );
-
-    diagnostics
-}
-
 #[salsa::tracked(returns(ref), lru = 64)]
 pub fn compute_diagnostics(
     db: &dyn db::BaseDb,
@@ -289,22 +163,10 @@ pub fn compute_diagnostics(
         );
     }
 
-    // TODO: re-enable? (though preprocessor_eval_file (also TODO: rename it) will probably
-    // supersede the functionality here)
-    /*
-    if let Some(outline) = outline(db, file) {
-        diagnostics.extend_from_slice(outline.diagnostics(db));
-    }
-
-    if let Ok(document_deps) = includes::document_deps(db, file) {
-        diagnostics.extend_from_slice(document_deps.diagnostics(db));
-    }
-    */
-
     let mut processed_files = if let Some(result) = lowering::lower_root_file(db, root_file) {
         diagnostics.extend_from_slice(result.diagnostics(db));
 
-        diagnostics.extend_from_slice(&check_mir_post(db, result));
+        diagnostics.extend_from_slice(check_mir_post::check_mir_post(db, result));
 
         result.processed_files(db).clone()
     } else {

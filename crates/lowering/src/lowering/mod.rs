@@ -5,6 +5,7 @@
 
 use std::borrow::Cow;
 
+use dt_tools_analyzer::macros::SubstitutedBody;
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
 use dt_tools_parser::{
     TextRange,
@@ -162,7 +163,6 @@ impl<D: DiagnosticCollector<File>> IntraFileCtx<'_, '_, D> {
 fn resolve_macro_to_value<
     'db,
     AstType: AstNodeOrToken,
-    MirType,
     D: DiagnosticCollector<File>,
     Spanner: FnMut(TextRange) -> Span<File>,
 >(
@@ -172,20 +172,19 @@ fn resolve_macro_to_value<
     spanner: &mut Spanner,
     macro_ctx: &MacroCtx,
     entrypoint: Entrypoint,
-    lower: impl FnOnce(
-        &'db dyn BaseDb,
-        &mut TrackedMapEnvMut<'db>,
-        &D,
-        &mut Spanner,
-        &AstType,
-    ) -> Result<MirType, ()>,
-) -> Result<Option<MirType>, ()> {
-    let Some((span, _trmaps, expanded)) = substitute_macro_tok(db, env, diag, spanner, macro_ctx)?
+) -> Result<Option<AstType>, ()> {
+    let Some((
+        span,
+        SubstitutedBody {
+            source_mappings: _,
+            substituted_text,
+        },
+    )) = substitute_macro_tok(db, env, diag, spanner, macro_ctx)?
     else {
         return Ok(None);
     };
 
-    let parse = entrypoint.parse(&expanded);
+    let parse = entrypoint.parse(&substituted_text);
 
     // TODO: use trmaps to map error ranges back to the original macro invocation site.
     emit_parse_errors(&parse, &diag, spanner);
@@ -194,21 +193,27 @@ fn resolve_macro_to_value<
     let Some(ast) = AstType::cast_node(red_node.clone())
         .or_else(|| red_node.children().find_map(AstType::cast_either))
     else {
-        diag.emit(Diagnostic::new(
-            span,
-            Cow::Owned(format!(
-                "Internal compiler error: Couldn't find {} as child of parse's root node, found node kinds {:?} and token kinds {:?}",
-                std::any::type_name::<AstType>(),
-                parse.red_node().child_nodes().map(|red| red.green.kind).collect::<Vec<_>>(),
-                parse.red_node().child_tokens().map(|red| red.green.kind).collect::<Vec<_>>()
-            )),
-            Severity::Error,
-        ));
+        let msg = format!(
+            "Internal compiler error: Couldn't find {} as child of parse's root node, found node kinds {:?} and token kinds {:?}",
+            std::any::type_name::<AstType>(),
+            parse
+                .red_node()
+                .child_nodes()
+                .map(|red| red.green.kind)
+                .collect::<Vec<_>>(),
+            parse
+                .red_node()
+                .child_tokens()
+                .map(|red| red.green.kind)
+                .collect::<Vec<_>>()
+        );
+        tracing::error!("{}", msg);
+        diag.emit(Diagnostic::new(span, Cow::Owned(msg), Severity::Error));
         return Err(());
     };
 
     // TODO: remove this closure
-    Ok(Some(lower(db, env, diag, spanner, &ast)?))
+    Ok(Some(ast))
 }
 
 /// Lowers an [`ast::DtPhandle`] to a [`MirPhandleTarget`], if valid.
@@ -223,16 +228,17 @@ fn lower_phandle<'db>(
 
     if let Some(macro_inv) = phandle.macro_invocation() {
         // If the phandle has a macro invocation (e.g. `&MACRO(...)`), resolve it.
-        Ok(resolve_macro_to_value(
+        let ast = resolve_macro_to_value(
             db,
             env,
             diag,
             spanner,
             &MacroCtx::Explicit(&macro_inv),
             Entrypoint::ReferenceNoamp,
-            lower_phandle,
         )?
-        .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro"))
+        .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
+
+        Ok(lower_phandle(db, env, diag, spanner, &ast)?)
     } else if phandle.is_path() {
         // &{/path/to/node}
         // FIXME: very naive, just strips the prefix/suffix from the source text.
@@ -260,8 +266,9 @@ fn lower_phandle<'db>(
             spanner,
             &MacroCtx::Implicit(&name_ast),
             Entrypoint::ReferenceNoamp,
-            lower_phandle,
         )?
+        .map(|ast| lower_phandle(db, env, diag, spanner, &ast))
+        .transpose()?
         .unwrap_or(MirPhandleTarget::Label(name_ast.syntax().text().to_owned())))
     }
 }

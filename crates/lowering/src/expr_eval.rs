@@ -1,6 +1,9 @@
 use std::{borrow::Cow, num::ParseIntError, str::FromStr, sync::Arc};
 
-use dt_tools_analyzer::{macros::substitute_macro_ast, string::interpret_escaped_char};
+use dt_tools_analyzer::{
+    macros::{SubstitutedBody, substitute_macro},
+    string::interpret_escaped_char,
+};
 use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
 use dt_tools_parser::{
     TextRange,
@@ -124,11 +127,15 @@ pub fn eval(
             };
 
             // TODO: error handling
-            let (_trmaps, s) = substitute_macro_ast(Some(&macro_invocation), def)
+            let SubstitutedBody {
+                source_mappings: _,
+                substituted_text,
+            } = substitute_macro(Some(&macro_invocation), def)
                 .ok()
                 .ok_or(())?;
 
-            let parse = dt_tools_parser::parser::Entrypoint::PreprocessorConditional.parse(&s);
+            let parse = dt_tools_parser::parser::Entrypoint::PreprocessorConditional
+                .parse(&substituted_text);
 
             if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
                 diag.emit(Diagnostic::new(

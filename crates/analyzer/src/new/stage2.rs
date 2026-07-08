@@ -18,7 +18,7 @@ use rustc_hash::FxHashMap;
 
 use super::outline::{AnalyzedToplevel, LabelDef};
 use crate::{
-    macros::{MacroDefinition, substitute_macro_ast},
+    macros::{MacroDefinition, substitute_macro},
     resolved_prop::Value,
 };
 
@@ -174,9 +174,9 @@ fn get_node_prop_name(
         }
     };
 
-    let s = substitute_macro_ast(macro_ast.as_ref(), macro_def)
+    let s = substitute_macro(macro_ast.as_ref(), macro_def)
         .expect("FIXME: no error")
-        .1;
+        .substituted_text;
 
     let parse = Entrypoint::Name.parse(&s);
 
