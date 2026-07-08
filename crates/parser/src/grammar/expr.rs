@@ -120,7 +120,10 @@ pub fn expr(p: &mut Parser, defined_operator: bool) -> Result<(), ()> {
 fn expr_binding_power(p: &mut Parser, defined_operator: bool, min_bp: u8) -> Result<(), ()> {
     let mut m_infix = p.start();
 
-    lhs(p, defined_operator)?;
+    let Ok(()) = lhs(p, defined_operator) else {
+        m_infix.ignore(p);
+        return Err(());
+    };
 
     // If None: We’re not at an operator; we don’t know what to do next, so we return and let the caller decide.
     while let Some(op) = InfixOp::at(p) {
@@ -374,7 +377,7 @@ mod tests {
             expect![[r#"
                 Errors: [
                     ParseError {
-                        message: "Expected infix operator or end-of-file, but found number literal",
+                        message: "Expected infix operator or end of input, but found number literal",
                         primary_text_range: TextRange {
                             start: 2,
                             end: 3,

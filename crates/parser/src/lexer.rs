@@ -18,7 +18,7 @@ use crate::TextRange;
 /// assert_eq!(tokens[0].kind, Ok(TokenKind::Ident));
 /// assert_eq!(tokens[1].kind, Ok(TokenKind::Whitespace));
 /// assert_eq!(tokens[2].kind, Ok(TokenKind::Number));
-/// assert_eq!(tokens[3].kind, Err(LexError::UnexpectedEofString));
+/// assert_eq!(tokens[3].kind, Err(LexError::UnexpectedEndString));
 /// assert!(tokens.get(4).is_none());
 /// ```
 #[must_use]
@@ -69,8 +69,8 @@ pub struct Token<'input> {
     thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Default, displaydoc::Display, Hash,
 )]
 pub enum LexError {
-    /// Unexpected EOF (hint: unterminated incbin directive)
-    UnexpectedEofIncbin,
+    /// Unexpected end of input (hint: unterminated incbin directive)
+    UnexpectedEndIncbin,
 
     /// Missing ( in incbin directive
     IncbinMissingLParen,
@@ -87,19 +87,19 @@ pub enum LexError {
     /// Missing string in incbin directive
     IncbinMissingString,
 
-    /// Unexpected EOF (hint: unterminated string literal)
-    UnexpectedEofString,
+    /// Unexpected end of input (hint: unterminated string literal)
+    UnexpectedEndString,
 
-    /// Unexpected EOF (hint: unterminated bytestring literal)
-    UnexpectedEofBytestring,
+    /// Unexpected end of input (hint: unterminated bytestring literal)
+    UnexpectedEndBytestring,
 
-    /// Unexpected EOF (hint: unterminated char literal)
-    UnexpectedEofChar,
+    /// Unexpected end of input (hint: unterminated char literal)
+    UnexpectedEndChar,
 
-    /// Unexpected EOF (hint: unterminated block comment)
-    UnexpectedEofBlockComment,
+    /// Unexpected end of input (hint: unterminated block comment)
+    UnexpectedEndBlockComment,
 
-    /// Unexpected input or EOF
+    /// Unexpected input, or end of input
     #[default]
     Default,
 }
@@ -495,7 +495,7 @@ fn lex_block_comment(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> 
         asterisk_found = false;
     }
     lex.bump(total_len);
-    Err(LexError::UnexpectedEofBlockComment)
+    Err(LexError::UnexpectedEndBlockComment)
 }
 
 fn lex_preprocessor_directive(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
@@ -622,7 +622,7 @@ fn lex_preprocessor_string(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexE
         escaped = false;
     }
     lex.bump(total_len);
-    Err(LexError::UnexpectedEofString)
+    Err(LexError::UnexpectedEndString)
 }
 
 // dtc:
@@ -650,7 +650,7 @@ fn lex_string(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
         escaped = false;
     }
     lex.bump(total_len);
-    Err(LexError::UnexpectedEofString)
+    Err(LexError::UnexpectedEndString)
 }
 
 fn lex_bytestring(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
@@ -668,7 +668,7 @@ fn lex_bytestring(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
         }
     }
     lex.bump(total_len);
-    Err(LexError::UnexpectedEofBytestring)
+    Err(LexError::UnexpectedEndBytestring)
 }
 
 fn lex_char(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
@@ -692,7 +692,7 @@ fn lex_char(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
         escaped = false;
     }
     lex.bump(total_len);
-    Err(LexError::UnexpectedEofChar)
+    Err(LexError::UnexpectedEndChar)
 }
 
 #[cfg(test)]
@@ -838,7 +838,7 @@ mod tests {
 
         // Unterminated string
         let mut lexer = TokenKind::lexer(r#""abc\";"#);
-        assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEofString)));
+        assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEndString)));
         assert_eq!(lexer.slice(), r#""abc\";"#);
     }
 
@@ -849,7 +849,7 @@ mod tests {
 
         // Unterminated string
         let mut lexer = TokenKind::lexer("[1234");
-        assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEofBytestring)));
+        assert_eq!(lexer.next(), Some(Err(LexError::UnexpectedEndBytestring)));
         assert_eq!(lexer.slice(), "[1234");
     }
 

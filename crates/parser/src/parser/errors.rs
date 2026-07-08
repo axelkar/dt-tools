@@ -19,7 +19,7 @@ pub enum Expected {
     LabelName,
     InfixOperator,
     PrefixOperator,
-    Eof,
+    End,
 }
 impl core::fmt::Display for Expected {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -32,7 +32,7 @@ impl core::fmt::Display for Expected {
             Expected::LabelName => f.write_str("label name"),
             Expected::InfixOperator => f.write_str("infix operator"),
             Expected::PrefixOperator => f.write_str("prefix operator"),
-            Expected::Eof => f.write_str("end-of-file"),
+            Expected::End => f.write_str("end of input"),
         }
     }
 }
@@ -70,7 +70,7 @@ fn fmt_expected_message(p: &mut Parser) -> String {
     if let Some(kind) = p.peek() {
         write!(message, ", but found {kind}").ok();
     } else {
-        write!(message, ", but found end-of-file").ok();
+        write!(message, ", but reached end of input").ok();
     }
 
     message

@@ -2,8 +2,10 @@
 
 use std::collections::HashMap;
 
-use codespan_reporting::files::SimpleFiles;
-use codespan_reporting::term::{self, termcolor};
+use codespan_reporting::{
+    files::SimpleFiles,
+    term::{self, termcolor},
+};
 use dt_tools_diagnostic::{Diagnostic, Severity};
 
 use crate::{db::BaseDb, file::File};

@@ -7,15 +7,15 @@ use std::borrow::Cow;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use dt_tools_analyzer::macros::SubstitutedBody;
-use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
+use dt_tools_diagnostic::{Diagnostic, Severity, Span};
 use dt_tools_parser::{
-    TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken, HasMacroInvocation, HasName},
     parser::Entrypoint,
 };
 
 use crate::{
     db::BaseDb,
+    diag::{Diag, SourceMap},
     emit_parse_errors,
     file::File,
     includes::IncludeDirs,
@@ -103,7 +103,8 @@ pub(crate) fn lower_file<'db>(
     let file_ast = parse.parse(db).source_file();
 
     let mut diagnostics = Vec::new();
-    let diag = parking_lot::Mutex::new(&mut diagnostics);
+    let base_map = SourceMap::File(file);
+    let mut diag = Diag::new(&mut diagnostics, &base_map);
 
     // Path of the current file's parent directory.
     let parent_dir_path = file.path(db).parent()?;
@@ -116,7 +117,7 @@ pub(crate) fn lower_file<'db>(
         db,
         file,
         env: &mut env,
-        diag: &diag,
+        diag: &mut diag,
         mir: &mut mir,
         parent_is_overlay,
         parent_dir_path,
@@ -146,11 +147,11 @@ pub(crate) fn lower_file<'db>(
 }
 
 /// Mutable context threaded through the tree traversal in a single [file](File).
-struct IntraFileCtx<'a, 'db, D: DiagnosticCollector<File>> {
+struct IntraFileCtx<'a, 'db, 's, 'm> {
     db: &'db dyn BaseDb,
     file: File,
     env: &'a mut TrackedMapEnvMut<'db>,
-    diag: &'a D,
+    diag: &'a mut Diag<'s, 'm>,
     mir: &'a mut Mir,
     parent_is_overlay: bool,
     parent_dir_path: &'a Utf8Path,
@@ -158,7 +159,7 @@ struct IntraFileCtx<'a, 'db, D: DiagnosticCollector<File>> {
     processed_files: &'a mut Vec<File>,
     includes: &'a mut Vec<(File, Span<File>)>,
 }
-impl<D: DiagnosticCollector<File>> IntraFileCtx<'_, '_, D> {
+impl IntraFileCtx<'_, '_, '_, '_> {
     /// Returns true if this is currently in overlay mode.
     #[must_use]
     fn is_overlay(&self) -> bool {
@@ -169,34 +170,39 @@ impl<D: DiagnosticCollector<File>> IntraFileCtx<'_, '_, D> {
 /// Resolves and substitutes a macro and reparses the result.
 ///
 /// Returns `Ok(None)` if the macro doesn't exist and the macro reference is implicit.
-fn resolve_macro_to_value<
-    'db,
-    AstType: AstNodeOrToken,
-    D: DiagnosticCollector<File>,
-    Spanner: FnMut(TextRange) -> Span<File>,
->(
+pub(crate) fn resolve_macro_to_ast<'db, AstType: AstNodeOrToken>(
     db: &'db dyn BaseDb,
-    env: &mut TrackedMapEnvMut<'db>,
-    diag: &D,
-    spanner: &mut Spanner,
+    env: &TrackedMapEnvMut<'db>,
+    diag: &mut Diag<'_, '_>,
     macro_ctx: &MacroCtx,
     entrypoint: Entrypoint,
 ) -> Result<Option<AstType>, ()> {
-    let Some((
-        span,
-        SubstitutedBody {
-            source_mappings: _,
-            substituted_text,
-        },
-    )) = substitute_macro_tok(db, env, diag, spanner, macro_ctx)?
+    let Some(SubstitutedBody {
+        source_mappings: _,
+        substituted_text,
+    }) = substitute_macro_tok(db, env, diag, macro_ctx)?
     else {
         return Ok(None);
     };
 
     let parse = entrypoint.parse(&substituted_text);
 
-    // TODO: use trmaps to map error ranges back to the original macro invocation site.
-    emit_parse_errors(&parse, &diag, spanner);
+    // TODO: use source mappings here and in the lowering
+    {
+        let child_map = SourceMap::Macro {
+            parent: diag.map,
+            invocation: diag.resolve(macro_ctx.text_range()),
+        };
+        emit_parse_errors(&parse, &mut Diag::new(&mut *diag.sink, &child_map));
+    }
+
+    if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
+        diag.emit(
+            macro_ctx.text_range(),
+            Cow::Borrowed("Failed to parse the result of this macro invocation"),
+            Severity::Error,
+        );
+    }
 
     let red_node = parse.red_node();
     let Some(ast) = AstType::cast_node(red_node.clone())
@@ -217,11 +223,10 @@ fn resolve_macro_to_value<
                 .collect::<Vec<_>>()
         );
         tracing::error!("{}", msg);
-        diag.emit(Diagnostic::new(span, Cow::Owned(msg), Severity::Error));
+        diag.emit(macro_ctx.text_range(), Cow::Owned(msg), Severity::Error);
         return Err(());
     };
 
-    // TODO: remove this closure
     Ok(Some(ast))
 }
 
@@ -229,25 +234,23 @@ fn resolve_macro_to_value<
 fn lower_phandle<'db>(
     db: &'db dyn BaseDb,
     env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    diag: &mut Diag<'_, '_>,
     phandle: &ast::DtPhandle,
 ) -> Result<MirPhandleTarget, ()> {
     use dt_tools_parser::parser::Entrypoint;
 
     if let Some(macro_inv) = phandle.macro_invocation() {
         // If the phandle has a macro invocation (e.g. `&MACRO(...)`), resolve it.
-        let ast = resolve_macro_to_value(
+        let ast = resolve_macro_to_ast(
             db,
             env,
             diag,
-            spanner,
             &MacroCtx::Explicit(&macro_inv),
             Entrypoint::ReferenceNoamp,
         )?
         .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
 
-        Ok(lower_phandle(db, env, diag, spanner, &ast)?)
+        Ok(lower_phandle(db, env, diag, &ast)?)
     } else if phandle.is_path() {
         // &{/path/to/node}
         // FIXME: very naive, just strips the prefix/suffix from the source text.
@@ -268,15 +271,14 @@ fn lower_phandle<'db>(
         // dtc wants extensions to be resolved from items above/before the extensions in
         // non-overlay mode, but phandles are fine in any order.
 
-        Ok(resolve_macro_to_value(
+        Ok(resolve_macro_to_ast(
             db,
             env,
             diag,
-            spanner,
             &MacroCtx::Implicit(&name_ast),
             Entrypoint::ReferenceNoamp,
         )?
-        .map(|ast| lower_phandle(db, env, diag, spanner, &ast))
+        .map(|ast| lower_phandle(db, env, diag, &ast))
         .transpose()?
         .unwrap_or(MirPhandleTarget::Label(name_ast.syntax().text().to_owned())))
     }

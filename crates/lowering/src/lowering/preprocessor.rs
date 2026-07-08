@@ -1,13 +1,18 @@
 use std::{borrow::Cow, sync::Arc};
 
-use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
+use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstToken},
     cst::RedNode,
 };
 
-use crate::{db::BaseDb, emit_parse_errors, expr_eval, file::File, macros::env::TrackedMapEnvMut};
+use crate::{
+    db::BaseDb,
+    diag::{Diag, SourceMap},
+    emit_parse_errors, expr_eval,
+    macros::env::TrackedMapEnvMut,
+};
 
 /// Strips the `#directive` prefix from a preprocessor directive.
 pub(crate) fn get_pp_directive_args(
@@ -92,8 +97,7 @@ pub(crate) fn get_pp_include_arg(
     input: &str,
     directive: &str,
     text_range: TextRange,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    diag: &mut Diag<'_, '_>,
 ) -> Option<(bool, String)> {
     // TODO: macro substitution in #include
 
@@ -103,29 +107,29 @@ pub(crate) fn get_pp_include_arg(
         Some(b'<') => (false, args.get(1..).expect("safe").split_once('>')),
         Some(b'"') => (true, args.get(1..).expect("safe").split_once('"')),
         None => {
-            diag.emit(Diagnostic::new(
-                spanner(args_text_range),
+            diag.emit(
+                args_text_range,
                 Cow::Borrowed("Expected an argument"),
                 Severity::Error,
-            ));
+            );
             return None;
         }
         _ => {
-            diag.emit(Diagnostic::new(
-                spanner(args_text_range),
+            diag.emit(
+                args_text_range,
                 Cow::Borrowed("Unexpected character in argument, expected `\"` or `<`."),
                 Severity::Error,
-            ));
+            );
             return None;
         }
     };
 
     let Some((s, _rest)) = split else {
-        diag.emit(Diagnostic::new(
-            spanner(args_text_range),
+        diag.emit(
+            args_text_range,
             Cow::Borrowed("Missing string terminator"),
             Severity::Error,
-        ));
+        );
         return None;
     };
 
@@ -136,20 +140,19 @@ pub(crate) fn get_pp_include_arg(
 pub(crate) fn pp_cond_directive_eval(
     db: &dyn BaseDb,
     env: &mut TrackedMapEnvMut,
-    file: File,
     directive: &ast::PreprocessorDirective,
-    diag: &impl DiagnosticCollector<File>,
+    diag: &mut Diag<'_, '_>,
 ) -> Result<bool, ()> {
     let input = directive.syntax().text();
 
     let directive_text_range = directive.syntax().text_range();
 
     let Some(directive_name) = directive.syntax().green.kind.preprocessor_directive_name() else {
-        diag.emit(Diagnostic::new(
-            directive_text_range.within_file(file),
+        diag.emit(
+            directive_text_range,
             Cow::Borrowed("Internal compiler error: preprocessor directive should have a name"),
             Severity::Warn,
-        ));
+        );
         return Err(());
     };
 
@@ -161,7 +164,6 @@ pub(crate) fn pp_cond_directive_eval(
         condition.insert_str(0, "defined(");
         condition.push(')');
 
-        // TODO: proper trmaps...
         condition_text_range =
             condition_text_range.offset_wrapping_signed(-"defined(".len().cast_signed());
         condition_text_range.end -= 1;
@@ -174,11 +176,11 @@ pub(crate) fn pp_cond_directive_eval(
         condition_text_range.end -= 1;
     } else if directive_name == "else" {
         if !condition.is_empty() {
-            diag.emit(Diagnostic::new(
-                condition_text_range.within_file(file),
+            diag.emit(
+                condition_text_range,
                 Cow::Borrowed("Extra arguments to `#else`"),
                 Severity::Warn,
-            ));
+            );
         }
 
         // Else branch is always enabled
@@ -187,18 +189,21 @@ pub(crate) fn pp_cond_directive_eval(
 
     let parse = dt_tools_parser::parser::Entrypoint::PreprocessorConditional.parse(&condition);
 
-    emit_parse_errors(&parse, &diag, &mut |text_range| {
-        text_range
-            .offset(condition_text_range.start)
-            .within_file(file)
-    });
+    // TODO: also use during eval instead of the AST offset hack?
+    {
+        let offset_map = SourceMap::Offset {
+            parent: diag.map,
+            offset: condition_text_range.start,
+        };
+        emit_parse_errors(&parse, &mut Diag::new(&mut *diag.sink, &offset_map));
+    }
 
     let expr_ast = RedNode::new_offset(Arc::new(parse.green_node), condition_text_range.start)
         .child_nodes()
         .find_map(ast::Expr::cast)
         .ok_or(())?;
 
-    let val = expr_eval::eval(db, env, expr_ast, &diag, &mut |tr| tr.within_file(file))?;
+    let val = expr_eval::eval(db, env, expr_ast, diag)?;
 
     Ok(val != 0)
 }

@@ -157,8 +157,8 @@ impl TokenMatcher for Reference {
 
 /// Parses cells.
 ///
-/// `AT_EOF`: whether a successful end of cells is determined by a `>` or end-of-file
-pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
+/// `AT_END`: whether a successful end of cells is determined by a `>` or end of input
+pub(super) fn cells<const AT_END: bool>(p: &mut Parser) -> Result<(), ()> {
     let _span = tracy_client::span!("grammar::cells");
 
     loop {
@@ -173,10 +173,10 @@ pub(super) fn cells<const AT_EOF: bool>(p: &mut Parser) -> Result<(), ()> {
         } else if p.check(TokenKind::LParen).silent().at() {
             // Start a parantesized expression
             dt_expr(p);
-        } else if (AT_EOF && {
-            p.add_expected(Expected::Eof);
+        } else if (AT_END && {
+            p.add_expected(Expected::End);
             p.at_end()
-        }) || (!AT_EOF && p.at(TokenKind::RAngle))
+        }) || (!AT_END && p.at(TokenKind::RAngle))
         {
             break;
         } else if p
@@ -355,7 +355,7 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
 
     let lcurly_span = p
         .range()
-        .expect("should not be at end-of-file with caller guarantee");
+        .expect("should not be at end of input by caller guarantee");
 
     // TODO: convert other grammars to assert eat
     assert!(p.eat(TokenKind::LCurly));
@@ -367,7 +367,7 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     if p.at_end() {
         // TODO: Is there a way to combine this with `,` and `;`
         p.error()
-            .msg_custom(Cow::Borrowed("Expected `}`, but found end-of-file"))
+            .msg_custom(Cow::Borrowed("Expected `}`, but reached end of input"))
             .add_span_label(lcurly_span, Cow::Borrowed("Unclosed delimiter"))
             .emit();
         m.complete(p, NodeKind::DtNode);
@@ -713,7 +713,7 @@ Tree:
             expect![[r#"
                 Errors: [
                     ParseError {
-                        message: "Expected ‘,’ or end-of-file, but found ‘;’",
+                        message: "Expected ‘,’ or end of input, but found ‘;’",
                         primary_text_range: TextRange {
                             start: 5,
                             end: 6,
@@ -750,7 +750,7 @@ Tree:
             expect![[r#"
                 Errors: [
                     ParseError {
-                        message: "Expected cell or end-of-file, but found ‘>’",
+                        message: "Expected cell or end of input, but found ‘>’",
                         primary_text_range: TextRange {
                             start: 3,
                             end: 4,

@@ -13,6 +13,7 @@ use dt_tools_lowering::{
     codespan_reporting::print_diagnostics,
     compute_diagnostics,
     db::{BaseDatabase, BaseDb},
+    diag::{Diag, SourceMap},
     emit_parse_errors,
     includes::IncludeDirs,
     lowering::lower_root_file,
@@ -147,8 +148,8 @@ fn cmd_parse(file: &Utf8Path) -> Result<()> {
     print!("{}", parse.green_node.print_tree());
 
     let mut diagnostics = Vec::new();
-    let diag = parking_lot::Mutex::new(&mut diagnostics);
-    emit_parse_errors(parse, &diag, &mut |tr| tr.within_file(file));
+    let map = SourceMap::File(file);
+    emit_parse_errors(parse, &mut Diag::new(&mut diagnostics, &map));
 
     if print_diagnostics(diagnostics, &db)? {
         std::process::exit(1);

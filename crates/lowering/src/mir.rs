@@ -333,9 +333,8 @@ pub struct UnresolvedExtension {
 mod tests {
     use expect_test::expect;
 
-    use crate::{db::BaseDb, includes::IncludeDirs, lowering::lower_root_file};
-
     use super::*;
+    use crate::{db::BaseDb, includes::IncludeDirs, lowering::lower_root_file};
 
     #[test]
     fn iter_live_defs_under() {

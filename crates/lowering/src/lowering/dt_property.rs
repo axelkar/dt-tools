@@ -1,7 +1,7 @@
 use std::{borrow::Cow, num::ParseIntError, str::FromStr, sync::Arc};
 
 use dt_tools_analyzer::string::interpret_escaped_string;
-use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
+use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode},
@@ -10,12 +10,12 @@ use dt_tools_parser::{
 };
 use num_traits::{AsPrimitive, Num};
 
-use super::{IntraFileCtx, lower_phandle, resolve_macro_to_value};
+use super::{IntraFileCtx, lower_phandle, resolve_macro_to_ast};
 use crate::{
     db::BaseDb,
+    diag::Diag,
     expr_eval::{self, interpret_escaped_char_tok, parse_int_tok},
     extra_num_traits::{Bits, Signedness},
-    file::File,
     lowering::dt_node::{build_path, get_name_and_unit_addr},
     macros::{MacroCtx, env::TrackedMapEnvMut},
     mir::{
@@ -24,44 +24,29 @@ use crate::{
     },
 };
 
-// TODO: options to results here
-// TODO: get rid of `impl DiagnosticCollector` and `impl FnMut(TextRange) -> Span<File>` because they cause monomorphization
-
 /// Lowers an [`ast::DtProperty`] to a [`MirDefinition`], if valid.
 pub(crate) fn lower_dt_property(
-    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
     parent_node_path: &str,
     prop: &ast::DtProperty,
 ) -> Result<(), ()> {
     if parent_node_path.is_empty() {
-        ctx.diag.emit(Diagnostic::new(
-            prop.syntax().text_range().within_file(ctx.file),
-            "Property must be defined inside a node".into(),
+        ctx.diag.emit(
+            prop.syntax().text_range(),
+            "Property must be defined inside a node",
             Severity::Error,
-        ));
+        );
         return Err(());
     }
 
     let mut values = Vec::new();
     for value_ast in prop.values() {
-        if let Ok(value) = lower_prop_value(
-            ctx.db,
-            ctx.env,
-            ctx.diag,
-            &mut |tr| tr.within_file(ctx.file),
-            &value_ast,
-        ) {
+        if let Ok(value) = lower_prop_value(ctx.db, ctx.env, ctx.diag, &value_ast) {
             values.push(value);
         }
     }
 
-    let name = get_name_and_unit_addr(
-        ctx.db,
-        ctx.env,
-        ctx.diag,
-        &mut |tr| tr.within_file(ctx.file),
-        prop,
-    )?;
+    let name = get_name_and_unit_addr(ctx.db, ctx.env, ctx.diag, prop)?;
     let path = build_path(parent_node_path, &name);
 
     let text_range = prop.syntax().text_range();
@@ -82,25 +67,24 @@ pub(crate) fn lower_dt_property(
 pub(crate) fn lower_prop_value<'db>(
     db: &'db dyn BaseDb,
     env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    diag: &mut Diag<'_, '_>,
     value: &ast::PropValue,
 ) -> Result<MirValue, ()> {
     match value {
         ast::PropValue::String(tok) => match interpret_escaped_string(tok.text()) {
             Ok(path) => Ok(MirValue::String(path)),
             Err(err) => {
-                diag.emit(Diagnostic::new(
-                    spanner(tok.text_range()),
+                diag.emit(
+                    tok.text_range(),
                     Cow::Owned(format!("Failed to parse string: {err}")),
                     Severity::Error,
-                ));
+                );
                 Err(())
             }
         },
         ast::PropValue::CellList(cell_list) => {
-            let bits_size = BitsSize::from_token(cell_list.bits_number().as_ref(), diag, spanner)?;
-            let cells = lower_cell_list(db, env, diag, spanner, cell_list, bits_size);
+            let bits_size = BitsSize::from_token(cell_list.bits_number().as_ref(), diag)?;
+            let cells = lower_cell_list(db, env, diag, cell_list, bits_size);
             Ok(MirValue::CellList(cells))
         }
         ast::PropValue::Bytestring(tok) => {
@@ -125,31 +109,30 @@ pub(crate) fn lower_prop_value<'db>(
             }
 
             if first_nibble.is_some() {
-                diag.emit(Diagnostic::new(
-                    spanner(tok.text_range()),
+                diag.emit(
+                    tok.text_range(),
                     Cow::Borrowed("Bytestring is missing a hex digit"),
                     Severity::Error,
-                ));
+                );
                 return Err(());
             }
 
             Ok(MirValue::Bytestring(bytes))
         }
         ast::PropValue::Phandle(phandle) => {
-            let target = lower_phandle(db, env, diag, spanner, phandle)?;
+            let target = lower_phandle(db, env, diag, phandle)?;
             Ok(MirValue::Phandle(target))
         }
         ast::PropValue::Macro(macro_inv) => {
-            let ast = resolve_macro_to_value(
+            let ast = resolve_macro_to_ast(
                 db,
                 env,
                 diag,
-                spanner,
                 &MacroCtx::Explicit(macro_inv),
                 Entrypoint::PropValues,
             )?
             .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
-            Ok(lower_prop_value(db, env, diag, spanner, &ast)?)
+            Ok(lower_prop_value(db, env, diag, &ast)?)
         }
     }
 }
@@ -168,14 +151,13 @@ impl BitsSize {
     /// Returns `Err(())` on unrecoverable parse errors (invalid number, unsupported bits).
     fn from_token(
         bits_number_tok: Option<&Arc<RedToken>>,
-        diag: &impl DiagnosticCollector<File>,
-        spanner: &mut impl FnMut(TextRange) -> Span<File>,
+        diag: &mut Diag<'_, '_>,
     ) -> Result<Self, ()> {
         let Some(bits_number_tok) = bits_number_tok else {
             return Ok(Self::default());
         };
 
-        let bits = parse_int_tok::<u32>(bits_number_tok, diag, spanner)?;
+        let bits = parse_int_tok::<u32>(bits_number_tok, diag)?;
 
         Ok(match bits {
             8 => Self::Bits8,
@@ -183,13 +165,13 @@ impl BitsSize {
             32 => Self::Bits32,
             64 => Self::Bits64,
             _ => {
-                diag.emit(Diagnostic::new(
-                    spanner(bits_number_tok.text_range()),
+                diag.emit(
+                    bits_number_tok.text_range(),
                     Cow::Owned(format!(
                         "Unsupported /bits/: {bits}. Cells must be 8, 16, 32 or 64 bits."
                     )),
                     Severity::Error,
-                ));
+                );
                 return Err(());
             }
         })
@@ -200,8 +182,7 @@ impl BitsSize {
 fn lower_cell_list<'db>(
     db: &'db dyn BaseDb,
     env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    diag: &mut Diag<'_, '_>,
     cell_list: &ast::DtCellList,
     bits_size: BitsSize,
 ) -> MirCellList {
@@ -210,28 +191,28 @@ fn lower_cell_list<'db>(
             // TODO: return Err on any Err, but run lower_cell on all child cells
             let cells: Vec<u8> = cell_list
                 .cells()
-                .filter_map(|c| lower_cell::<u8>(db, env, diag, spanner, &c).ok())
+                .filter_map(|c| lower_cell::<u8>(db, env, diag, &c).ok())
                 .collect();
             MirCellList::Bits8(cells)
         }
         BitsSize::Bits16 => {
             let cells: Vec<u16> = cell_list
                 .cells()
-                .filter_map(|c| lower_cell::<u16>(db, env, diag, spanner, &c).ok())
+                .filter_map(|c| lower_cell::<u16>(db, env, diag, &c).ok())
                 .collect();
             MirCellList::Bits16(cells)
         }
         BitsSize::Bits32 => {
             let cells: Vec<MirCell32> = cell_list
                 .cells()
-                .filter_map(|c| lower_cell::<MirCell32>(db, env, diag, spanner, &c).ok())
+                .filter_map(|c| lower_cell::<MirCell32>(db, env, diag, &c).ok())
                 .collect();
             MirCellList::Bits32(cells)
         }
         BitsSize::Bits64 => {
             let cells: Vec<u64> = cell_list
                 .cells()
-                .filter_map(|c| lower_cell::<u64>(db, env, diag, spanner, &c).ok())
+                .filter_map(|c| lower_cell::<u64>(db, env, diag, &c).ok())
                 .collect();
             MirCellList::Bits64(cells)
         }
@@ -267,8 +248,7 @@ trait LowerCell: Sized {
     fn from_phandle(
         target: MirPhandleTarget,
         phandle_range: TextRange,
-        diag: &impl DiagnosticCollector<File>,
-        spanner: &mut impl FnMut(TextRange) -> Span<File>,
+        diag: &mut Diag<'_, '_>,
     ) -> Result<Self, ()>;
 }
 
@@ -276,39 +256,36 @@ trait LowerCell: Sized {
 fn lower_cell<'db, T: LowerCell>(
     db: &'db dyn BaseDb,
     env: &mut TrackedMapEnvMut<'db>,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    diag: &mut Diag<'_, '_>,
     cell: &ast::Cell,
 ) -> Result<T, ()> {
     match cell {
-        ast::Cell::Number(tok) => {
-            parse_int_tok::<T::Number>(tok, diag, spanner).map(T::from_number)
-        }
+        ast::Cell::Number(tok) => parse_int_tok::<T::Number>(tok, diag).map(T::from_number),
         ast::Cell::Char(tok) => {
-            let ch = interpret_escaped_char_tok(tok, diag, spanner)?;
+            let ch = interpret_escaped_char_tok(tok, diag)?;
 
             let val = u32::from(ch);
             if let Ok(v) = T::Number::try_from(val) {
                 Ok(T::from_number(v))
             } else {
-                diag.emit(Diagnostic::new(
-                    spanner(tok.text_range()),
+                diag.emit(
+                    tok.text_range(),
                     Cow::Owned(format!(
                         "character value {ch:?}={val} too large for {}-bit cell",
                         T::Number::BITS
                     )),
                     Severity::Error,
-                ));
+                );
                 Err(())
             }
         }
         ast::Cell::Phandle(phandle) => {
-            let target = lower_phandle(db, env, diag, spanner, phandle)?;
-            T::from_phandle(target, phandle.syntax().text_range(), diag, spanner)
+            let target = lower_phandle(db, env, diag, phandle)?;
+            T::from_phandle(target, phandle.syntax().text_range(), diag)
         }
         ast::Cell::DtExpr(dt_expr) => {
             let expr = dt_expr.expr().ok_or(())?;
-            let num = expr_eval::eval(db, env, expr, diag, spanner)?;
+            let num = expr_eval::eval(db, env, expr, diag)?;
 
             if let Ok(v) = T::Number::try_from(num) {
                 Ok(T::from_number(v))
@@ -316,65 +293,47 @@ fn lower_cell<'db, T: LowerCell>(
                 // Two's complement bitwise reinterpretation
                 Ok(T::from_number(v.as_()))
             } else {
-                emit_overflow(
-                    num,
-                    dt_expr.syntax().text_range(),
-                    T::Number::BITS,
-                    diag,
-                    spanner,
-                );
+                emit_overflow(num, dt_expr.syntax().text_range(), T::Number::BITS, diag);
                 Err(())
             }
         }
         ast::Cell::Macro(macro_inv) => {
-            let ast = resolve_macro_to_value(
+            let ast = resolve_macro_to_ast(
                 db,
                 env,
                 diag,
-                spanner,
                 &MacroCtx::Explicit(macro_inv),
                 Entrypoint::Cells,
             )?
             .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
 
-            Ok(lower_cell::<T>(db, env, diag, spanner, &ast)?)
+            Ok(lower_cell::<T>(db, env, diag, &ast)?)
         }
     }
 }
 
 /// Helper function that isn't monomorphized
-fn emit_overflow(
-    num: i64,
-    range: TextRange,
-    bits: u32,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
-) {
+fn emit_overflow(num: i64, range: TextRange, bits: u32, diag: &mut Diag<'_, '_>) {
     let cmp = if num < 0 { "small" } else { "large" };
-    diag.emit(Diagnostic::new(
-        spanner(range),
+    diag.emit(
+        range,
         Cow::Owned(format!(
             "number {num} too {cmp} to fit in {bits}-bit signed integer \
              (using two's complement) or {bits}-bit unsigned integer"
         )),
         Severity::Error,
-    ));
+    );
 }
 
 /// Helper function that isn't monomorphized
-fn emit_phandle_rejected(
-    phandle_range: TextRange,
-    bits: u32,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
-) {
-    diag.emit(Diagnostic::new(
-        spanner(phandle_range),
+fn emit_phandle_rejected(phandle_range: TextRange, bits: u32, diag: &mut Diag<'_, '_>) {
+    diag.emit(
+        phandle_range,
         Cow::Owned(format!(
             "phandle reference not valid in {bits}-bit cells (only 32-bit cell lists support phandles)"
         )),
         Severity::Error,
-    ));
+    );
 }
 
 macro_rules! impl_lower_cell_int {
@@ -390,10 +349,9 @@ macro_rules! impl_lower_cell_int {
             fn from_phandle(
                 _target: MirPhandleTarget,
                 phandle_range: TextRange,
-                diag: &impl DiagnosticCollector<File>,
-                spanner: &mut impl FnMut(TextRange) -> Span<File>,
+                diag: &mut Diag<'_, '_>,
             ) -> Result<Self, ()> {
-                emit_phandle_rejected(phandle_range, <$T>::BITS, diag, spanner);
+                emit_phandle_rejected(phandle_range, <$T>::BITS, diag);
                 Err(())
             }
         }
@@ -415,8 +373,7 @@ impl LowerCell for MirCell32 {
     fn from_phandle(
         target: MirPhandleTarget,
         _phandle_range: TextRange,
-        _diag: &impl DiagnosticCollector<File>,
-        _spanner: &mut impl FnMut(TextRange) -> Span<File>,
+        _diag: &mut Diag<'_, '_>,
     ) -> Result<Self, ()> {
         Ok(MirCell32::Phandle(target))
     }

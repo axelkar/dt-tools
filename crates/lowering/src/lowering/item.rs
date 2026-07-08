@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use dt_tools_analyzer::macros::MacroDefinition;
-use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity};
+use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     ast,
     ast::{AstNode, AstNodeOrToken, AstToken, HasDtPhandle, HasName},
@@ -14,7 +14,6 @@ use super::{
     preprocessor::{get_pp_directive_args, get_pp_include_arg},
 };
 use crate::{
-    file::File,
     lowering::{
         dt_node::{build_path, get_name_and_unit_addr, lower_dt_node},
         dt_property::lower_dt_property,
@@ -41,7 +40,7 @@ fn possible_include_paths_utf8<'a, P: AsRef<Utf8Path>>(
 /// Lowers an [`ast::Item`] to [`MirDefinition`]s.
 #[expect(clippy::too_many_lines, reason = "hard to make this shorter")]
 pub(crate) fn lower_item(
-    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
     parent_node_path: &str,
     item: ast::Item,
 ) {
@@ -62,8 +61,7 @@ pub(crate) fn lower_item(
         ast::Item::PreprocessorConditional(preprocessor_conditional) => {
             let Some((_dir, branch)) =
                 preprocessor_conditional.branches().find(|(dir, _branch)| {
-                    pp_cond_directive_eval(ctx.db, ctx.env, ctx.file, dir, &ctx.diag)
-                        .is_ok_and(|val| val)
+                    pp_cond_directive_eval(ctx.db, ctx.env, dir, ctx.diag).is_ok_and(|val| val)
                 })
             else {
                 return;
@@ -75,38 +73,37 @@ pub(crate) fn lower_item(
         ast::Item::PreprocessorDirective(dir) => match dir.kind() {
             TokenKind::PragmaDirective => {
                 // TODO: implement #pragma
-                ctx.diag.emit(Diagnostic::new(
-                    text_range.within_file(ctx.file),
+                ctx.diag.emit(
+                    text_range,
                     Cow::Borrowed("`#pragma` is unimplemented"),
                     Severity::Error,
-                ));
+                );
             }
             TokenKind::DefineDirective => match MacroDefinition::parse(dir.syntax().text()) {
                 Ok(parsed) => ctx
                     .env
                     .insert_macro(parsed, text_range.within_file(ctx.file)),
                 Err(err) => {
-                    ctx.diag.emit(Diagnostic::new(
+                    ctx.diag.emit(
                         if let Some(local_range) = err.text_range() {
                             local_range.offset(text_range.start)
                         } else {
                             text_range
-                        }
-                        .within_file(ctx.file),
+                        },
                         Cow::Owned(err.to_string()),
                         Severity::Error,
-                    ));
+                    );
                 }
             },
             TokenKind::UndefDirective => {
                 let input = dir.syntax().text();
                 let (args, args_text_range) = get_pp_directive_args(input, "undef", text_range);
                 if args.contains(' ') {
-                    ctx.diag.emit(Diagnostic::new(
-                        args_text_range.within_file(ctx.file),
+                    ctx.diag.emit(
+                        args_text_range,
                         Cow::Borrowed("Arguments to `#undef` should be just a macro name"),
                         Severity::Error,
-                    ));
+                    );
                 } else {
                     ctx.env.own_macro_map.insert(args, None);
                 }
@@ -115,9 +112,7 @@ pub(crate) fn lower_item(
                 // TODO: real evaluation and macro substitution
                 let input = dir.syntax().text();
                 let Some((relative, include_path)) =
-                    get_pp_include_arg(input, "include", text_range, &ctx.diag, &mut |tr| {
-                        tr.within_file(ctx.file)
-                    })
+                    get_pp_include_arg(input, "include", text_range, ctx.diag)
                 else {
                     return;
                 };
@@ -130,11 +125,11 @@ pub(crate) fn lower_item(
                 )
                 .map(|path| files.get_file(ctx.db, &path))
                 .find(|file| file.is_readable_file(ctx.db)) else {
-                    ctx.diag.emit(Diagnostic::new(
-                        text_range.within_file(ctx.file),
+                    ctx.diag.emit(
+                        text_range,
                         Cow::Owned(format!("Couldn't find file to include: {include_path}")),
                         Severity::Error,
-                    ));
+                    );
                     return;
                 };
 
@@ -156,7 +151,7 @@ pub(crate) fn lower_item(
                 result
                     .diagnostics(ctx.db)
                     .iter()
-                    .for_each(|diagnostic| ctx.diag.emit(diagnostic.clone()));
+                    .for_each(|diagnostic| ctx.diag.push(diagnostic.clone()));
                 ctx.processed_files
                     .extend_from_slice(result.processed_files(ctx.db));
                 ctx.includes.extend_from_slice(result.includes(ctx.db));
@@ -169,14 +164,14 @@ pub(crate) fn lower_item(
                 let (args, _args_text_range) = get_pp_directive_args(input, "error", text_range);
 
                 // TODO: remove debug thing?
-                ctx.diag.emit(Diagnostic::new(
-                    text_range.within_file(ctx.file),
+                ctx.diag.emit(
+                    text_range,
                     Cow::Owned(format!(
                         "`#error`: {args:?}, defined {args:?}={}",
                         ctx.env.get_macro_def(ctx.db, &args).is_some()
                     )),
                     Severity::Error,
-                ));
+                );
             }
             _ => {}
         },
@@ -185,7 +180,7 @@ pub(crate) fn lower_item(
 
 /// Handles an [`ast::DtsDirective`] like `/include/`, `/delete-node/` or `/delete-property/`.
 pub(crate) fn handle_directive(
-    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
     parent_node_path: &str,
     dir: &ast::DtsDirective,
     files: &crate::file::Files,
@@ -206,11 +201,11 @@ pub(crate) fn handle_directive(
             match dt_tools_analyzer::string::interpret_escaped_string(string_tok.text()) {
                 Ok(path) => path,
                 Err(err) => {
-                    ctx.diag.emit(Diagnostic::new(
-                        string_tok.text_range().within_file(ctx.file),
+                    ctx.diag.emit(
+                        string_tok.text_range(),
                         Cow::Owned(format!("Failed to parse string: {err}")),
                         Severity::Error,
-                    ));
+                    );
                     return;
                 }
             };
@@ -220,11 +215,11 @@ pub(crate) fn handle_directive(
                 .map(|path| files.get_file(ctx.db, &path))
                 .find(|f| f.is_readable_file(ctx.db))
         else {
-            ctx.diag.emit(Diagnostic::new(
-                dir.syntax().text_range().within_file(ctx.file),
+            ctx.diag.emit(
+                dir.syntax().text_range(),
                 Cow::Owned(format!("Couldn't find file to include: {include_path}")),
                 Severity::Error,
-            ));
+            );
             return;
         };
 
@@ -248,7 +243,7 @@ pub(crate) fn handle_directive(
         result
             .diagnostics(ctx.db)
             .iter()
-            .for_each(|diagnostic| ctx.diag.emit(diagnostic.clone()));
+            .for_each(|diagnostic| ctx.diag.push(diagnostic.clone()));
         ctx.processed_files
             .extend_from_slice(result.processed_files(ctx.db));
         ctx.includes.extend_from_slice(result.includes(ctx.db));
@@ -280,7 +275,7 @@ pub(crate) fn handle_directive(
 
 /// Optionally emit [`MirDefinitionValue::DeletedNode`] or [`MirDefinitionValue::DeletedProperty`] from an [`ast::DtsDirective`].
 pub(crate) fn emit_delete_directive(
-    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
     parent_node_path: &str,
     dir: &ast::DtsDirective,
 ) {
@@ -294,22 +289,11 @@ pub(crate) fn emit_delete_directive(
     };
 
     if kind == Some(TokenKind::DeleteNodeDirective) {
-        let target_path = if let Ok(name) = get_name_and_unit_addr(
-            ctx.db,
-            ctx.env,
-            ctx.diag,
-            &mut |tr| tr.within_file(ctx.file),
-            &args,
-        ) {
+        let target_path = if let Ok(name) = get_name_and_unit_addr(ctx.db, ctx.env, ctx.diag, &args)
+        {
             build_path(parent_node_path, &name)
         } else if let Some(phandle) = args.dt_phandle() {
-            let Ok(target) = lower_phandle(
-                ctx.db,
-                ctx.env,
-                ctx.diag,
-                &mut |tr| tr.within_file(ctx.file),
-                &phandle,
-            ) else {
+            let Ok(target) = lower_phandle(ctx.db, ctx.env, ctx.diag, &phandle) else {
                 return;
             };
 
@@ -356,7 +340,7 @@ pub(crate) fn emit_delete_directive(
 ///
 /// Returns `Err(())` if it can't be resolved. If in an overlay, an error will not be emitted.
 pub(crate) fn resolve_phandle(
-    ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
+    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
     target: &MirPhandleTarget,
     phandle: &ast::DtPhandle,
 ) -> Result<String, ()> {
@@ -369,11 +353,11 @@ pub(crate) fn resolve_phandle(
                 if ctx.is_overlay() {
                     // TODO: handle unresolved delete-node!
                 } else {
-                    ctx.diag.emit(Diagnostic::new(
-                        phandle.syntax().text_range().within_file(ctx.file),
+                    ctx.diag.emit(
+                        phandle.syntax().text_range(),
                         Cow::Owned(format!("Label not found: {name}")),
                         Severity::Error,
-                    ));
+                    );
                 }
                 return Err(());
             }
@@ -383,11 +367,11 @@ pub(crate) fn resolve_phandle(
                 if ctx.is_overlay() {
                     // TODO: handle unresolved delete-node!
                 } else {
-                    ctx.diag.emit(Diagnostic::new(
-                        phandle.syntax().text_range().within_file(ctx.file),
+                    ctx.diag.emit(
+                        phandle.syntax().text_range(),
                         Cow::Owned(format!("Node at path not found: {path}")),
                         Severity::Error,
-                    ));
+                    );
                 }
                 return Err(());
             }

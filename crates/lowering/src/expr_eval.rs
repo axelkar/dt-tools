@@ -1,23 +1,21 @@
-use std::{borrow::Cow, num::ParseIntError, str::FromStr, sync::Arc};
+use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
-use dt_tools_analyzer::{
-    macros::{SubstitutedBody, substitute_macro},
-    string::interpret_escaped_char,
-};
-use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
+use dt_tools_analyzer::string::interpret_escaped_char;
+use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
-    TextRange,
     ast::{self, AstNode},
     cst::RedToken,
     lexer::TokenKind,
+    parser::Entrypoint,
 };
 use num_traits::Num;
 
 use crate::{
     db::BaseDb,
+    diag::Diag,
     extra_num_traits::{Bits, Signedness},
-    file::File,
-    macros::env::TrackedMapEnvMut,
+    lowering::resolve_macro_to_ast,
+    macros::{MacroCtx, env::TrackedMapEnvMut},
 };
 
 /// Parses an integer and emits errors.
@@ -25,14 +23,12 @@ pub fn parse_int_tok<
     T: FromStr<Err = ParseIntError> + Num<FromStrRadixErr = ParseIntError> + Bits + Signedness,
 >(
     tok: &Arc<RedToken>,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    diag: &mut Diag<'_, '_>,
 ) -> Result<T, ()> {
     /// Helper function that isn't monomorphized
     fn emit_err(
         err: &ParseIntError,
-        diag: &impl DiagnosticCollector<File>,
-        spanner: &mut impl FnMut(TextRange) -> Span<File>,
+        diag: &mut Diag<'_, '_>,
         tok: &Arc<RedToken>,
         bits: u32,
         signedness: &'static str,
@@ -40,11 +36,7 @@ pub fn parse_int_tok<
         let msg = err
             .to_string()
             .replace("target type", &format!("{bits}-bit {signedness} integer"));
-        diag.emit(Diagnostic::new(
-            spanner(tok.text_range()),
-            msg.into(),
-            Severity::Error,
-        ));
+        diag.emit(tok.text_range(), msg, Severity::Error);
     }
 
     let src = tok.text().as_str();
@@ -61,20 +53,15 @@ pub fn parse_int_tok<
         // Decimal
         src.parse()
     }
-    .map_err(|err| emit_err(&err, diag, spanner, tok, T::BITS, T::SIGNEDNESS))
+    .map_err(|err| emit_err(&err, diag, tok, T::BITS, T::SIGNEDNESS))
 }
 
 pub fn interpret_escaped_char_tok(
     tok: &Arc<RedToken>,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    diag: &mut Diag<'_, '_>,
 ) -> Result<char, ()> {
     interpret_escaped_char(tok.text()).map_err(|err| {
-        diag.emit(Diagnostic::new(
-            spanner(tok.text_range()),
-            err.to_string().into(),
-            Severity::Error,
-        ));
+        diag.emit(tok.text_range(), err.to_string(), Severity::Error);
     })
 }
 
@@ -84,12 +71,11 @@ pub fn eval(
     db: &dyn BaseDb,
     env: &TrackedMapEnvMut,
     ast: ast::Expr,
-    diag: &impl DiagnosticCollector<File>,
-    spanner: &mut impl FnMut(TextRange) -> Span<File>,
+    diag: &mut Diag<'_, '_>,
 ) -> Result<i64, ()> {
     match ast {
         ast::Expr::PrefixExpr(prefix_expr) => {
-            let mut value = || eval(db, env, prefix_expr.expr().ok_or(())?, diag, spanner);
+            let mut value = || eval(db, env, prefix_expr.expr().ok_or(())?, diag);
             match prefix_expr.op().ok_or(())? {
                 TokenKind::Plus => value(),
                 TokenKind::Minus => Ok(-value()?),
@@ -111,53 +97,21 @@ pub fn eval(
                 _ => Err(()),
             }
         }
-        ast::Expr::ParenExpr(paren_expr) => {
-            eval(db, env, paren_expr.expr().ok_or(())?, diag, spanner)
-        }
+        ast::Expr::ParenExpr(paren_expr) => eval(db, env, paren_expr.expr().ok_or(())?, diag),
         ast::Expr::MacroInvocation(macro_invocation) => {
-            let ident = macro_invocation.ident().ok_or(())?;
-            let name: &str = ident.text();
-            let Some(def) = env.get_macro_def(db, name) else {
-                diag.emit(Diagnostic::new(
-                    spanner(ident.text_range()),
-                    Cow::Owned(format!("Macro `{name}` is not defined")),
-                    Severity::Error,
-                ));
-                return Err(());
-            };
+            let expr_ast = resolve_macro_to_ast::<ast::Expr>(
+                db,
+                env,
+                diag,
+                &MacroCtx::Explicit(&macro_invocation),
+                Entrypoint::PreprocessorConditional,
+            )?
+            .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
 
-            // TODO: error handling
-            let SubstitutedBody {
-                source_mappings: _,
-                substituted_text,
-            } = substitute_macro(Some(&macro_invocation), def)
-                .ok()
-                .ok_or(())?;
+            // TODO: prevent infinite recursion
 
-            let parse = dt_tools_parser::parser::Entrypoint::PreprocessorConditional
-                .parse(&substituted_text);
-
-            if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
-                diag.emit(Diagnostic::new(
-                    spanner(macro_invocation.syntax().text_range()),
-                    Cow::Borrowed("Failed to parse the result of this macro invocation"),
-                    Severity::Error,
-                ));
-                // TODO: trmaps and error handling
-                return Err(());
-            }
-
-            // TODO: prevent infinite recursion...
-
-            let expr_ast = parse
-                .red_node()
-                .child_nodes()
-                .find_map(ast::Expr::cast)
-                .ok_or(())?;
-
-            // FIXME: diag needs trmaps
-            // TODO: wrap spanner!
-            eval(db, env, expr_ast, diag, spanner)
+            // TODO: enter a macro frame here so ranges from the expansion map up.
+            eval(db, env, expr_ast, diag)
         }
         ast::Expr::LiteralExpr(literal_expr) => {
             if let Some(number) = literal_expr
@@ -165,13 +119,13 @@ pub fn eval(
                 .child_tokens()
                 .find(|tok| tok.green.kind == TokenKind::Number)
             {
-                parse_int_tok::<i64>(&number, diag, spanner)
+                parse_int_tok::<i64>(&number, diag)
             } else if let Some(char) = literal_expr
                 .syntax()
                 .child_tokens()
                 .find(|tok| tok.green.kind == TokenKind::Char)
             {
-                let val = interpret_escaped_char_tok(&char, diag, spanner)?;
+                let val = interpret_escaped_char_tok(&char, diag)?;
 
                 Ok(val as i64)
             } else {
@@ -207,8 +161,8 @@ pub fn eval(
                 .find_map(|child| ast::Expr::cast(child.as_node()?.clone()))
                 .ok_or(())?;
 
-            let lhs_value = eval(db, env, lhs, diag, spanner)?;
-            let rhs_value = || eval(db, env, rhs, diag, spanner);
+            let lhs_value = eval(db, env, lhs, diag)?;
+            let rhs_value = || eval(db, env, rhs, diag);
 
             Ok(match op.green.kind {
                 TokenKind::Plus => lhs_value + rhs_value()?,
@@ -233,7 +187,7 @@ pub fn eval(
                     let cond = lhs_value != 0;
                     if cond {
                         let mhs = mhs.ok_or(())?;
-                        eval(db, env, mhs, diag, spanner)?
+                        eval(db, env, mhs, diag)?
                     } else {
                         rhs_value()?
                     }
@@ -259,14 +213,17 @@ mod tests {
             .unwrap();
 
         let mut diagnostics = Vec::new();
-        let diag = parking_lot::Mutex::new(&mut diagnostics);
         let file = db
             .get_files()
             .add_virtual(&db, "/main.dts".into(), String::new());
+        let map = crate::diag::SourceMap::File(file);
 
-        let num = super::eval(&db, env, ast, &diag, &mut |text_range| {
-            text_range.within_file(file)
-        });
+        let num = super::eval(
+            &db,
+            env,
+            ast,
+            &mut crate::diag::Diag::new(&mut diagnostics, &map),
+        );
 
         assert!(
             diagnostics.is_empty(),

@@ -150,7 +150,7 @@ impl<'t, 'input> Source<'t, 'input> {
     ///    ^^^ prev_next_cursor is here
     /// ```
     // FIXME: this will usually return Some since prev_next_cursor is initialized to 0, except at
-    // EOF!!
+    // end of input!!
     pub(crate) fn prev_next_range(&self) -> Option<TextRange> {
         Some(self.tokens.get(self.prev_next_cursor)?.text_range)
     }
@@ -165,7 +165,7 @@ impl<'t, 'input> Source<'t, 'input> {
 
     /// Peeks ahead at the current token's kind.
     ///
-    /// Returns None on EOF
+    /// Returns None at end of input
     pub(super) fn peek_kind(&mut self) -> Option<TokenKind> {
         self.skip_trivia();
         self.peek_kind_immediate()
@@ -198,7 +198,7 @@ impl<'t, 'input> Source<'t, 'input> {
     ///
     /// Doesn't skip trivia.
     ///
-    /// Returns None on EOF.
+    /// Returns None at end of input.
     #[inline]
     pub(super) fn peek_kind_immediate(&mut self) -> Option<TokenKind> {
         let _span = tracy_client::span!("parser::Source::peek_kind_immediate");
@@ -232,7 +232,7 @@ impl<'t, 'input> Source<'t, 'input> {
     ///
     /// Doesn't skip trivia.
     ///
-    /// Returns None on EOF.
+    /// Returns None at end of input.
     pub(super) fn peek_immediate_next_kind(&self) -> Option<TokenKind> {
         Some(
             self.tokens
@@ -246,7 +246,7 @@ impl<'t, 'input> Source<'t, 'input> {
     ///
     /// Doesn't skip trivia.
     ///
-    /// Returns None on EOF.
+    /// Returns None at end of input.
     fn peek_token_immediate(&self) -> Option<&Token<'_>> {
         self.tokens.get(self.cursor)
     }
@@ -292,7 +292,7 @@ mod tests {
         assert_eq!(source.prev_next_cursor, 7);
         assert_eq!(source.prev_next_text(), None);
 
-        // parser will only peek at EOF
+        // parser will only peek at end of input
         assert_eq!(source.peek_kind(), None);
 
         assert_eq!(source.cursor, 7);
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(source.prev_next_cursor, 7);
         assert_eq!(source.prev_next_text(), Some("\n"));
 
-        // parser will only peek at EOF
+        // parser will only peek at end of input
         assert_eq!(source.peek_kind(), None);
 
         assert_eq!(source.cursor, 8);

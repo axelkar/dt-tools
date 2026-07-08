@@ -165,7 +165,7 @@ impl Entrypoint {
 
         // Add all tokens to CST and error
         if !p.at_end() {
-            p.add_expected(Expected::Eof);
+            p.add_expected(Expected::End);
             let m = p.start();
 
             p.error().msg_expected().emit();
@@ -219,7 +219,7 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Peeks ahead at the current token's kind.
     ///
-    /// Returns None on EOF
+    /// Returns None at end of input
     #[inline]
     fn peek_immediate(&mut self) -> Option<TokenKind> {
         self.source.peek_kind_immediate()
@@ -227,7 +227,7 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     /// Peeks ahead at the current token's kind.
     ///
-    /// Returns None on EOF
+    /// Returns None at end of input
     #[inline]
     pub fn peek(&mut self) -> Option<TokenKind> {
         self.source.peek_kind()
@@ -280,7 +280,7 @@ impl<'t, 'input> Parser<'t, 'input> {
     }
     fn current_token_error_range(&mut self) -> TextRange {
         if self.at_end() {
-            // Emit the error at the second-last character before EOF, if possible. This is so the
+            // Emit the error at the second-last character before end of input, if possible. This is so the
             // errors show consistently in editors that don't display the trailing newline.
             self.source
                 .last_token_range()
@@ -342,7 +342,10 @@ impl<'t, 'input> Parser<'t, 'input> {
         let mut text = String::new();
 
         while self.peek_immediate().is_some_and(|k| set.contains(&k)) {
-            let token = self.source.next_token().expect("Tried to bump at EOF");
+            let token = self
+                .source
+                .next_token()
+                .expect("Tried to bump at end of input");
             n_raw_tokens += 1;
             text.push_str(token.text);
         }
@@ -357,7 +360,7 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.expected.clear();
     }
 
-    /// Returns true if at the end-of-file.
+    /// Returns true if at the end of input.
     pub fn at_end(&mut self) -> bool {
         self.peek().is_none()
     }
@@ -373,7 +376,10 @@ impl<'t, 'input> Parser<'t, 'input> {
         #[cfg(feature = "grammar-tracing")]
         debug!(pos = self.events.len(), kind = ?self.source.peek_kind(), "push token");
 
-        assert!(self.source.next_token().is_some(), "Tried to bump at EOF");
+        assert!(
+            self.source.next_token().is_some(),
+            "Tried to bump at end of input"
+        );
         self.events.push(Event::AddToken);
     }
 
@@ -742,7 +748,7 @@ Tree:
             expect![[r#"
                 Errors: [
                     ParseError {
-                        message: "Expected ‘}’, but found end-of-file",
+                        message: "Expected ‘}’, but reached end of input",
                         primary_text_range: TextRange {
                             start: 9,
                             end: 10,
