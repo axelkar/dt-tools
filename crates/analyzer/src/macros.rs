@@ -53,13 +53,20 @@ struct MacroToken {
     text_range: TextRange,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Param {
+    // TODO: handle vararg substitution with commas etc.
+    is_vararg: bool,
+    name: String,
+}
+
 struct Parser<'params, 'input> {
     /// Current text offset - the index of the character that `peek` returns
     offset: usize,
     current_token_start_offset: usize,
     iter: Peekable<Chars<'input>>,
     current_token: String,
-    params: &'params [String],
+    params: &'params [Param],
     /// List of (already) processed tokens
     body_tokens: Vec<MacroToken>,
     dont_prescan_indices: Vec<usize>,
@@ -78,7 +85,11 @@ impl Parser<'_, '_> {
     fn complete_token(&mut self) -> Result<(), MacroDefinitionParseError> {
         if !self.current_token.is_empty() {
             // Check if current token is a parameter
-            if let Some(i) = self.params.iter().position(|x| x == &self.current_token) {
+            if let Some(i) = self
+                .params
+                .iter()
+                .position(|p| p.name == self.current_token)
+            {
                 self.push_tok(MacroToken {
                     text_range: self.text_range(),
                     kind: MacroTokenKind::Parameter(i),
@@ -146,7 +157,7 @@ impl Parser<'_, '_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
 pub enum MacroDefinitionParseError {
     /// Lex error; the lexer should have caught this.
     LexError,
@@ -162,6 +173,8 @@ pub enum MacroDefinitionParseError {
     ConcatAtEnd { text_range: TextRange },
     /// Invalid backslash
     InvalidBackslash { text_range: TextRange },
+    /// Only the last parameter may be variadic.
+    NonLastVararg { name: String },
 }
 impl MacroDefinitionParseError {
     /// Returns the range of the error, if it exists.
@@ -175,12 +188,15 @@ impl MacroDefinitionParseError {
             | Self::ConcatAtStart { text_range }
             | Self::ConcatAtEnd { text_range }
             | Self::InvalidBackslash { text_range } => Some(*text_range),
-            Self::LexError | Self::MissingName => None,
+            Self::LexError | Self::MissingName | Self::NonLastVararg { name: _ } => None,
         }
     }
 }
 
-fn parse_params(iter: &mut Peekable<Chars<'_>>, offset: &mut usize) -> Vec<String> {
+fn parse_params(
+    iter: &mut Peekable<Chars<'_>>,
+    offset: &mut usize,
+) -> Result<Vec<Param>, MacroDefinitionParseError> {
     let mut params = Vec::new();
 
     if iter.peek() == Some(&'(') {
@@ -189,17 +205,26 @@ fn parse_params(iter: &mut Peekable<Chars<'_>>, offset: &mut usize) -> Vec<Strin
         let mut current_param = String::new();
         for ch in iter.by_ref() {
             *offset += 1;
+
+            let mut new_param = || {
+                if !current_param.trim().is_empty() {
+                    let name = current_param.trim();
+                    let vararg_name = name.strip_suffix("...");
+
+                    params.push(Param {
+                        is_vararg: vararg_name.is_some(),
+                        name: vararg_name.unwrap_or(name).to_owned(),
+                    });
+                }
+            };
+
             match ch {
                 ')' => {
-                    if !current_param.trim().is_empty() {
-                        params.push(current_param.trim().to_owned());
-                    }
+                    new_param();
                     break;
                 }
                 ',' => {
-                    if !current_param.trim().is_empty() {
-                        params.push(current_param.trim().to_owned());
-                    }
+                    new_param();
                     current_param.clear();
                 }
                 _ => {
@@ -208,7 +233,20 @@ fn parse_params(iter: &mut Peekable<Chars<'_>>, offset: &mut usize) -> Vec<Strin
             }
         }
     }
-    params
+
+    if let Some((last, rest)) = params.split_last_mut() {
+        if let Some(param) = rest.iter().find(|param| param.is_vararg) {
+            return Err(MacroDefinitionParseError::NonLastVararg {
+                name: param.name.clone(),
+            });
+        }
+
+        if last.is_vararg && last.name.is_empty() {
+            "__VA_ARGS__".clone_into(&mut last.name);
+        }
+    }
+
+    Ok(params)
 }
 
 fn parse_string(p: &mut Parser, ch: char) -> Result<(), MacroDefinitionParseError> {
@@ -377,7 +415,7 @@ pub struct MacroDefinition {
     /// Macro name
     pub name: String,
     /// Parameter names
-    params: Vec<String>,
+    params: Vec<Param>,
     /// Parsed macro body tokens, used for substitution
     body_tokens: Vec<MacroToken>,
     /// Parameter indices not to prescan.
@@ -426,7 +464,7 @@ impl MacroDefinition {
             return Err(MacroDefinitionParseError::MissingName);
         }
 
-        let params = parse_params(&mut iter, &mut offset);
+        let params = parse_params(&mut iter, &mut offset)?;
 
         let mut p = Parser {
             offset,
@@ -696,6 +734,8 @@ pub fn substitute_macro(
         })
         .unwrap_or_default();
 
+    // TODO: argument prescan so some macros with indirection tricks work
+
     // TODO: vararg macros
     if def.params.len() != arguments.len() {
         return Err(format!(
@@ -773,7 +813,6 @@ mod tests {
     use std::fmt::Write;
 
     use expect_test::{Expect, expect};
-    use pretty_assertions::assert_eq;
 
     use super::*;
 
@@ -941,7 +980,17 @@ mod tests {
 
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
     fn check_parse(input: &str, expect: Expect) {
-        let def = MacroDefinition::parse(input).unwrap();
+        let def = match MacroDefinition::parse(input) {
+            Ok(def) => def,
+            Err(err) => {
+                let text_range = err
+                    .text_range()
+                    .map(|tr| format!(" ({tr})"))
+                    .unwrap_or_default();
+                expect.assert_eq(&format!("--- error ---\n{err}{text_range}\n"));
+                return;
+            }
+        };
 
         let mut actual = String::new();
         actual.push_str(&def.name);
@@ -951,7 +1000,10 @@ mod tests {
             if i != 0 {
                 actual.push_str(", ");
             }
-            actual.push_str(param);
+            actual.push_str(&param.name);
+            if param.is_vararg {
+                actual.push_str("...");
+            }
         }
 
         actual.push_str(")\n");
@@ -978,20 +1030,11 @@ mod tests {
     #[test]
     fn parse_basic() {
         check_parse(
-            "#define CONCAT(a, b) a \\\n## b",
+            "#define FOO \\\\\n",
             expect![[r#"
-                CONCAT(a, b)
-                Parameter(0) 21..22
-                ConcatOperator 25..27
-                Parameter(1) 28..29
-                dont_prescan_indices: [0, 1]
+                --- error ---
+                Invalid backslash (12..14)
             "#]],
-        );
-        assert_eq!(
-            MacroDefinition::parse("#define FOO \\\\\n"),
-            Err(MacroDefinitionParseError::InvalidBackslash {
-                text_range: (12..14).into()
-            })
         );
 
         check_parse(
@@ -1002,6 +1045,36 @@ mod tests {
                 WordNoWhitespace("+") 14..15
                 Word("2") 16..17
                 dont_prescan_indices: []
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_basic_args() {
+        // Note how dont_prescan_indices is empty
+        check_parse(
+            "#define ADD(a, b) a + b",
+            expect![[r#"
+                ADD(a, b)
+                Parameter(0) 18..19
+                WordNoWhitespace("+") 20..21
+                Parameter(1) 22..23
+                dont_prescan_indices: []
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_concat() {
+        // Note how dont_prescan_indices is not empty due to the ## operator
+        check_parse(
+            "#define CONCAT(a, b) a \\\n## b",
+            expect![[r#"
+                CONCAT(a, b)
+                Parameter(0) 21..22
+                ConcatOperator 25..27
+                Parameter(1) 28..29
+                dont_prescan_indices: [0, 1]
             "#]],
         );
     }
@@ -1026,57 +1099,65 @@ mod tests {
                 dont_prescan_indices: [0]
             "#]],
         );
-        assert_eq!(
-            MacroDefinition::parse("#define FOO(a) #"),
-            Err(MacroDefinitionParseError::StringifyNotAParam {
-                text_range: (15..16).into(),
-            })
+        check_parse(
+            "#define FOO(a) #",
+            expect![[r#"
+                --- error ---
+                '#' not followed by a macro parameter (15..16)
+            "#]],
         );
-        assert_eq!(
-            MacroDefinition::parse("#define FOO(a) #   "),
-            Err(MacroDefinitionParseError::StringifyNotAParam {
-                text_range: (18..19).into(),
-            })
+        check_parse(
+            "#define FOO(a) #   ",
+            expect![[r#"
+                --- error ---
+                '#' not followed by a macro parameter (18..19)
+            "#]],
         );
-        assert_eq!(
-            MacroDefinition::parse("#define FOO(a) #b"),
-            Err(MacroDefinitionParseError::StringifyNotAParam {
-                text_range: (16..17).into(),
-            })
+        check_parse(
+            "#define FOO(a) #b",
+            expect![[r#"
+                --- error ---
+                '#' not followed by a macro parameter (16..17)
+            "#]],
         );
-        assert_eq!(
-            MacroDefinition::parse("#define FOO(a) #\"\""),
-            Err(MacroDefinitionParseError::StringifyNotAParam {
-                text_range: (16..18).into(),
-            })
+        check_parse(
+            "#define FOO(a) #\"\"",
+            expect![[r#"
+                --- error ---
+                '#' not followed by a macro parameter (16..18)
+            "#]],
         );
     }
 
     #[test]
     fn parse_concat_errors() {
-        assert_eq!(
-            MacroDefinition::parse(r#"#define FOO(a) "abc" ## def"#),
-            Err(MacroDefinitionParseError::ConcatInvalidToken {
-                text_range: (15..20).into(),
-            })
+        check_parse(
+            r#"#define FOO(a) "abc" ## def"#,
+            expect![[r#"
+                --- error ---
+                invalid token for '##' (15..20)
+            "#]],
         );
-        assert_eq!(
-            MacroDefinition::parse(r#"#define FOO(a) abc ## "def""#),
-            Err(MacroDefinitionParseError::ConcatInvalidToken {
-                text_range: (22..27).into(),
-            })
+        check_parse(
+            r#"#define FOO(a) abc ## "def""#,
+            expect![[r#"
+                --- error ---
+                invalid token for '##' (22..27)
+            "#]],
         );
-        assert_eq!(
-            MacroDefinition::parse("#define FOO(a) abc ##"),
-            Err(MacroDefinitionParseError::ConcatAtEnd {
-                text_range: (19..21).into(),
-            })
+        check_parse(
+            "#define FOO(a) abc ##",
+            expect![[r#"
+                --- error ---
+                '##' cannot be at end (19..21)
+            "#]],
         );
-        assert_eq!(
-            MacroDefinition::parse("#define FOO(a) ##"),
-            Err(MacroDefinitionParseError::ConcatAtStart {
-                text_range: (15..17).into(),
-            })
+        check_parse(
+            "#define FOO(a) ##",
+            expect![[r#"
+                --- error ---
+                '##' cannot be at start (15..17)
+            "#]],
         );
     }
 
@@ -1137,6 +1218,19 @@ mod tests {
                 Word("a") 15..16
                 Word("a") 17..18
                 dont_prescan_indices: []
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_vararg() {
+        check_parse(
+            r#"#define __stringify_1(x...) #x"#,
+            expect![[r#"
+                __stringify_1(x...)
+                StringifyOperator 28..29
+                Parameter(0) 29..30
+                dont_prescan_indices: [0]
             "#]],
         );
     }
