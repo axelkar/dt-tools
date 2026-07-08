@@ -1,13 +1,13 @@
 use std::borrow::Cow;
 
 use dt_tools_analyzer::macros::{SubstitutedBody, substitute_macro};
-use dt_tools_diagnostic::Severity;
+use dt_tools_diagnostic::{Severity, Span};
 use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstToken},
 };
 
-use crate::{db::BaseDb, diag::Diag, macros::env::TrackedMapEnvMut};
+use crate::{db::BaseDb, diag::Diag, file::File, macros::env::TrackedMapEnvMut};
 
 pub mod env;
 
@@ -36,6 +36,15 @@ impl MacroCtx<'_> {
             Self::Implicit(name) => name.syntax().text_range(),
         }
     }
+
+    /// Returns the text range of each argument.
+    #[must_use]
+    pub fn arg_ranges(&self) -> Vec<TextRange> {
+        match self {
+            Self::Explicit(invoc) => invoc.arguments().map(|arg| arg.text_range()).collect(),
+            Self::Implicit(_) => Vec::new(),
+        }
+    }
 }
 
 /// Resolves and substitutes a macro.
@@ -46,10 +55,10 @@ pub(crate) fn substitute_macro_tok<'db>(
     env: &TrackedMapEnvMut<'db>,
     diag: &mut Diag<'_, '_>,
     macro_ctx: &MacroCtx,
-) -> Result<Option<SubstitutedBody>, ()> {
+) -> Result<Option<(SubstitutedBody, Span<File>)>, ()> {
     let name = macro_ctx.name();
 
-    let Some(def) = env.get_macro_def(db, name) else {
+    let Some((def, macro_def)) = env.get_macro(db, name).map(|(def, span)| (def, *span)) else {
         let is_explicit_macro = matches!(macro_ctx, MacroCtx::Explicit(_));
         return if is_explicit_macro {
             diag.emit(
@@ -70,7 +79,7 @@ pub(crate) fn substitute_macro_tok<'db>(
         },
         def,
     ) {
-        Ok(substituted_body) => Ok(Some(substituted_body)),
+        Ok(substituted_body) => Ok(Some((substituted_body, macro_def))),
         Err(err) => {
             diag.emit(macro_ctx.text_range(), Cow::Owned(err), Severity::Error);
             Err(())

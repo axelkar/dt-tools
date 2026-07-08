@@ -1,5 +1,6 @@
 //! Diagnostic emission and source mapping for lowering.
 
+use dt_tools_analyzer::macros::{TextRangeMap, TextRangeMapTo};
 use dt_tools_diagnostic::{Diagnostic, DiagnosticMessage, Severity, Span};
 use dt_tools_parser::TextRange;
 
@@ -23,9 +24,7 @@ pub enum SourceMap<'a> {
     /// Ranges are byte offsets into a macro expansion.
     Macro {
         parent: &'a SourceMap<'a>,
-        /// Span of the whole macro invocation in the parent text.
-        invocation: Span<File>,
-        // TODO: &[TextRangeMap]
+        expansion: &'a MacroExpansion,
     },
 }
 
@@ -35,9 +34,51 @@ impl SourceMap<'_> {
         match self {
             SourceMap::File(file) => range.within_file(*file),
             SourceMap::Offset { parent, offset } => parent.resolve(range.offset(*offset)),
-            // TODO: add span label "in this macro invocation"
-            // TODO: &[TextRangeMap]
-            SourceMap::Macro { parent, invocation } => parent.resolve(range),
+            SourceMap::Macro { parent, expansion } => expansion.resolve(range, parent),
+        }
+    }
+}
+
+/// Where each part of a macro expansion came from.
+pub struct MacroExpansion {
+    /// Maps offsets in the expanded text to the macro definition or arguments.
+    pub(crate) source_mappings: Vec<TextRangeMap>,
+    /// Span of the `#define` directive.
+    pub(crate) macro_def: Span<File>,
+    /// Range of each argument, in the enclosing text.
+    pub(crate) args: Vec<TextRange>,
+    /// Range of the whole macro invocation, in the enclosing text.
+    pub(crate) invocation: TextRange,
+}
+
+impl MacroExpansion {
+    /// Maps `range` in the expanded text back to its origin. `parent` maps the enclosing text.
+    // TODO: add span label "in this macro invocation"
+    // TODO: multiple spans from Concat and Stringify
+    // TODO: show every step of the way; don't only resolve at parent
+    fn resolve(&self, range: TextRange, parent: &SourceMap) -> Span<File> {
+        let Some(map) = self
+            .source_mappings
+            .iter()
+            .rfind(|map| map.from_offset <= range.start)
+        else {
+            return parent.resolve(self.invocation);
+        };
+        let delta = range.start - map.from_offset;
+        match &map.to {
+            TextRangeMapTo::MacroTextOffset(offset) => {
+                let start = offset + delta;
+                self.macro_def
+                    .subspan_inside(TextRange::new(start, start + range.length()))
+            }
+            // Arguments may be prescanned, so map to the whole argument.
+            TextRangeMapTo::ArgumentIdx(idx) => {
+                parent.resolve(*self.args.get(*idx).unwrap_or(&self.invocation))
+            }
+            // TODO: map Concat and Stringify precisely
+            TextRangeMapTo::Concat(_) | TextRangeMapTo::Stringify { .. } => {
+                parent.resolve(self.invocation)
+            }
         }
     }
 }

@@ -13,7 +13,7 @@ use num_traits::{AsPrimitive, Num};
 use super::{IntraFileCtx, lower_phandle, resolve_macro_to_ast};
 use crate::{
     db::BaseDb,
-    diag::Diag,
+    diag::{Diag, SourceMap},
     expr_eval::{self, interpret_escaped_char_tok, parse_int_tok},
     extra_num_traits::{Bits, Signedness},
     lowering::dt_node::{build_path, get_name_and_unit_addr},
@@ -51,8 +51,7 @@ pub(crate) fn lower_dt_property(
 
     let text_range = prop.syntax().text_range();
     let provenance = MirProvenance {
-        file: ctx.file,
-        text_range,
+        span: ctx.diag.resolve(text_range),
     };
 
     ctx.mir.definitions.push(MirDefinition {
@@ -124,7 +123,7 @@ pub(crate) fn lower_prop_value<'db>(
             Ok(MirValue::Phandle(target))
         }
         ast::PropValue::Macro(macro_inv) => {
-            let ast = resolve_macro_to_ast(
+            let (ast, expansion) = resolve_macro_to_ast(
                 db,
                 env,
                 diag,
@@ -132,7 +131,16 @@ pub(crate) fn lower_prop_value<'db>(
                 Entrypoint::PropValues,
             )?
             .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
-            Ok(lower_prop_value(db, env, diag, &ast)?)
+            let child_map = SourceMap::Macro {
+                parent: diag.map,
+                expansion: &expansion,
+            };
+            Ok(lower_prop_value(
+                db,
+                env,
+                &mut Diag::new(&mut *diag.sink, &child_map),
+                &ast,
+            )?)
         }
     }
 }
@@ -298,7 +306,7 @@ fn lower_cell<'db, T: LowerCell>(
             }
         }
         ast::Cell::Macro(macro_inv) => {
-            let ast = resolve_macro_to_ast(
+            let (ast, expansion) = resolve_macro_to_ast(
                 db,
                 env,
                 diag,
@@ -307,7 +315,16 @@ fn lower_cell<'db, T: LowerCell>(
             )?
             .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
 
-            Ok(lower_cell::<T>(db, env, diag, &ast)?)
+            let child_map = SourceMap::Macro {
+                parent: diag.map,
+                expansion: &expansion,
+            };
+            Ok(lower_cell::<T>(
+                db,
+                env,
+                &mut Diag::new(&mut *diag.sink, &child_map),
+                &ast,
+            )?)
         }
     }
 }

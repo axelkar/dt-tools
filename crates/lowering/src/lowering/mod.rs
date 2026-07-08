@@ -15,7 +15,7 @@ use dt_tools_parser::{
 
 use crate::{
     db::BaseDb,
-    diag::{Diag, SourceMap},
+    diag::{Diag, MacroExpansion, SourceMap},
     emit_parse_errors,
     file::File,
     includes::IncludeDirs,
@@ -176,22 +176,31 @@ pub(crate) fn resolve_macro_to_ast<'db, AstType: AstNodeOrToken>(
     diag: &mut Diag<'_, '_>,
     macro_ctx: &MacroCtx,
     entrypoint: Entrypoint,
-) -> Result<Option<AstType>, ()> {
-    let Some(SubstitutedBody {
-        source_mappings: _,
-        substituted_text,
-    }) = substitute_macro_tok(db, env, diag, macro_ctx)?
+) -> Result<Option<(AstType, MacroExpansion)>, ()> {
+    let Some((
+        SubstitutedBody {
+            source_mappings,
+            substituted_text,
+        },
+        macro_def,
+    )) = substitute_macro_tok(db, env, diag, macro_ctx)?
     else {
         return Ok(None);
     };
 
+    let expansion = MacroExpansion {
+        source_mappings,
+        macro_def,
+        args: macro_ctx.arg_ranges(),
+        invocation: macro_ctx.text_range(),
+    };
+
     let parse = entrypoint.parse(&substituted_text);
 
-    // TODO: use source mappings here and in the lowering
     {
         let child_map = SourceMap::Macro {
             parent: diag.map,
-            invocation: diag.resolve(macro_ctx.text_range()),
+            expansion: &expansion,
         };
         emit_parse_errors(&parse, &mut Diag::new(&mut *diag.sink, &child_map));
     }
@@ -199,7 +208,7 @@ pub(crate) fn resolve_macro_to_ast<'db, AstType: AstNodeOrToken>(
     if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
         diag.emit(
             macro_ctx.text_range(),
-            Cow::Borrowed("Failed to parse the result of this macro invocation"),
+            format!("Failed to parse the result of this macro invocation ({substituted_text:?})"),
             Severity::Error,
         );
     }
@@ -227,7 +236,7 @@ pub(crate) fn resolve_macro_to_ast<'db, AstType: AstNodeOrToken>(
         return Err(());
     };
 
-    Ok(Some(ast))
+    Ok(Some((ast, expansion)))
 }
 
 /// Lowers an [`ast::DtPhandle`] to a [`MirPhandleTarget`], if valid.
@@ -241,7 +250,7 @@ fn lower_phandle<'db>(
 
     if let Some(macro_inv) = phandle.macro_invocation() {
         // If the phandle has a macro invocation (e.g. `&MACRO(...)`), resolve it.
-        let ast = resolve_macro_to_ast(
+        let (ast, expansion) = resolve_macro_to_ast(
             db,
             env,
             diag,
@@ -250,7 +259,16 @@ fn lower_phandle<'db>(
         )?
         .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
 
-        Ok(lower_phandle(db, env, diag, &ast)?)
+        let child_map = SourceMap::Macro {
+            parent: diag.map,
+            expansion: &expansion,
+        };
+        Ok(lower_phandle(
+            db,
+            env,
+            &mut Diag::new(&mut *diag.sink, &child_map),
+            &ast,
+        )?)
     } else if phandle.is_path() {
         // &{/path/to/node}
         // FIXME: very naive, just strips the prefix/suffix from the source text.
@@ -278,7 +296,13 @@ fn lower_phandle<'db>(
             &MacroCtx::Implicit(&name_ast),
             Entrypoint::ReferenceNoamp,
         )?
-        .map(|ast| lower_phandle(db, env, diag, &ast))
+        .map(|(ast, expansion)| {
+            let child_map = SourceMap::Macro {
+                parent: diag.map,
+                expansion: &expansion,
+            };
+            lower_phandle(db, env, &mut Diag::new(&mut *diag.sink, &child_map), &ast)
+        })
         .transpose()?
         .unwrap_or(MirPhandleTarget::Label(name_ast.syntax().text().to_owned())))
     }
@@ -490,6 +514,29 @@ pub(crate) mod tests {
                 --- errors ---
                 Error L3:13-L3:16: Macro `VAL` is not defined
                 Error L3:27-L3:30: Macro `VAL` is not defined
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_macro_error_propagation() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define BIG (1 << 40)
+#define CELL(x) <x 5>
+
+/ { prop = <BIG>, CELL((1 << 40)); };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L6:1-L6:38
+                property = CellList(Bits32([])), CellList(Bits32([Number(5)])) /prop /main.dts L6:5-L6:35
+
+                --- errors ---
+                Error L3:13-L3:22: number 1099511627776 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer
+                Error L6:24-L6:33: number 1099511627776 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer
             "#]],
         );
     }

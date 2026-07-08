@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fmt};
 
-use dt_tools_parser::TextRange;
+use dt_tools_diagnostic::Span;
 
 use crate::file::{DisplaySpanLineColumn, File};
 
@@ -64,9 +64,9 @@ impl Mir {
                 "{:6} {} {} {}",
                 kind,
                 def.path,
-                def.provenance.file.path(db),
+                def.provenance.span.file.path(db),
                 DisplaySpanLineColumn(
-                    &def.provenance.text_range.within_file(def.provenance.file),
+                    &def.provenance.span,
                     db
                 )
             );
@@ -156,8 +156,7 @@ impl Mir {
 /// One source location that contributed to a definition.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MirProvenance {
-    pub file: File,
-    pub text_range: TextRange,
+    pub span: Span<File>,
 }
 
 /// Flat MIR definition with a path

@@ -12,7 +12,7 @@ use num_traits::Num;
 
 use crate::{
     db::BaseDb,
-    diag::Diag,
+    diag::{Diag, SourceMap},
     extra_num_traits::{Bits, Signedness},
     lowering::resolve_macro_to_ast,
     macros::{MacroCtx, env::TrackedMapEnvMut},
@@ -99,7 +99,7 @@ pub fn eval(
         }
         ast::Expr::ParenExpr(paren_expr) => eval(db, env, paren_expr.expr().ok_or(())?, diag),
         ast::Expr::MacroInvocation(macro_invocation) => {
-            let expr_ast = resolve_macro_to_ast::<ast::Expr>(
+            let (expr_ast, expansion) = resolve_macro_to_ast::<ast::Expr>(
                 db,
                 env,
                 diag,
@@ -110,8 +110,16 @@ pub fn eval(
 
             // TODO: prevent infinite recursion
 
-            // TODO: enter a macro frame here so ranges from the expansion map up.
-            eval(db, env, expr_ast, diag)
+            let child_map = SourceMap::Macro {
+                parent: diag.map,
+                expansion: &expansion,
+            };
+            eval(
+                db,
+                env,
+                expr_ast,
+                &mut Diag::new(&mut *diag.sink, &child_map),
+            )
         }
         ast::Expr::LiteralExpr(literal_expr) => {
             if let Some(number) = literal_expr

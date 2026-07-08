@@ -61,7 +61,7 @@ fn check_phandle(
                 .is_none()
             {
                 Some(Diagnostic::new(
-                    def.provenance.text_range.within_file(def.provenance.file),
+                    def.provenance.span,
                     Cow::Owned(format!("Label not found: {name}")),
                     Severity::Error,
                 ))
@@ -74,7 +74,7 @@ fn check_phandle(
                 None
             } else {
                 Some(Diagnostic::new(
-                    def.provenance.text_range.within_file(def.provenance.file),
+                    def.provenance.span,
                     Cow::Owned(format!("Node at path not found: {path}")),
                     Severity::Error,
                 ))
@@ -95,18 +95,16 @@ fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<File>>) {
             mir::MirDefinitionValue::PluginDirective => {
                 if dts_v1.is_none() {
                     diagnostics.push(Diagnostic::new(
-                        def.provenance.text_range.within_file(def.provenance.file),
+                        def.provenance.span,
                         "`/plugin/;` before `/dts-v1/;`".into(),
                         Severity::Error,
                     ));
                 } else if let Some(prev_def) = &overlay_mode {
                     diagnostics.push(Diagnostic {
                         span: MultiSpan {
-                            primary_spans: vec![
-                                def.provenance.text_range.within_file(def.provenance.file),
-                            ],
+                            primary_spans: vec![def.provenance.span],
                             span_labels: vec![SpanLabel {
-                                span: prev_def.text_range.within_file(prev_def.file),
+                                span: prev_def.span,
                                 msg: "Previous definition here".into(),
                             }],
                         },
@@ -122,7 +120,7 @@ fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<File>>) {
             | mir::MirDefinitionValue::DeletedProperty => {
                 if dts_v1.is_none() {
                     diagnostics.push(Diagnostic::new(
-                        def.provenance.text_range.within_file(def.provenance.file),
+                        def.provenance.span,
                         "Definition before /dts-v1/;".into(),
                         Severity::Error,
                     ));

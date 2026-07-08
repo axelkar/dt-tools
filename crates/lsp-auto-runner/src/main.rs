@@ -58,6 +58,8 @@ fn run_child(
             format_args!("Build was unsuccessful: {}\nChild stderr:", output.status).red()
         );
         std::io::stderr().write_all(&output.stderr)?;
+
+        return Ok(());
     }
 
     let executable = str::from_utf8(&jq_output.stdout).expect("Invalid UTF-8 sequence");

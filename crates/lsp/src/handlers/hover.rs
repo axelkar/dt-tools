@@ -147,12 +147,7 @@ fn mir_definition_section(
 
         // Provenance
         let is_here = def.provenance == most_precise.provenance;
-        fmt_span(
-            db,
-            &def.provenance.text_range.within_file(def.provenance.file),
-            is_here,
-            &mut s,
-        );
+        fmt_span(db, &def.provenance.span, is_here, &mut s);
 
         s
     }
@@ -164,7 +159,13 @@ fn mir_definition_section(
         .definitions
         .iter()
         .filter(|def| {
-            def.provenance.file == file && def.provenance.text_range.byte_range().contains(&offset)
+            def.provenance.span.file == file
+                && def
+                    .provenance
+                    .span
+                    .text_range
+                    .byte_range()
+                    .contains(&offset)
         })
         .collect_vec();
 
@@ -188,7 +189,7 @@ fn mir_definition_section(
                 .collect_vec()
                 .join("\n- ")
         ),
-        most_precise.provenance.text_range,
+        most_precise.provenance.span.text_range,
     ))
 }
 

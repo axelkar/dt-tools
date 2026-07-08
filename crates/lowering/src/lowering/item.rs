@@ -80,9 +80,7 @@ pub(crate) fn lower_item(
                 );
             }
             TokenKind::DefineDirective => match MacroDefinition::parse(dir.syntax().text()) {
-                Ok(parsed) => ctx
-                    .env
-                    .insert_macro(parsed, text_range.within_file(ctx.file)),
+                Ok(parsed) => ctx.env.insert_macro(parsed, ctx.diag.resolve(text_range)),
                 Err(err) => {
                     ctx.diag.emit(
                         if let Some(local_range) = err.text_range() {
@@ -135,7 +133,7 @@ pub(crate) fn lower_item(
 
                 ctx.processed_files.push(include_file);
                 ctx.includes
-                    .push((include_file, text_range.within_file(ctx.file)));
+                    .push((include_file, ctx.diag.resolve(text_range)));
 
                 let result = lower_file(
                     ctx.db,
@@ -224,10 +222,8 @@ pub(crate) fn handle_directive(
         };
 
         ctx.processed_files.push(include_file);
-        ctx.includes.push((
-            include_file,
-            dir.syntax().text_range().within_file(ctx.file),
-        ));
+        ctx.includes
+            .push((include_file, ctx.diag.resolve(dir.syntax().text_range())));
 
         let result = lower_file(
             ctx.db,
@@ -255,8 +251,7 @@ pub(crate) fn handle_directive(
             path: parent_node_path.to_owned(),
             value: MirDefinitionValue::V1Directive,
             provenance: MirProvenance {
-                file: ctx.file,
-                text_range: dir.syntax().text_range(),
+                span: ctx.diag.resolve(dir.syntax().text_range()),
             },
         });
     } else if kind == Some(TokenKind::PluginDirective) {
@@ -264,8 +259,7 @@ pub(crate) fn handle_directive(
             path: parent_node_path.to_owned(),
             value: MirDefinitionValue::PluginDirective,
             provenance: MirProvenance {
-                file: ctx.file,
-                text_range: dir.syntax().text_range(),
+                span: ctx.diag.resolve(dir.syntax().text_range()),
             },
         });
     } else {
@@ -284,8 +278,7 @@ pub(crate) fn emit_delete_directive(
 
     let text_range = dir.syntax().text_range();
     let provenance = MirProvenance {
-        file: ctx.file,
-        text_range,
+        span: ctx.diag.resolve(text_range),
     };
 
     if kind == Some(TokenKind::DeleteNodeDirective) {

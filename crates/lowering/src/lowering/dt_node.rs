@@ -13,7 +13,7 @@ use dt_tools_parser::{
 use super::{IntraFileCtx, lower_phandle};
 use crate::{
     db::BaseDb,
-    diag::Diag,
+    diag::{Diag, SourceMap},
     lowering::{
         item::{lower_item, resolve_phandle},
         resolve_macro_to_ast,
@@ -32,8 +32,7 @@ pub(crate) fn lower_dt_node(
     dt_node: &ast::DtNode,
 ) {
     let provenance = MirProvenance {
-        file: ctx.file,
-        text_range: dt_node.syntax().text_range(),
+        span: ctx.diag.resolve(dt_node.syntax().text_range()),
     };
     let omit_if_no_ref = dt_node.omit_if_no_ref();
 
@@ -235,14 +234,18 @@ pub(crate) fn resolve_name_or_macro<'db, Ast: HasName + HasMacroInvocation>(
         return Err(());
     };
 
-    let Some(ast) =
+    let Some((ast, expansion)) =
         resolve_macro_to_ast::<ast::EntryName>(db, env, diag, &macro_ctx, Entrypoint::Name)?
     else {
         let name_ast = name_ast.expect("Should return None only with MacroCtx::Implicit");
         return Ok(name_ast.syntax().text().as_str().to_owned());
     };
 
-    resolve_name_or_macro(db, env, diag, &ast)
+    let child_map = SourceMap::Macro {
+        parent: diag.map,
+        expansion: &expansion,
+    };
+    resolve_name_or_macro(db, env, &mut Diag::new(&mut *diag.sink, &child_map), &ast)
 }
 
 /// Resolves and concatenates together the name and unit address of a compatible AST node.
