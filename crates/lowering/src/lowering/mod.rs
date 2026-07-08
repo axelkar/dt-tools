@@ -9,7 +9,6 @@ use dt_tools_diagnostic::{Diagnostic, DiagnosticCollector, Severity, Span};
 use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstNodeOrToken, AstToken, HasMacroInvocation, HasName},
-    lexer::TokenKind,
     parser::Entrypoint,
 };
 
@@ -60,7 +59,7 @@ pub struct LoweredFile<'db> {
     #[returns(ref)]
     pub mir: Mir,
 
-    /// Whether this file is part of a plugin/overlay (`/plugin/;`).
+    /// Whether this file is part of a overlay (`/plugin/;`).
     pub is_overlay: bool,
 }
 
@@ -76,16 +75,7 @@ pub struct LoweredFile<'db> {
 ///
 /// Will panic if [`IncludeDirs`] hasn't been defined.
 pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'_>> {
-    // Detect /plugin/; in the root file.
-    let is_overlay = crate::parse_file(db, root_file).is_some_and(|p| {
-        p.parse(db).source_file().directives().any(|dir| {
-            dir.syntax()
-                .child_tokens()
-                .any(|tok| tok.green.kind == TokenKind::PluginDirective)
-        })
-    });
-
-    lower_file(db, root_file, None, is_overlay)
+    lower_file(db, root_file, None, false)
 }
 
 /// Lowers the CST of a single file to [`Mir`], recursing into its includes.
@@ -94,7 +84,7 @@ pub(crate) fn lower_file<'db>(
     db: &'db dyn BaseDb,
     file: File,
     parent_env: Option<TrackedMapEnv<'db>>,
-    is_overlay: bool,
+    parent_is_overlay: bool,
 ) -> Option<LoweredFile<'db>> {
     let span = profiling::tracy_client::span!("lsp::salsa::lowering::lower_file");
     span.emit_text(file.path(db).as_str());
@@ -120,7 +110,7 @@ pub(crate) fn lower_file<'db>(
         env: &mut env,
         diag: &diag,
         mir: &mut mir,
-        is_overlay,
+        parent_is_overlay,
     };
 
     // TODO: PERF: split into phases with includes and after includes for Salsa tracking
@@ -135,6 +125,8 @@ pub(crate) fn lower_file<'db>(
             item,
         );
     }
+
+    let is_overlay = ctx.is_overlay();
 
     Some(LoweredFile::new(
         db,
@@ -154,7 +146,14 @@ struct IntraFileCtx<'a, 'db, D: DiagnosticCollector<File>> {
     env: &'a mut TrackedMapEnvMut<'db>,
     diag: &'a D,
     mir: &'a mut Mir,
-    is_overlay: bool,
+    parent_is_overlay: bool,
+}
+impl<D: DiagnosticCollector<File>> IntraFileCtx<'_, '_, D> {
+    /// Returns true if this is currently in overlay mode.
+    #[must_use]
+    fn is_overlay(&self) -> bool {
+        self.parent_is_overlay || self.mir.sets_overlay()
+    }
 }
 
 /// Resolves and substitutes a macro and reparses the result.
@@ -328,7 +327,9 @@ mod tests {
 /dts-v1/;
 "#,
             &[],
-            expect![""],
+            expect![[r#"
+                dts-v1  /main.dts 1..10
+            "#]],
         );
     }
 
@@ -341,6 +342,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..16
             "#]],
         );
@@ -355,6 +357,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..60
                 property = CellList(Bits32([Number(1), Number(2), Number(3)])) /baz /main.dts 28..42
                 property = String("bar") /foo /main.dts 15..27
@@ -372,6 +375,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..40
                 property = CellList(Bits64([1])) /value /main.dts 15..37
             "#]],
@@ -387,6 +391,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..31
                 node labels=[LBL] /node /main.dts 15..28
             "#]],
@@ -403,6 +408,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..31
                 node labels=[LBL] /node /main.dts 15..28
                 node   /node /main.dts 32..53
@@ -421,6 +427,8 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
+                plugin  /main.dts 11..20
                 --- unresolved ---
                   label=UNKNOWN (1 definitions)
             "#]],
@@ -437,6 +445,7 @@ mod tests {
 "#,
             &[("/inc.dtsi", r#"/ { inc_prop = <2>; };"#)],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /inc.dtsi 0..22
                 node   / /main.dts 31..54
                 property = CellList(Bits32([Number(2)])) /inc_prop /inc.dtsi 4..19
@@ -455,6 +464,7 @@ mod tests {
 "#,
             &[("/inc.dtsi", r#"/ { inc_prop = <BOGUS>; };"#)],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /inc.dtsi 0..26
                 node   / /main.dts 31..54
                 property = CellList(Bits32([])) /inc_prop /inc.dtsi 4..23
@@ -475,6 +485,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..44
                 node   /foo /main.dts 15..22
                 delete-node /foo /main.dts 23..41
@@ -491,6 +502,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..50
                 node labels=[foo] /bar /main.dts 15..27
                 delete-node /bar /main.dts 28..47
@@ -507,6 +519,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..48
                 node   /foo /main.dts 15..22
                 delete-node /foo /main.dts 23..45
@@ -523,6 +536,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..51
                 property = CellList(Bits32([Number(1)])) /foo /main.dts 15..25
                 delete-property /foo /main.dts 26..48
@@ -544,6 +558,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 36..53
                 property = CellList(Bits32([Number(1)])) /yes /main.dts 40..50
             "#]],
@@ -562,6 +577,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 50..76
                 property = CellList(Bits32([Number(42)])), String("example") /prop /main.dts 54..73
             "#]],
@@ -580,6 +596,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 30..51
                 node   / /main.dts 52..73
                 node labels=[FOO] /foo /main.dts 34..48
@@ -600,6 +617,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 30..49
                 node   / /main.dts 50..73
                 node labels=[FOO] /foo /main.dts 34..46
@@ -620,6 +638,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 36..54
                 node   / /main.dts 55..73
                 node   /SUBSTITUTED@bar /main.dts 40..51
@@ -640,6 +659,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 60..74
                 node   /BAR /main.dts 64..71
             "#]],
@@ -655,6 +675,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..44
                 property = CellList(Bits32([])) /prop /main.dts 15..28
                 property =  /prop2 /main.dts 29..41
@@ -675,6 +696,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
 
                 --- errors ---
                 Error 11..17: Label not found: BOGUS
@@ -691,6 +713,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..31
                 property = Phandle(Label("BOGUS")) /foo /main.dts 15..28
 
@@ -709,6 +732,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..32
                 property = Phandle(Path("/bar")) /foo /main.dts 15..29
 
@@ -728,6 +752,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..30
                 node   / /main.dts 31..50
                 node labels=[foo] /bar /main.dts 15..27
@@ -748,6 +773,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..37
                 property = CellList(Bits32([])) /prop /main.dts 15..34
 
@@ -766,6 +792,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..35
                 property = CellList(Bits32([Number(1), Number(4294967295)])) /prop /main.dts 15..32
 
@@ -784,6 +811,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..36
                 property = CellList(Bits32([Number(0), Number(97)])) /prop /main.dts 15..33
             "#]],
@@ -799,6 +827,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
+                dts-v1  /main.dts 1..10
                 node   / /main.dts 11..42
                 /omit-if-no-ref/ node /foo /main.dts 15..39
             "#]],

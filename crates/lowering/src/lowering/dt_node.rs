@@ -71,7 +71,7 @@ pub(crate) fn lower_dt_node(
             let mut body_mir = Mir::default();
             lower_dt_node_body_replace_mir(ctx, &mut body_mir, "", dt_node);
 
-            if ctx.is_overlay {
+            if ctx.is_overlay() {
                 // Overlay; we can leave the extension unresolved
 
                 // Propagate any nested unresolved extensions.
@@ -173,6 +173,7 @@ pub(crate) fn lower_dt_node_body_replace_mir(
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
+    let is_overlay = ctx.is_overlay();
     lower_dt_node_body(
         &mut IntraFileCtx {
             db: ctx.db,
@@ -180,7 +181,7 @@ pub(crate) fn lower_dt_node_body_replace_mir(
             env: ctx.env,
             diag: ctx.diag,
             mir: body_mir,
-            is_overlay: ctx.is_overlay,
+            parent_is_overlay: is_overlay,
         },
         parent_node_path,
         dt_node,

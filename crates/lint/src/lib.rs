@@ -48,7 +48,6 @@ pub struct EarlyLint<F> {
 pub struct EarlyContext<'i, F> {
     pub lints: Vec<EarlyLint<F>>,
     pub src: &'i str,
-    pub is_main_file: bool,
     pub file: F,
 }
 impl<F: std::fmt::Debug + Clone> EarlyContext<'_, F> {
@@ -110,13 +109,11 @@ pub trait EarlyLintPass<F> {
 pub fn default_lint<F: std::fmt::Debug + Clone>(
     file_ast: &ast::SourceFile,
     src: &str,
-    is_main_file: bool,
     file_id: F,
 ) -> Vec<EarlyLint<F>> {
     let mut cx = EarlyContext {
         lints: Vec::new(),
         src,
-        is_main_file,
         file: file_id,
     };
     // TODO: go over the tree only once

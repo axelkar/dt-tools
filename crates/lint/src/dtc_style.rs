@@ -13,7 +13,6 @@ use crate::{EarlyLintPass, LintId};
 /// validation and more.
 ///
 /// This includes lints for making sure that
-/// - `/dts-v1/;` is the first item (other than whitespace and comments)
 /// - Properties are defined before nodes
 // - TODO: No duplicate items
 pub struct DtcStyle;
@@ -22,25 +21,6 @@ pub struct DtcStyle;
 
 impl<F: std::fmt::Debug + Clone> EarlyLintPass<F> for DtcStyle {
     fn check_document(&mut self, cx: &mut crate::EarlyContext<'_, F>, file: &ast::SourceFile) {
-        if cx.is_main_file
-            && let Some(first) = file.items().next()
-        {
-            let is_v1_directive = first.clone().into_directive().ok().is_some_and(|dir| {
-                dir.syntax()
-                    .child_tokens()
-                    .any(|tok| tok.green.kind == TokenKind::V1Directive)
-            });
-
-            if !is_v1_directive {
-                cx.add_lint_from_cst(
-                    LintId::DtcStyle,
-                    "First item must be `/dts-v1/;` directive",
-                    Severity::Error,
-                    first.syntax_item().text_range(),
-                );
-            }
-        }
-
         for prop in file.properties() {
             cx.add_lint_from_cst(
                 LintId::DtcStyle,

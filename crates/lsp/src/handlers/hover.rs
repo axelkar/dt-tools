@@ -140,6 +140,8 @@ fn mir_definition_section(
             ),
             MirDefinitionValue::DeletedNode => "Node deleted ".to_owned(),
             MirDefinitionValue::DeletedProperty => "Property deleted ".to_owned(),
+            MirDefinitionValue::V1Directive => "`/dts-v1/;`".to_owned(),
+            MirDefinitionValue::PluginDirective => "`/plugin/;`".to_owned(),
         };
         *already_defined = true;
 

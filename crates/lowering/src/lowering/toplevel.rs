@@ -160,7 +160,7 @@ pub(crate) fn handle_toplevel_item(
                     ctx.db,
                     include_file,
                     Some(std::mem::take(ctx.env).into_immut(ctx.db)),
-                    ctx.is_overlay,
+                    ctx.is_overlay(),
                 )
                 .expect("The file should exist, its existence is confirmed above");
 
@@ -206,16 +206,13 @@ pub(crate) fn handle_directive(
     parent_dir_path: &Utf8Path,
     files: &crate::file::Files,
 ) {
-    let tokens: Vec<_> = dir.syntax().child_tokens().collect();
-    let text_range = dir.syntax().text_range();
+    let kind = dir.kind();
 
-    if tokens
-        .iter()
-        .any(|tok| tok.green.kind == TokenKind::DtIncludeDirective)
-    {
+    if kind == Some(TokenKind::DtIncludeDirective) {
         // /include/ "path"
-        let Some(string_tok) = tokens
-            .iter()
+        let Some(string_tok) = dir
+            .syntax()
+            .child_tokens()
             .find(|tok| tok.green.kind == TokenKind::String)
         else {
             return;
@@ -240,7 +237,7 @@ pub(crate) fn handle_directive(
                 .find(|f| f.is_readable_file(ctx.db))
         else {
             ctx.diag.emit(Diagnostic::new(
-                text_range.within_file(ctx.file),
+                dir.syntax().text_range().within_file(ctx.file),
                 Cow::Owned(format!("Couldn't find file to include: {include_path}")),
                 Severity::Error,
             ));
@@ -248,13 +245,16 @@ pub(crate) fn handle_directive(
         };
 
         processed_files.push(include_file);
-        includes.push((include_file, text_range.within_file(ctx.file)));
+        includes.push((
+            include_file,
+            dir.syntax().text_range().within_file(ctx.file),
+        ));
 
         let result = lower_file(
             ctx.db,
             include_file,
             Some(std::mem::take(ctx.env).into_immut(ctx.db)),
-            ctx.is_overlay,
+            ctx.is_overlay(),
         )
         .expect("file exists");
 
@@ -269,6 +269,24 @@ pub(crate) fn handle_directive(
 
         // TODO: PERF: Salsa tracked? currently this breaks all Salsa tracking...
         ctx.env.flatten_ancestors(ctx.db);
+    } else if kind == Some(TokenKind::V1Directive) {
+        ctx.mir.definitions.push(MirDefinition {
+            path: path_prefix.to_owned(),
+            value: MirDefinitionValue::V1Directive,
+            provenance: MirProvenance {
+                file: ctx.file,
+                text_range: dir.syntax().text_range(),
+            },
+        });
+    } else if kind == Some(TokenKind::PluginDirective) {
+        ctx.mir.definitions.push(MirDefinition {
+            path: path_prefix.to_owned(),
+            value: MirDefinitionValue::PluginDirective,
+            provenance: MirProvenance {
+                file: ctx.file,
+                text_range: dir.syntax().text_range(),
+            },
+        });
     } else {
         emit_delete_directive(ctx, path_prefix, dir);
     }
@@ -311,7 +329,7 @@ pub(crate) fn emit_delete_directive(
 
             match resolve_phandle(ctx, &target, &phandle) {
                 Ok(value) => value,
-                Err(()) if ctx.is_overlay => {
+                Err(()) if ctx.is_overlay() => {
                     // TODO: handle unresolved delete-node!
                     return;
                 }
@@ -350,7 +368,7 @@ pub(crate) fn emit_delete_directive(
 
 /// Resolves a [`MirPhandleTarget`] to a path.
 ///
-/// Returns `Err(())` if it can't be resolved. If `ctx.is_overlay`, an error will not be emitted.
+/// Returns `Err(())` if it can't be resolved. If in an overlay, an error will not be emitted.
 pub(crate) fn resolve_phandle(
     ctx: &mut IntraFileCtx<'_, '_, impl DiagnosticCollector<File>>,
     target: &MirPhandleTarget,
@@ -362,7 +380,7 @@ pub(crate) fn resolve_phandle(
                 path.to_owned()
             } else {
                 // Couldn't resolve it.
-                if ctx.is_overlay {
+                if ctx.is_overlay() {
                     // TODO: handle unresolved delete-node!
                 } else {
                     ctx.diag.emit(Diagnostic::new(
@@ -376,7 +394,7 @@ pub(crate) fn resolve_phandle(
         }
         MirPhandleTarget::Path(path) => {
             if !ctx.mir.contains_node(path) {
-                if ctx.is_overlay {
+                if ctx.is_overlay() {
                     // TODO: handle unresolved delete-node!
                 } else {
                     ctx.diag.emit(Diagnostic::new(

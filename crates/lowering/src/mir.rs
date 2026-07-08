@@ -56,6 +56,8 @@ impl Mir {
                 }
                 MirDefinitionValue::DeletedNode => "delete-node".to_owned(),
                 MirDefinitionValue::DeletedProperty => "delete-property".to_owned(),
+                MirDefinitionValue::V1Directive => "dts-v1".to_owned(),
+                MirDefinitionValue::PluginDirective => "plugin".to_owned(),
             };
             let _ = writeln!(
                 out,
@@ -138,6 +140,14 @@ impl Mir {
         self.iter_live_defs_under(path)
             .any(|def| def.path == path && matches!(def.value, MirDefinitionValue::Node(_)))
     }
+
+    /// Returns true if this switches to overlay mode.
+    #[must_use]
+    pub fn sets_overlay(&self) -> bool {
+        self.definitions
+            .iter()
+            .any(|def| matches!(def.value, MirDefinitionValue::PluginDirective))
+    }
 }
 
 /// One source location that contributed to a definition.
@@ -168,6 +178,13 @@ pub enum MirDefinitionValue {
     DeletedNode,
     /// `/delete-property/` removes the property at this path.
     DeletedProperty,
+
+    /// `/dts-v1/;` begins a DTS document.
+    V1Directive,
+    /// `/plugin/;` specifies an "overlay" document.
+    ///
+    /// It must come immediately after `/dts-v1/;`.
+    PluginDirective,
 }
 
 /// Metadata for a node definition.

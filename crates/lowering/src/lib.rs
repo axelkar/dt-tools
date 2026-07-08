@@ -212,6 +212,53 @@ fn check_mir_post<'db>(
         }
     }
 
+    // Validate the existence and order of /dts-v1/; and /plugin/;
+    let mut dts_v1: Option<mir::MirProvenance> = None;
+    let mut overlay_mode: Option<mir::MirProvenance> = None;
+    for def in &mir.definitions {
+        match def.value {
+            mir::MirDefinitionValue::V1Directive => {
+                dts_v1 = Some(def.provenance.clone());
+            }
+            mir::MirDefinitionValue::PluginDirective => {
+                if dts_v1.is_none() {
+                    diagnostics.push(Diagnostic::new(
+                        def.provenance.text_range.within_file(def.provenance.file),
+                        "`/plugin/;` before `/dts-v1/;`".into(),
+                        Severity::Error,
+                    ));
+                } else if let Some(prev_def) = &overlay_mode {
+                    diagnostics.push(Diagnostic {
+                        span: MultiSpan {
+                            primary_spans: vec![
+                                def.provenance.text_range.within_file(def.provenance.file),
+                            ],
+                            span_labels: vec![SpanLabel {
+                                span: prev_def.text_range.within_file(prev_def.file),
+                                msg: "Previous definition here".into(),
+                            }],
+                        },
+                        msg: "`/plugin/;` twice".into(),
+                        severity: Severity::Error,
+                    });
+                }
+                overlay_mode = Some(def.provenance.clone());
+            }
+            mir::MirDefinitionValue::Node(_)
+            | mir::MirDefinitionValue::Property(_)
+            | mir::MirDefinitionValue::DeletedNode
+            | mir::MirDefinitionValue::DeletedProperty => {
+                if dts_v1.is_none() {
+                    diagnostics.push(Diagnostic::new(
+                        def.provenance.text_range.within_file(def.provenance.file),
+                        "Definition before /dts-v1/;".into(),
+                        Severity::Error,
+                    ));
+                }
+            }
+        }
+    }
+
     tag_diagnostics(
         &mut diagnostics,
         concat!(module_path!(), "::check_mir_post"),
@@ -276,13 +323,9 @@ pub fn compute_diagnostics(
                 text_range.within_file(*file)
             });
 
-            let is_root_file = *file == root_file;
-            for mut lint in dt_tools_lint::default_lint(
-                &parse.source_file(),
-                root_file.contents(db),
-                is_root_file,
-                root_file,
-            ) {
+            for mut lint in
+                dt_tools_lint::default_lint(&parse.source_file(), file.contents(db), *file)
+            {
                 tag_diagnostic(&mut lint.diagnostic, &format!("dt-tools(lint {})", lint.id));
                 diagnostics.push(lint.diagnostic);
             }
