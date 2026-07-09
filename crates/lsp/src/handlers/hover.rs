@@ -121,32 +121,55 @@ fn mir_definition_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
+    fn fmt_list(singular: &str, plural: &str, values: &[impl std::fmt::Display]) -> String {
+        if values.is_empty() {
+            return format!("no {plural}");
+        }
+
+        let inflected = if values.len() == 1 { singular } else { plural };
+
+        format!("{inflected} `{}`", values.iter().join(", "))
+    }
+
     fn fmt_mir_def(
         db: &dyn BaseDb,
         def: &MirDefinition,
         most_precise: &MirDefinition,
         already_defined: &mut bool,
     ) -> String {
+        let is_same_path = def.path == most_precise.path;
+        let path_part = if is_same_path {
+            String::new()
+        } else {
+            format!("`{}` ", def.path)
+        };
+        let mut defined = || {
+            if *already_defined {
+                "redefined"
+            } else {
+                *already_defined = true;
+                "defined"
+            }
+        };
+
         let mut s: String = match &def.value {
-            MirDefinitionValue::Node(mir_node_data) => format!(
-                "Node {}defined with labels `{}` ",
-                already_defined.then_some("re").unwrap_or_default(),
-                mir_node_data.labels.join(", ")
+            MirDefinitionValue::Node(data) => format!(
+                "Node {path_part}{} with {} ",
+                defined(),
+                fmt_list("label", "labels", &data.labels)
             ),
-            MirDefinitionValue::Property(mir_property_data) => format!(
-                "Property {}defined with values `{}` ",
-                already_defined.then_some("re").unwrap_or_default(),
-                mir_property_data.values.iter().join(", ")
+            MirDefinitionValue::Property(data) => format!(
+                "Property {path_part}{} with {} ",
+                defined(),
+                fmt_list("value", "values", &data.values)
             ),
-            MirDefinitionValue::DeletedNode => "Node deleted ".to_owned(),
-            MirDefinitionValue::DeletedProperty => "Property deleted ".to_owned(),
+            MirDefinitionValue::DeletedNode => format!("Node {path_part}deleted "),
+            MirDefinitionValue::DeletedProperty => format!("Property {path_part}deleted "),
             MirDefinitionValue::V1Directive => "`/dts-v1/;`".to_owned(),
             MirDefinitionValue::PluginDirective => "`/plugin/;`".to_owned(),
         };
-        *already_defined = true;
 
-        // Provenance
-        let is_here = def.provenance == most_precise.provenance;
+        let is_here = def == most_precise;
         fmt_span(db, &def.provenance.span, is_here, &mut s);
 
         s
@@ -170,21 +193,15 @@ fn mir_definition_section(
         .collect_vec();
 
     let most_precise = *matching_defs.iter().max_by_key(|def| def.path.len())?;
-    let with_same_path = mir
-        .definitions
-        .iter()
-        .filter(|def| def.path == most_precise.path)
-        .collect_vec();
 
     // TODO: get e.g. binding documentation using `compatible`
 
     let mut already_defined = false;
     Some((
         format!(
-            "MIR: {}\n\n- {}",
+            "MIR: `{}`\n\n- {}",
             most_precise.path,
-            with_same_path
-                .iter()
+            mir.history(&most_precise.path)
                 .map(|def| fmt_mir_def(db, def, most_precise, &mut already_defined))
                 .collect_vec()
                 .join("\n- ")

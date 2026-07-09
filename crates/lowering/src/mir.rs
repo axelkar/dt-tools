@@ -4,6 +4,20 @@ use dt_tools_diagnostic::Span;
 
 use crate::file::{DisplaySpanLineColumn, File};
 
+fn strip_base<'a>(this: &'a str, base: &str) -> Option<&'a str> {
+    if this == base {
+        Some("")
+    } else {
+        this.strip_prefix(base)
+            .filter(|stripped| stripped.starts_with('/'))
+    }
+}
+fn btreeset_find_base_of<'a>(set: &BTreeSet<&'a str>, needle: &'a str) -> Option<&'a str> {
+    set.range(..=needle)
+        .rfind(|possible_base| strip_base(needle, possible_base).is_some())
+        .map(|v| &**v)
+}
+
 /// Mid-level intermediate representation of devicetrees.
 ///
 /// Uses a flat list of definitions keyed by full path. Tree assembly and merging happens at the end.
@@ -86,27 +100,13 @@ impl Mir {
     ///
     /// Pass `""` to iterate all live definitions in the tree.
     pub fn iter_live_defs_under(&self, path_base: &str) -> impl Iterator<Item = &MirDefinition> {
-        fn strip_base<'a>(this: &'a str, base: &str) -> Option<&'a str> {
-            if this == base {
-                Some("")
-            } else {
-                this.strip_prefix(base)
-                    .filter(|stripped| stripped.starts_with('/'))
-            }
-        }
-        fn btreeset_find_base_of<'a>(set: &BTreeSet<&'a str>, needle: &'a str) -> Option<&'a str> {
-            set.range(..=needle)
-                .rfind(|possible_base| strip_base(needle, possible_base).is_some())
-                .map(|v| &**v)
-        }
-
         let mut deleted = BTreeSet::<&str>::new();
 
         self.definitions
             .iter()
             .rev()
             .take_while(|def| {
-                // break immediately if a parent of path_base or path_base itself is deleted
+                // break immediately if an ancestor of path_base or path_base itself is deleted
                 !(matches!(def.value, MirDefinitionValue::DeletedNode)
                     && strip_base(path_base, &def.path).is_some())
             })
@@ -132,6 +132,39 @@ impl Mir {
                     _ => None,
                 }
             })
+    }
+
+    /// Returns the history of a path.
+    ///
+    /// May include [`MirDefinition`]s at this path and ancestor paths.
+    pub fn history(&self, path: &str) -> impl Iterator<Item = &MirDefinition> {
+        let mut currently_defined = false;
+
+        self.definitions.iter().filter_map(move |def| {
+            // filter to this or ancestors only
+            let stripped = strip_base(path, &def.path)?;
+            let is_self = stripped.is_empty();
+
+            if is_self {
+                match def.value {
+                    MirDefinitionValue::Node(_) | MirDefinitionValue::Property(_) => {
+                        currently_defined = true;
+                    }
+                    MirDefinitionValue::DeletedNode | MirDefinitionValue::DeletedProperty => {
+                        currently_defined = false;
+                    }
+                    _ => {}
+                }
+
+                Some(def)
+            } else if currently_defined && let MirDefinitionValue::DeletedNode = def.value {
+                // Deleted as a child
+                currently_defined = false;
+                Some(def)
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns true if `path` currently exists as a live node.
