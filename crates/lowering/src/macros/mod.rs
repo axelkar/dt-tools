@@ -1,11 +1,13 @@
 use std::borrow::Cow;
 
-use dt_tools_analyzer::macros::{SubstitutedBody, substitute_macro};
+use dt_tools_analyzer::macros::{MacroDefinition, SubstitutedBody};
 use dt_tools_diagnostic::{Severity, Span};
 use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstToken},
+    lexer::{self, TokenKind},
 };
+use rustc_hash::FxHashSet;
 
 use crate::{db::BaseDb, diag::Diag, file::File, macros::env::TrackedMapEnvMut};
 
@@ -47,6 +49,135 @@ impl MacroCtx<'_> {
     }
 }
 
+/// Split a `MACRO(a, b, c)` token stream into argument strings.
+///
+/// `lparen_idx` is the index of the `(` token.
+fn extract_args_from_tokens(
+    tokens: &[lexer::Token<'_>],
+    lparen_idx: usize,
+) -> (usize, Vec<String>) {
+    let mut level = 0u32;
+    let mut start = lparen_idx + 1;
+    let mut args = Vec::new();
+
+    for (i, tok) in tokens.iter().enumerate().skip(lparen_idx + 1) {
+        match tok.kind {
+            Ok(TokenKind::LParen) => level += 1,
+            Ok(TokenKind::RParen) if level == 0 => {
+                let arg = tokens[start..i].iter().map(|t| t.text).collect::<String>();
+                if !arg.trim().is_empty() || !args.is_empty() {
+                    args.push(arg.trim().to_owned());
+                }
+                return (i, args);
+            }
+            Ok(TokenKind::RParen) => level -= 1,
+            Ok(TokenKind::Comma) if level == 0 => {
+                let arg = tokens[start..i].iter().map(|t| t.text).collect::<String>();
+                args.push(arg.trim().to_owned());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+
+    // No matching RParen found
+    (tokens.len().saturating_sub(1), args)
+}
+
+/// Single-pass macro expansion with inline replacement.
+fn expand_macros_in_text<'db>(
+    db: &'db dyn BaseDb,
+    env: &TrackedMapEnvMut<'db>,
+    text: &str,
+    disabled: &mut FxHashSet<String>,
+) -> String {
+    let tokens = lexer::lex(text);
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+
+    while let Some(tok) = tokens.get(i) {
+        if tok.kind != Ok(TokenKind::Ident)
+            || disabled.contains(tok.text)
+            || env.get_macro_def(db, tok.text).is_none()
+        {
+            out.push_str(tok.text);
+            i += 1;
+            continue;
+        }
+
+        let macro_name = tok.text.to_owned();
+        let def = env.get_macro_def(db, &macro_name).unwrap();
+
+        // Gather arguments (empty vec for object-like macros).
+        let (args, advance_to) = if def.param_count() == 0 {
+            (Vec::new(), i + 1)
+        } else {
+            let mut j = i + 1;
+            while let Some(tok) = tokens.get(j)
+                && tok.kind.is_ok_and(TokenKind::is_trivia)
+            {
+                j += 1;
+            }
+            if let Some(tok) = tokens.get(j)
+                && tok.kind == Ok(TokenKind::LParen)
+            {
+                let (rparen_idx, args) = extract_args_from_tokens(&tokens, j);
+                (args, rparen_idx + 1)
+            } else {
+                // Names a function-like macro but isn't followed by `(`.
+                out.push_str(tok.text);
+                i += 1;
+                continue;
+            }
+        };
+
+        // Expand = prescan + substitute + rescan.
+        disabled.insert(macro_name.clone());
+        let prescanned = prescan_arguments(db, env, &args, def, disabled);
+        let sub = def
+            .substitute(&prescanned)
+            .expect("argument count validated during parse");
+        let expanded = expand_macros_in_text(db, env, &sub.substituted_text, disabled);
+        out.push_str(&expanded);
+        disabled.remove(&macro_name);
+
+        // TODO: source mapping for prescan. we need (File, TextRange) provenance (TextRangeMap isn't enough for multi-file)
+
+        i = advance_to;
+    }
+
+    out
+}
+
+/// Prescan macro arguments before substitution.
+///
+/// See <https://gcc.gnu.org/onlinedocs/cpp/Argument-Prescan.html> for details.
+fn prescan_arguments<'db>(
+    db: &'db dyn BaseDb,
+    env: &TrackedMapEnvMut<'db>,
+    arguments: &[String],
+    def: &MacroDefinition,
+    disabled: &mut FxHashSet<String>,
+) -> Vec<String> {
+    let non_prescan_vararg_idx = def
+        .variadic_param_idx()
+        .filter(|i| def.dont_prescan_indices().contains(i));
+
+    arguments
+        .iter()
+        .enumerate()
+        .map(|(i, arg)| {
+            if def.dont_prescan_indices().contains(&i)
+                || non_prescan_vararg_idx.is_some_and(|k| i >= k)
+            {
+                arg.clone()
+            } else {
+                expand_macros_in_text(db, env, arg, disabled)
+            }
+        })
+        .collect()
+}
+
 /// Resolves and substitutes a macro.
 ///
 /// Returns `Ok(None)` if the macro doesn't exist and the macro reference is implicit.
@@ -72,13 +203,31 @@ pub(crate) fn substitute_macro_tok<'db>(
         };
     };
 
-    match substitute_macro(
-        match macro_ctx {
-            MacroCtx::Explicit(inv) => Some(inv),
-            _ => None,
-        },
-        def,
-    ) {
+    // Extract raw argument strings from the AST.
+    let raw_arguments: Vec<String> = match macro_ctx {
+        MacroCtx::Explicit(inv) => inv
+            .arguments()
+            .map(|arg| {
+                arg.green
+                    .child_tokens()
+                    .map(|tok| tok.text.as_str())
+                    .collect::<String>()
+            })
+            .collect(),
+        MacroCtx::Implicit(_) => Vec::new(),
+    };
+
+    let mut disabled: FxHashSet<String> = FxHashSet::default();
+    disabled.insert(name.to_owned());
+
+    let arguments = if def.param_count() > 0 && !raw_arguments.is_empty() {
+        // Prescan arguments for macro invocation
+        prescan_arguments(db, env, &raw_arguments, def, &mut disabled)
+    } else {
+        raw_arguments
+    };
+
+    match def.substitute(&arguments) {
         Ok(substituted_body) => Ok(Some((substituted_body, macro_def))),
         Err(err) => {
             diag.emit(macro_ctx.text_range(), err.to_string(), Severity::Error);

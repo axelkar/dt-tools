@@ -6,7 +6,7 @@ use dt_tools_parser::{
     parser::Entrypoint,
 };
 
-use crate::macros::{MacroDefinition, substitute_macro};
+use crate::macros::{MacroDefinition, substitute_macro_ast};
 
 #[derive(thiserror::Error, Debug, displaydoc::Display)]
 pub enum ValueFromAstError {
@@ -162,7 +162,7 @@ impl Cell {
                     return Err(ValueFromAstError::UnrecognizedMacro(macro_name.to_owned()));
                 };
 
-                let s = substitute_macro(Some(macro_ast), macro_def)
+                let s = substitute_macro_ast(Some(macro_ast), macro_def)
                     .expect("FIXME: no error")
                     .substituted_text;
 
@@ -228,7 +228,7 @@ fn reference_eval(
         todo!()
     }
 
-    let s = substitute_macro(macro_ast.as_ref(), macro_def)
+    let s = substitute_macro_ast(macro_ast.as_ref(), macro_def)
         .expect("FIXME: no error")
         .substituted_text;
 

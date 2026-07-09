@@ -398,7 +398,7 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
                     kind: MacroTokenKind::WordNoWhitespace(ch.to_string()),
                 })?;
             }
-            '-' => {
+            '-' | ',' => {
                 // Can't be pasted next to words
                 p.complete_token()?;
                 p.push_tok(MacroToken {
@@ -518,6 +518,24 @@ impl MacroDefinition {
         })
     }
 
+    /// Returns parameter indices that must not be prescanned (`#` or `##`).
+    #[must_use]
+    pub fn dont_prescan_indices(&self) -> &[usize] {
+        &self.dont_prescan_indices
+    }
+
+    /// Returns the number of parameters this macro expects.
+    #[must_use]
+    pub fn param_count(&self) -> usize {
+        self.params.len()
+    }
+
+    /// Returns the index of the variadic parameter.
+    #[must_use]
+    pub fn variadic_param_idx(&self) -> Option<usize> {
+        self.params.iter().position(|p| p.is_vararg)
+    }
+
     /// Value of parameter `idx`. For the trailing variadic parameter, joins the
     /// remaining arguments with `, ` like the C preprocessor's `__VA_ARGS__`.
     ///
@@ -533,8 +551,22 @@ impl MacroDefinition {
         }
     }
 
+    /// Substitutes a macro's arguments.
+    ///
+    /// Note: the arguments aren't prescanned.
+    ///
+    /// # Errors
+    ///
+    /// See [`MacroSubstitutionError`] for details.
+    ///
+    /// # Panics
+    ///
+    /// May panic if there is an internal compiler error.
     #[expect(clippy::too_many_lines, reason = "Hard to make this shorter")]
-    fn substitute(&self, arguments: &[String]) -> Result<SubstitutedBody, MacroSubstitutionError> {
+    pub fn substitute(
+        &self,
+        arguments: &[String],
+    ) -> Result<SubstitutedBody, MacroSubstitutionError> {
         let mut s = String::new();
         let mut iter = self.body_tokens.iter().peekable();
         let mut push_ws = false;
@@ -652,7 +684,7 @@ impl MacroDefinition {
                     };
 
                     // The parser assures that there is a token before a concat
-                    let prev = trmaps.last_mut().unwrap();
+                    let prev = trmaps.last_mut().expect("should be a token before concat");
 
                     prev.to = TextRangeMapTo::Concat {
                         operator: token.text_range,
@@ -800,30 +832,23 @@ impl TextRangeMapTo {
     }
 }
 
-// TODO:
-// https://en.cppreference.com/w/cpp/preprocessor/replace
-// * Scanning keeps track of macros they replaced. If scan finds text matching such macro, it marks it "to be ignored" (all scans will ignore it). This prevents recursion.
-// * If scanning found function-like macro, arguments are scanned before put inside replacement-list. Except # and ## operators take argument without scan.
-// * After macro was replaced, result text is scanned.
-//
-// https://gcc.gnu.org/onlinedocs/gcc-3.4.3/cpp/Argument-Prescan.html
-
-/// Substituted macro body from [`substitute_macro`].
+/// Substituted macro body from [`MacroDefinition::substitute`].
 pub struct SubstitutedBody {
     pub source_mappings: Vec<TextRangeMap>,
     pub substituted_text: String,
 }
 
-/// Substitutes a macro's arguments.
+/// Substitutes a macro's arguments from a macro invocation AST.
+///
+/// Note: the arguments aren't prescanned.
 ///
 /// If the `ast` parameter is set to `None`, it is assumed that it's an object-like macro and not
 /// a function-like macro.
 ///
 /// # Errors
 ///
-/// Returns an error if the number of arguments given doesn't match the number of parameters in the
-/// macro definition.
-pub fn substitute_macro(
+/// See [`MacroSubstitutionError`].
+pub fn substitute_macro_ast(
     ast: Option<&ast::MacroInvocation>,
     def: &MacroDefinition,
 ) -> Result<SubstitutedBody, MacroSubstitutionError> {
@@ -839,8 +864,6 @@ pub fn substitute_macro(
                 .collect::<Vec<String>>()
         })
         .unwrap_or_default();
-
-    // TODO: argument prescan so some macros with indirection tricks work
 
     def.substitute(&arguments)
 }
@@ -1087,15 +1110,16 @@ mod tests {
         check_substitute(
             "#define MACRO(...) function(argument, __VA_ARGS__)",
             &["foo".to_owned(), "bar".to_owned()],
-            expect![r#"function(argument, foo, bar)"#],
+            expect!["function(argument , foo, bar)"],
             expect![[r#"
                 0.. macro+19
                 8.. macro+27
                 9.. macro+28
-                19.. arg_0
-                22.. vararg_separator(macro+38..49)
-                24.. arg_1
-                27.. macro+49
+                18.. macro+36
+                20.. arg_0
+                23.. vararg_separator(macro+38..49)
+                25.. arg_1
+                28.. macro+49
             "#]],
         );
     }
@@ -1105,12 +1129,13 @@ mod tests {
         check_substitute(
             "#define MACRO(...) function(argument, __VA_ARGS__)",
             &[],
-            expect![r#"function(argument, )"#],
+            expect!["function(argument , )"],
             expect![[r#"
                 0.. macro+19
                 8.. macro+27
                 9.. macro+28
-                19.. macro+49
+                18.. macro+36
+                20.. macro+49
             "#]],
         );
     }

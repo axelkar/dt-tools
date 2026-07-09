@@ -40,8 +40,11 @@ pub(crate) fn lower_dt_property(
     }
 
     let mut values = Vec::new();
+    let mut expansion_stack = Vec::new();
     for value_ast in prop.values() {
-        if let Ok(value) = lower_prop_value(ctx.db, ctx.env, ctx.diag, &value_ast) {
+        if let Ok(value) =
+            lower_prop_value(ctx.db, ctx.env, ctx.diag, &value_ast, &mut expansion_stack)
+        {
             values.push(value);
         }
     }
@@ -68,6 +71,7 @@ pub(crate) fn lower_prop_value<'db>(
     env: &mut TrackedMapEnvMut<'db>,
     diag: &mut Diag<'_, '_>,
     value: &ast::PropValue,
+    expansion_stack: &mut Vec<String>,
 ) -> Result<MirValue, ()> {
     match value {
         ast::PropValue::String(tok) => match interpret_escaped_string(tok.text()) {
@@ -123,6 +127,17 @@ pub(crate) fn lower_prop_value<'db>(
             Ok(MirValue::Phandle(target))
         }
         ast::PropValue::Macro(macro_inv) => {
+            let name = macro_inv
+                .green_ident()
+                .map_or(String::new(), |t| t.text.to_string());
+            if expansion_stack.contains(&name) {
+                diag.emit(
+                    macro_inv.syntax().text_range(),
+                    format!("macro `{name}` expanded recursively"),
+                    Severity::Error,
+                );
+                return Err(());
+            }
             let (ast, expansion) = resolve_macro_to_ast(
                 db,
                 env,
@@ -131,16 +146,20 @@ pub(crate) fn lower_prop_value<'db>(
                 Entrypoint::PropValues,
             )?
             .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
+            expansion_stack.push(name);
             let child_map = SourceMap::Macro {
                 parent: diag.map,
                 expansion: &expansion,
             };
-            Ok(lower_prop_value(
+            let result = lower_prop_value(
                 db,
                 env,
                 &mut Diag::new(&mut *diag.sink, &child_map),
                 &ast,
-            )?)
+                expansion_stack,
+            );
+            expansion_stack.pop();
+            Ok(result?)
         }
     }
 }

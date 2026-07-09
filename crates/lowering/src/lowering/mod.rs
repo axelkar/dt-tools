@@ -540,4 +540,103 @@ pub(crate) mod tests {
             "#]],
         );
     }
+
+    /// When a `#` parameter is used directly, the argument isn't prescanned.
+    /// With an indirection macro, the argument is expanded first, then stringified.
+    #[test]
+    fn mir_macro_prescan_stringify() {
+        check_mir(
+            r#"
+/dts-v1/;
+
+#define STRINGIFY(x...) #x
+#define XSTRINGIFY(x...) STRINGIFY(x)
+
+#define FOO bar
+
+/ {
+    no_prescan = STRINGIFY(FOO);
+    prescanned = XSTRINGIFY(FOO);
+};
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L9:1-L12:3
+                property = String("FOO") /no_prescan /main.dts L10:5-L10:33
+                property = String("bar") /prescanned /main.dts L11:5-L11:34
+            "#]],
+        );
+    }
+
+    /// When a `##` parameter is used directly, the arguments aren't prescanned.
+    /// With an indirection macro, the arguments are expanded first, then concatenated.
+    #[test]
+    fn mir_macro_prescan_concat() {
+        check_mir(
+            r#"
+/dts-v1/;
+
+#define CAT(x, y...) x ## y
+#define XCAT(x, y...) CAT(x, y)
+
+#define PREFIX foo
+
+/ {
+    CAT(PREFIX, _suffix) {};
+    XCAT(PREFIX, _suffix) {};
+};
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L9:1-L12:3
+                node   /PREFIX_suffix /main.dts L10:5-L10:29
+                node   /foo_suffix /main.dts L11:5-L11:30
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_macro_recursive() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define SELF SELF
+
+/ { prop = SELF; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L5:1-L5:20
+                property =  /prop /main.dts L5:5-L5:17
+
+                --- errors ---
+                Error L3:14-L3:18: macro `SELF` expanded recursively
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_macro_recursive_with_prescan() {
+        check_mir(
+            r#"
+/dts-v1/;
+#define SELF SELF
+#define ID(x) x
+
+/ { prop = ID(SELF); };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L6:1-L6:24
+                property =  /prop /main.dts L6:5-L6:21
+
+                --- errors ---
+                Error L3:14-L3:18: macro `SELF` expanded recursively
+            "#]],
+        );
+    }
 }
