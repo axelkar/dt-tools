@@ -123,8 +123,7 @@ impl Parser<'_, '_> {
     #[inline]
     fn bump(&mut self, ch: char) {
         if self.current_token.is_empty() {
-            // FIXME: assumes thet the character is a single byte
-            self.current_token_start_offset = self.offset - 1;
+            self.current_token_start_offset = self.offset - ch.len_utf8();
         }
         self.current_token.push(ch);
     }
@@ -202,9 +201,10 @@ fn parse_params(
     if iter.peek() == Some(&'(') {
         iter.next();
         *offset += 1;
+
         let mut current_param = String::new();
         for ch in iter.by_ref() {
-            *offset += 1;
+            *offset += ch.len_utf8();
 
             let mut new_param = || {
                 if !current_param.trim().is_empty() {
@@ -256,12 +256,17 @@ fn parse_string(p: &mut Parser, ch: char) -> Result<(), MacroDefinitionParseErro
     while let Some(ch) = p.next() {
         p.bump(ch);
 
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
         if ch == '\\' {
             escaped = true;
             continue;
         }
 
-        if ch == '"' && !escaped {
+        if ch == '"' {
             break;
         }
     }
@@ -284,7 +289,7 @@ fn parse_double_special_characters(
         p.next();
         p.push_tok(MacroToken {
             text_range: TextRange {
-                start: p.offset - 2,
+                start: p.offset - ch.len_utf8() * 2,
                 end: p.offset,
             },
             kind: MacroTokenKind::Word({
@@ -294,11 +299,10 @@ fn parse_double_special_characters(
                 s
             }),
         })?;
-        p.next();
     } else {
         p.push_tok(MacroToken {
             text_range: TextRange {
-                start: p.offset - 1,
+                start: p.offset - ch.len_utf8(),
                 end: p.offset,
             },
             kind: MacroTokenKind::Word(ch.to_string()),
@@ -328,6 +332,7 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
             '"' => parse_string(p, ch)?,
             '#' => {
                 p.complete_token()?;
+
                 if let Some('#') = p.peek() {
                     p.next();
                     let concat_text_range = TextRange {
@@ -363,17 +368,18 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
                         text_range: concat_text_range,
                     })?;
                     p.expect_concat_param = Some(concat_text_range);
-                    continue;
-                }
-                p.push_tok(MacroToken {
-                    kind: MacroTokenKind::StringifyOperator,
-                    text_range: TextRange {
-                        start: p.offset - 1,
-                        end: p.offset,
-                    },
-                })?;
+                } else {
+                    // stringify operator
+                    p.push_tok(MacroToken {
+                        kind: MacroTokenKind::StringifyOperator,
+                        text_range: TextRange {
+                            start: p.offset - 1,
+                            end: p.offset,
+                        },
+                    })?;
 
-                p.expect_stringify_param = true;
+                    p.expect_stringify_param = true;
+                }
             }
             _ if ch.is_whitespace() => {
                 p.complete_token()?;
@@ -457,7 +463,7 @@ impl MacroDefinition {
             }
             macro_name.push(ch);
             iter.next(); // Consume the character
-            offset += 1;
+            offset += ch.len_utf8();
         }
 
         if macro_name.is_empty() {
@@ -1177,6 +1183,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_string_escaped_quote() {
+        check_parse(
+            r#"#define FOO "a\"b" c"#,
+            expect![[r#"
+                FOO()
+                WordNoWhitespace("\"a\\\"b\"") 12..18
+                Word("c") 19..20
+                dont_prescan_indices: []
+            "#]],
+        );
+    }
+
+    #[test]
     fn parse_symbols_not_together() {
         check_parse(
             r#"#define FOO << >> && ||"#,
@@ -1193,15 +1212,14 @@ mod tests {
 
     #[test]
     fn parse_symbols_together() {
-        // FIXME: parsed improperly
         check_parse(
             r#"#define FOO <<>>&&||"#,
             expect![[r#"
                 FOO()
                 Word("<<") 12..14
-                Word(">") 15..16
+                Word(">>") 14..16
                 Word("&&") 16..18
-                Word("|") 19..20
+                Word("||") 18..20
                 dont_prescan_indices: []
             "#]],
         );
@@ -1209,14 +1227,12 @@ mod tests {
 
     #[test]
     fn parse_utf8() {
-        // FIXME: parsed improperly
         check_parse(
-            r#"#define FOO ä a a"#,
+            r#"#define FOO ä a"#,
             expect![[r#"
                 FOO()
-                Word("ä") 13..15
+                Word("ä") 12..14
                 Word("a") 15..16
-                Word("a") 17..18
                 dont_prescan_indices: []
             "#]],
         );
