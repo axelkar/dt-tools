@@ -15,7 +15,7 @@ impl Marker {
         p.events.push(Event::Placeholder);
 
         #[cfg(feature = "grammar-tracing")]
-        debug!(pos, "start node");
+        tracing::debug!(pos, "start node");
 
         Self {
             pos,

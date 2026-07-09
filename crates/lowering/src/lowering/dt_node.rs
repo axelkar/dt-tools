@@ -27,17 +27,18 @@ use crate::{
 
 /// Lowers an [`ast::DtNode`] and its subtree to flat [`MirDefinition`]s.
 pub(crate) fn lower_dt_node(
-    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
+    ctx: &mut IntraFileCtx<'_, '_>,
+    diag: &mut Diag<'_, '_>,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
     let provenance = MirProvenance {
-        span: ctx.diag.resolve(dt_node.syntax().text_range()),
+        span: diag.resolve(dt_node.syntax().text_range()),
     };
     let omit_if_no_ref = dt_node.omit_if_no_ref();
 
-    let lower_resolved = |ctx: &mut _, provenance, node_path: &String| {
-        let labels = collect_labels(ctx, dt_node, node_path);
+    let lower_resolved = |ctx: &mut _, diag: &mut _, provenance, node_path: &String| {
+        let labels = collect_labels(ctx, diag, dt_node, node_path);
 
         // Emit the node definition.
         ctx.mir.definitions.push(MirDefinition {
@@ -50,20 +51,20 @@ pub(crate) fn lower_dt_node(
         });
 
         // Process the node body: subnodes and properties.
-        lower_dt_node_body(ctx, node_path, dt_node);
+        lower_dt_node_body(ctx, diag, node_path, dt_node);
     };
 
     // Handle extensions: &label { } or &{/path} { }
     if let Some(phandle) = dt_node.dt_phandle() {
-        let Ok(target) = lower_phandle(ctx.db, ctx.env, ctx.diag, &phandle) else {
+        let Ok(target) = lower_phandle(ctx.db, ctx.env, diag, &phandle) else {
             return;
         };
 
-        if let Ok(ref target_path) = resolve_phandle(ctx, &target, &phandle) {
-            lower_resolved(ctx, provenance, target_path);
+        if let Ok(ref target_path) = resolve_phandle(ctx, diag, &target, &phandle) {
+            lower_resolved(ctx, diag, provenance, target_path);
         } else {
             let mut body_mir = Mir::default();
-            lower_dt_node_body_replace_mir(ctx, &mut body_mir, "/", dt_node);
+            lower_dt_node_body_replace_mir(ctx, diag, &mut body_mir, "/", dt_node);
 
             if ctx.is_overlay() {
                 // Overlay; we can leave the extension unresolved
@@ -83,7 +84,7 @@ pub(crate) fn lower_dt_node(
             }
         }
     } else {
-        let name = if let Ok(name) = get_name_and_unit_addr(ctx.db, ctx.env, ctx.diag, dt_node) {
+        let name = if let Ok(name) = get_name_and_unit_addr(ctx.db, ctx.env, diag, dt_node) {
             Some(name)
         } else if dt_node
             .syntax()
@@ -99,7 +100,7 @@ pub(crate) fn lower_dt_node(
             let root_node = name == "/";
 
             if parent_node_path.is_empty() && !root_node {
-                ctx.diag.emit(
+                diag.emit(
                     dt_node.syntax().text_range(),
                     "Subnode must be defined inside a node",
                     Severity::Error,
@@ -108,7 +109,7 @@ pub(crate) fn lower_dt_node(
             }
 
             if root_node && !parent_node_path.is_empty() {
-                ctx.diag.emit(
+                diag.emit(
                     dt_node.syntax().text_range(),
                     "Root node (`/`) must be defined outside other nodes",
                     Severity::Error,
@@ -119,30 +120,31 @@ pub(crate) fn lower_dt_node(
             // Build the node's full path.
             let node_path = build_path(parent_node_path, &name);
 
-            lower_resolved(ctx, provenance, &node_path);
+            lower_resolved(ctx, diag, provenance, &node_path);
         } else {
             // Name is missing, but process so diagnostics are emitted
             let mut body_mir = Mir::default();
-            lower_dt_node_body_replace_mir(ctx, &mut body_mir, "/", dt_node);
+            lower_dt_node_body_replace_mir(ctx, diag, &mut body_mir, "/", dt_node);
         }
     }
 }
 
 /// Collects labels defined on an [`ast::DtNode`].
 pub(crate) fn collect_labels(
-    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
+    ctx: &mut IntraFileCtx<'_, '_>,
+    diag: &mut Diag<'_, '_>,
     dt_node: &ast::DtNode,
     node_path: &str,
 ) -> Vec<String> {
     let mut labels: Vec<String> = Vec::new();
     for label_ast in dt_node.labels() {
-        if let Ok(label_name) = resolve_name_or_macro(ctx.db, ctx.env, ctx.diag, &label_ast) {
+        if let Ok(label_name) = resolve_name_or_macro(ctx.db, ctx.env, diag, &label_ast) {
             // Check for duplicate labels (dtc: no duplicates globally).
             if let Some((old_path, span)) = ctx.env.get_label(ctx.db, &label_name)
                 && old_path != node_path
             {
-                let primary_span = ctx.diag.resolve(label_ast.syntax().text_range());
-                ctx.diag.push(Diagnostic {
+                let primary_span = diag.resolve(label_ast.syntax().text_range());
+                diag.push(Diagnostic {
                     span: MultiSpan {
                         primary_spans: vec![primary_span],
                         span_labels: vec![SpanLabel {
@@ -156,7 +158,7 @@ pub(crate) fn collect_labels(
                     severity: Severity::Warn,
                 });
             } else {
-                let label_span = ctx.diag.resolve(label_ast.syntax().text_range());
+                let label_span = diag.resolve(label_ast.syntax().text_range());
                 ctx.env
                     .own_label_map
                     .insert(label_name.clone(), Some((node_path.to_owned(), label_span)));
@@ -169,7 +171,8 @@ pub(crate) fn collect_labels(
 
 /// [`lower_dt_node_body`] but with [`IntraFileCtx::mir`] replaced.
 pub(crate) fn lower_dt_node_body_replace_mir(
-    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
+    ctx: &mut IntraFileCtx<'_, '_>,
+    diag: &mut Diag<'_, '_>,
     body_mir: &mut Mir,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
@@ -180,7 +183,6 @@ pub(crate) fn lower_dt_node_body_replace_mir(
             db: ctx.db,
             file: ctx.file,
             env: ctx.env,
-            diag: ctx.diag,
             mir: body_mir,
             parent_is_overlay: is_overlay,
             parent_dir_path: ctx.parent_dir_path,
@@ -188,6 +190,7 @@ pub(crate) fn lower_dt_node_body_replace_mir(
             processed_files: ctx.processed_files,
             includes: ctx.includes,
         },
+        diag,
         parent_node_path,
         dt_node,
     );
@@ -195,14 +198,15 @@ pub(crate) fn lower_dt_node_body_replace_mir(
 
 /// Lowers the body of an [`ast::DtNode`].
 pub(crate) fn lower_dt_node_body(
-    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
+    ctx: &mut IntraFileCtx<'_, '_>,
+    diag: &mut Diag<'_, '_>,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
     // TODO: preprocessor conditionals in nodes
 
     for item in dt_node.items() {
-        lower_item(ctx, parent_node_path, item);
+        lower_item(ctx, diag, parent_node_path, item);
     }
 }
 

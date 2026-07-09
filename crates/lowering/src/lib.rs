@@ -22,7 +22,7 @@ pub mod mir;
 pub struct Parse<'db> {
     #[returns(ref)]
     #[no_eq]
-    pub parse: dt_tools_parser::parser::Parse<'static>,
+    pub parse: dt_tools_parser::parser::Parse<'db>,
 }
 
 // `no_eq`: Always changes when `file.contents` changes
@@ -47,7 +47,7 @@ pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
     }
 
     let contents: &str = file.contents(db);
-    let parse = dt_tools_parser::parser::parse(contents).into_static();
+    let parse = dt_tools_parser::parser::Entrypoint::SourceFile.parse(contents);
     Some(Parse::new(db, parse))
 }
 

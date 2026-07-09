@@ -168,7 +168,7 @@ impl<'p, 't, 'input, MsgState> ErrorBuilder<'p, 't, 'input, MsgState> {
         self
     }
 
-    /// Gets the error from `Parser::expected`.
+    /// Gets the error using [`Parser::expected`] and [`Parser::peek`].
     #[inline]
     #[must_use]
     pub fn msg_expected(self) -> ErrorBuilder<'p, 't, 'input, MessageFilled> {

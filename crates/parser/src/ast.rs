@@ -312,7 +312,9 @@ impl SourceFile {
 }
 
 define_ast_node! {
-    /// A [DTS directive][1].
+    /// A [DTS directive][1] wrapped by [`DtsDirective`].
+    ///
+    /// e.g. `/include/ file.dts;`
     ///
     /// Kind: [`NodeKind::DtsDirective`]
     ///
@@ -415,6 +417,9 @@ pub enum PropValue {
     Phandle(DtPhandle),
     Bytestring(Arc<RedToken>),
     Macro(MacroInvocation),
+    DtsDirective(DtsDirective),
+    PreprocessorConditional(PreprocessorConditional),
+    PreprocessorDirective(PreprocessorDirective),
 }
 impl AstNodeOrToken for PropValue {
     fn cast_node(syntax: Arc<RedNode>) -> Option<Self> {
@@ -422,6 +427,12 @@ impl AstNodeOrToken for PropValue {
             NodeKind::DtCellList => Some(Self::CellList(DtCellList { syntax })),
             NodeKind::DtPhandle => Some(Self::Phandle(DtPhandle { syntax })),
             NodeKind::MacroInvocation => Some(Self::Macro(MacroInvocation { syntax })),
+            NodeKind::DtsDirective => Some(Self::DtsDirective(DtsDirective { syntax })),
+            NodeKind::PreprocessorConditional => {
+                Some(Self::PreprocessorConditional(PreprocessorConditional {
+                    syntax,
+                }))
+            }
             _ => None,
         }
     }
@@ -429,7 +440,7 @@ impl AstNodeOrToken for PropValue {
         match syntax.green.kind {
             TokenKind::String => Some(Self::String(syntax)),
             TokenKind::DtBytestring => Some(Self::Bytestring(syntax)),
-            _ => None,
+            _ => PreprocessorDirective::cast(syntax).map(Self::PreprocessorDirective),
         }
     }
     fn syntax_item(&self) -> RedItemRef<'_> {
@@ -438,6 +449,9 @@ impl AstNodeOrToken for PropValue {
             Self::String(it) | Self::Bytestring(it) => TreeItem::Token(it),
             Self::Phandle(it) => TreeItem::Node(&it.syntax),
             Self::Macro(it) => TreeItem::Node(&it.syntax),
+            Self::DtsDirective(it) => TreeItem::Node(&it.syntax),
+            Self::PreprocessorConditional(it) => TreeItem::Node(&it.syntax),
+            Self::PreprocessorDirective(it) => TreeItem::Token(&it.syntax),
         }
     }
 }
@@ -450,6 +464,9 @@ pub enum Cell {
     Phandle(DtPhandle),
     Macro(MacroInvocation),
     DtExpr(DtExpr),
+    DtsDirective(DtsDirective),
+    PreprocessorConditional(PreprocessorConditional),
+    PreprocessorDirective(PreprocessorDirective),
 }
 impl AstNodeOrToken for Cell {
     fn cast_node(syntax: Arc<RedNode>) -> Option<Self> {
@@ -457,6 +474,11 @@ impl AstNodeOrToken for Cell {
             NodeKind::DtPhandle => Some(Self::Phandle(DtPhandle { syntax })),
             NodeKind::MacroInvocation => Some(Self::Macro(MacroInvocation { syntax })),
             NodeKind::DtExpr => Some(Self::DtExpr(DtExpr { syntax })),
+            NodeKind::PreprocessorConditional => {
+                Some(Self::PreprocessorConditional(PreprocessorConditional {
+                    syntax,
+                }))
+            }
             _ => None,
         }
     }
@@ -464,7 +486,7 @@ impl AstNodeOrToken for Cell {
         match syntax.green.kind {
             TokenKind::Number => Some(Self::Number(syntax)),
             TokenKind::Char => Some(Self::Char(syntax)),
-            _ => None,
+            _ => PreprocessorDirective::cast(syntax).map(Self::PreprocessorDirective),
         }
     }
     fn syntax_item(&self) -> RedItemRef<'_> {
@@ -473,6 +495,9 @@ impl AstNodeOrToken for Cell {
             Self::Phandle(it) => TreeItem::Node(&it.syntax),
             Self::Macro(it) => TreeItem::Node(&it.syntax),
             Self::DtExpr(it) => TreeItem::Node(&it.syntax),
+            Self::DtsDirective(it) => TreeItem::Node(&it.syntax),
+            Self::PreprocessorConditional(it) => TreeItem::Node(&it.syntax),
+            Self::PreprocessorDirective(it) => TreeItem::Token(&it.syntax),
         }
     }
 }
@@ -889,6 +914,16 @@ impl PreprocessorBranch {
     pub fn items(&self) -> impl Iterator<Item = Item> + '_ {
         self.syntax.children().filter_map(Item::cast_either)
     }
+
+    /// Returns an iterator over direct [`PropValue`] children.
+    pub fn prop_values(&self) -> impl Iterator<Item = PropValue> + '_ {
+        self.syntax.children().filter_map(PropValue::cast_either)
+    }
+
+    /// Returns an iterator over direct [`Cell`] children.
+    pub fn cells(&self) -> impl Iterator<Item = Cell> + '_ {
+        self.syntax.children().filter_map(Cell::cast_either)
+    }
 }
 
 /// A preprocessor directive
@@ -913,19 +948,10 @@ impl AstToken for PreprocessorDirective {
 /// Item in a [`SourceFile`] or a [`DtNode`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Item {
-    /// A Devicetree node
     DtNode(DtNode),
-    /// A Devicetree property
     DtProperty(DtProperty),
-    /// A DTS directive wrapped by [`DtsDirective`].
-    ///
-    /// e.g. `/include/ file.dts;`
     DtsDirective(DtsDirective),
-    /// A preprocessor conditional.
     PreprocessorConditional(PreprocessorConditional),
-    /// A preprocessor directive
-    ///
-    /// e.g. `#include file.dts`
     PreprocessorDirective(PreprocessorDirective),
 }
 impl AstNodeOrToken for Item {

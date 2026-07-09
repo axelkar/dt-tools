@@ -18,10 +18,10 @@ either.workspace = true
 enum-as-inner = "0.7.0"
 itertools.workspace = true
 logos.workspace = true
-smallvec = "1.13"
+smallvec.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-dt-tools-diagnostic.workspace = true
+dt-tools-diagnostic = { workspace = true, features = ["codespan-reporting"] }
 displaydoc.workspace = true
 expect-test.workspace = true
 constcat = "0.6.1"

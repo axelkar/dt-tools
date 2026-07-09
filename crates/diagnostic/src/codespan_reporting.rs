@@ -1,4 +1,7 @@
-use codespan_reporting::diagnostic::Label;
+use codespan_reporting::{
+    diagnostic::Label,
+    term::termcolor::{ColorChoice, StandardStream},
+};
 
 use crate::Severity;
 
@@ -13,13 +16,16 @@ pub fn print_diagnostics_single_file<Name: std::fmt::Display + Clone, Source: As
     name: Name,
     source: Source,
     diagnostics: Vec<crate::Diagnostic<()>>,
+    stderr: bool,
 ) -> Result<(), codespan_reporting::files::Error> {
     let mut files = codespan_reporting::files::SimpleFiles::new();
     let file_id = files.add(name, source);
 
-    let writer = codespan_reporting::term::termcolor::StandardStream::stderr(
-        codespan_reporting::term::termcolor::ColorChoice::Always,
-    );
+    let writer = if stderr {
+        StandardStream::stderr(ColorChoice::Always)
+    } else {
+        StandardStream::stdout(ColorChoice::Always)
+    };
     let config = codespan_reporting::term::Config::default();
 
     for diagnostic in diagnostics {

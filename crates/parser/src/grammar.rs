@@ -1,15 +1,12 @@
 use std::borrow::Cow;
 
-use constcat::concat_slices;
-#[cfg(feature = "grammar-tracing")]
-use tracing::debug;
-
 use crate::{
     cst::NodeKind,
     grammar::preprocessor_directive::{BEGIN_COND_SET, CONTINUE_COND_SET},
     lexer::TokenKind,
     parser::{CompletedMarker, Expected, LabelName, Marker, NAME_SET, Name, Parser, TokenMatcher},
 };
+use constcat::concat_slices;
 
 pub(crate) mod expr;
 mod preprocessor_directive;
@@ -36,6 +33,14 @@ macro_rules! vis {
 }
 // Export the macro with path-based scoping
 pub(crate) use vis;
+
+// Gets rid of annoying cfg hints in rust-analyzer
+macro_rules! debug {
+    ($($args:tt)*) => {
+        #[cfg(feature = "grammar-tracing")]
+        tracing::debug!($($args)*);
+    }
+}
 
 /// Parses a macro invocation.
 ///
@@ -162,23 +167,14 @@ pub(super) fn cells<const AT_END: bool>(p: &mut Parser) -> Result<(), ()> {
     let _span = tracy_client::span!("grammar::cells");
 
     loop {
-        p.add_expected(Expected::Cell);
-        if p.check(&[TokenKind::Number, TokenKind::Char])
-            .silent()
-            .eat()
-        {
-        } else if p.check(TokenKind::Ident).silent().at() {
-            macro_invocation(p);
-        } else if p.check(Reference).silent().eat() {
-        } else if p.check(TokenKind::LParen).silent().at() {
-            // Start a parantesized expression
-            dt_expr(p);
-        } else if (AT_END && {
+        if eat_cell::<AT_END>(p) {
+        } else if if AT_END {
             p.add_expected(Expected::End);
             p.at_end()
-        }) || (!AT_END && p.at(TokenKind::RAngle))
-        {
-            break;
+        } else {
+            p.at(TokenKind::RAngle)
+        } {
+            return Ok(());
         } else if p
             .check(&[TokenKind::Semicolon, TokenKind::LCurly, TokenKind::RCurly])
             .silent()
@@ -189,18 +185,47 @@ pub(super) fn cells<const AT_END: bool>(p: &mut Parser) -> Result<(), ()> {
         {
             p.error().msg_expected().emit();
             return Err(());
-        } else if p.check(expr::OPERATORS_SET).silent().at() {
+        } else {
             p.error()
                 .msg_expected()
-                .add_hint("Wrap expressions in parenthesis".into())
                 .bump_wrap_err()
+                .add_hint("in cells()".into())
                 .emit();
-        } else {
-            p.error().msg_expected().bump_wrap_err().emit();
         }
     }
+}
 
-    Ok(())
+fn eat_cell<const AT_END: bool>(p: &mut Parser) -> bool {
+    p.add_expected(Expected::Cell);
+
+    if p.check(&[TokenKind::Number, TokenKind::Char])
+        .silent()
+        .eat()
+    {
+        true
+    } else if p.check(TokenKind::Ident).silent().at() {
+        macro_invocation(p);
+        true
+    } else if p.check(Reference).silent().eat() {
+        true
+    } else if p.check(TokenKind::LParen).silent().at() {
+        // Start a parantesized expression
+        dt_expr(p);
+        true
+    } else if eat_dts_include(p)
+        || preprocessor_directive::eat_preprocessor_directive(p, &eat_cell::<AT_END>)
+    {
+        true
+    } else if p.check(expr::OPERATORS_SET).silent().at() && !p.check(TokenKind::RAngle).at() {
+        p.error()
+            .msg_expected()
+            .add_hint("Wrap expressions in parenthesis".into())
+            .bump_wrap_err()
+            .emit();
+        true
+    } else {
+        false
+    }
 }
 
 /// Parses a Devicetree expression within parenthesis.
@@ -300,7 +325,13 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
         } else if p.check(Reference).silent().eat() {
         } else if p.check(TokenKind::Ident).silent().at() {
             macro_invocation(p);
-        } else if p.check(TokenKind::DtBytestring).silent().eat() {
+        } else if p.check(TokenKind::DtBytestring).silent().eat()
+            || eat_dts_include(p)
+            || preprocessor_directive::eat_preprocessor_directive(p, &|p| {
+                let _ = propvalues(p, ending_kinds);
+                true
+            })
+        {
         } else {
             p.error().msg_expected().bump_wrap_err().emit();
             break;
@@ -315,7 +346,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
             // Missing comma but can be recovered
             p.error().msg_expected().emit();
         } else {
-            break;
+            return Err(());
         }
     }
     Ok(())
@@ -356,7 +387,6 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     let _span = tracy_client::span!("grammar::dt_node_body");
 
     vis!(begin);
-    #[cfg(feature = "grammar-tracing")]
     debug!("dt_node_body start");
 
     let lcurly_span = p
@@ -387,7 +417,6 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
 
     m.complete(p, NodeKind::DtNode);
 
-    #[cfg(feature = "grammar-tracing")]
     debug!("dt_node_body end");
     vis!(end);
 }
@@ -397,7 +426,6 @@ fn item(p: &mut Parser) {
     let _span = tracy_client::span!("grammar::item");
 
     vis!(begin);
-    #[cfg(feature = "grammar-tracing")]
     debug!("item start");
 
     if eat_node_or_prop(p) {
@@ -427,12 +455,16 @@ fn item(p: &mut Parser) {
             .msg_custom(Cow::Borrowed("Unmatched `;`"))
             .bump_wrap_err()
             .emit();
-    } else if eat_dts_directive(p) || preprocessor_directive::eat_preprocessor_directive(p, item) {
+    } else if eat_dts_directive(p)
+        || preprocessor_directive::eat_preprocessor_directive(p, &|p| {
+            item(p);
+            true
+        })
+    {
     } else {
         p.error().msg_expected().bump_wrap_err().emit();
     }
 
-    #[cfg(feature = "grammar-tracing")]
     debug!("item end");
     vis!(end);
 }
@@ -515,19 +547,24 @@ fn eat_node_or_prop(p: &mut Parser) -> bool {
     true
 }
 
+/// Note: DTC supports this at the lexer level.
+fn eat_dts_include(p: &mut Parser) -> bool {
+    if let Some(m) = p.eat_starting(TokenKind::DtIncludeDirective) {
+        p.expect(TokenKind::String);
+        m.complete(p, NodeKind::DtsDirective);
+        true
+    } else {
+        false
+    }
+}
+
 /// Note: only directives wrapped by [`NodeKind::DtsDirective`].
 fn eat_dts_directive(p: &mut Parser) -> bool {
     if let Some(m) = p.eat_starting(&[TokenKind::V1Directive, TokenKind::PluginDirective]) {
         p.check(TokenKind::Semicolon)
             .expect_recoverable(ITEM_RECOVERY_SET);
         m.complete(p, NodeKind::DtsDirective);
-    } else if let Some(m) = p.eat_starting(TokenKind::DtIncludeDirective) {
-        // TODO: only match this at root
-        // When an error is emitted, hint that include directives aren't supported outside the top
-        // level
-
-        p.expect(TokenKind::String);
-        m.complete(p, NodeKind::DtsDirective);
+    } else if eat_dts_include(p) {
     } else if let Some(m) = p.eat_starting(TokenKind::MemreserveDirective) {
         let m_params = p.start();
         p.expect(TokenKind::Number);
@@ -592,6 +629,10 @@ pub(super) fn entry_sourcefile(p: &mut Parser) {
             let e = p.start();
             p.bump();
             e.complete(p, NodeKind::ParseError);
+        } else if preprocessor_directive::catch_unmatched_pp_directive(p, &|p| {
+            item(p);
+            true
+        }) {
         } else {
             item(p);
         }
@@ -756,7 +797,7 @@ Tree:
             expect![[r#"
                 Errors: [
                     ParseError {
-                        message: "Expected cell or end of input, but found ‘>’",
+                        message: "Expected cell, ‘/include/‘, preprocessor directive, ‘>’ or end of input, but found ‘>’",
                         primary_text_range: TextRange {
                             start: 3,
                             end: 4,
@@ -767,7 +808,7 @@ Tree:
                                     start: 3,
                                     end: 4,
                                 },
-                                "Wrap expressions in parenthesis",
+                                "in cells()",
                             ),
                         ],
                     },

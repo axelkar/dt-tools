@@ -403,6 +403,7 @@ impl CustomValue {
             ast::PropValue::Phandle(_) => todo!(),
             ast::PropValue::Bytestring(_) => todo!(),
             ast::PropValue::Macro(_) => todo!(),
+            _ => todo!(),
         })
     }
 }

@@ -56,6 +56,7 @@ pub fn parse_int_tok<
     .map_err(|err| emit_err(&err, diag, tok, T::BITS, T::SIGNEDNESS))
 }
 
+/// Wraps [`interpret_escaped_char`], handling errors.
 pub fn interpret_escaped_char_tok(
     tok: &Arc<RedToken>,
     diag: &mut Diag<'_, '_>,

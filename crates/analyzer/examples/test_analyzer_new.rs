@@ -48,6 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &path,
             &text,
             new_diagnostics,
+            true,
         )?;
 
         std::process::exit(1);

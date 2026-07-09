@@ -34,6 +34,14 @@ mod dtc_tests;
 mod item;
 mod preprocessor;
 
+// TODO: how to communicate back prop values and cells? type-safe or generic?
+enum LowerFileCtx {
+    SourceFile,
+    DtNode { parent_node_path: String },
+    PropValues,
+    Cells,
+}
+
 /// Result of lowering a single file and its includes.
 #[salsa::tracked]
 pub struct LoweredFile<'db> {
@@ -99,6 +107,7 @@ pub(crate) fn lower_file<'db>(
 
     let mut env = TrackedMapEnvMut::from_parent(parent_env);
 
+    // TODO: parse entrypoint?
     let parse = super::parse_file(db, file)?;
     let file_ast = parse.parse(db).source_file();
 
@@ -117,7 +126,6 @@ pub(crate) fn lower_file<'db>(
         db,
         file,
         env: &mut env,
-        diag: &mut diag,
         mir: &mut mir,
         parent_is_overlay,
         parent_dir_path,
@@ -129,8 +137,9 @@ pub(crate) fn lower_file<'db>(
     // TODO: PERF: split into phases with includes and after includes for Salsa tracking
     // TODO: PERF: flatten includes only at the root file boundary?
 
+    // TODO: custom lowering function for non-SourceFile includes
     for item in file_ast.items() {
-        item::lower_item(&mut ctx, &parent_node_path, item);
+        item::lower_item(&mut ctx, &mut diag, &parent_node_path, item);
     }
 
     let is_overlay = ctx.is_overlay();
@@ -147,11 +156,10 @@ pub(crate) fn lower_file<'db>(
 }
 
 /// Mutable context threaded through the tree traversal in a single [file](File).
-struct IntraFileCtx<'a, 'db, 's, 'm> {
+struct IntraFileCtx<'a, 'db> {
     db: &'db dyn BaseDb,
     file: File,
     env: &'a mut TrackedMapEnvMut<'db>,
-    diag: &'a mut Diag<'s, 'm>,
     mir: &'a mut Mir,
     parent_is_overlay: bool,
     parent_dir_path: &'a Utf8Path,
@@ -159,7 +167,7 @@ struct IntraFileCtx<'a, 'db, 's, 'm> {
     processed_files: &'a mut Vec<File>,
     includes: &'a mut Vec<(File, Span<File>)>,
 }
-impl IntraFileCtx<'_, '_, '_, '_> {
+impl IntraFileCtx<'_, '_> {
     /// Returns true if this is currently in overlay mode.
     #[must_use]
     fn is_overlay(&self) -> bool {

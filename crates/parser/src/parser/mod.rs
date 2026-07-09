@@ -239,11 +239,73 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.source.peek_kind_immediate()
     }
 
+    fn reconstruct_text(&self) -> String {
+        self.source.tokens.iter().map(|tok| tok.text).collect()
+    }
+    fn print_errors(&self) {
+        let diagnostics = self
+            .events
+            .iter()
+            .filter_map(|ev| {
+                if let Event::Error(error) = ev {
+                    Some(error)
+                } else {
+                    None
+                }
+            })
+            .map(|error| dt_tools_diagnostic::Diagnostic {
+                span: dt_tools_diagnostic::MultiSpan {
+                    primary_spans: vec![error.primary_text_range.within_file(())],
+                    span_labels: error
+                        .span_labels
+                        .iter()
+                        .map(|(text_range, msg)| dt_tools_diagnostic::SpanLabel {
+                            span: text_range.within_file(()),
+                            msg: msg.clone(),
+                        })
+                        .collect(),
+                },
+                msg: error.message.clone(),
+                severity: dt_tools_diagnostic::Severity::Error,
+            })
+            .collect::<Vec<_>>();
+
+        let text = self.reconstruct_text();
+
+        dt_tools_diagnostic::codespan_reporting::print_diagnostics_single_file(
+            "/in-parser.dts",
+            &text,
+            diagnostics,
+            false,
+        )
+        .unwrap();
+    }
+
     /// Peeks ahead at the current token's kind.
     ///
     /// Returns None at end of input
     #[inline]
     pub fn peek(&mut self) -> Option<TokenKind> {
+        const PARSER_STEP_LIMIT: u32 = 1_000;
+
+        if self.source.steps >= PARSER_STEP_LIMIT {
+            self.print_errors();
+            panic!(
+                "the parser seems stuck!\nat byte {:?}.\nnext 5 tokens: {:?}",
+                self.source
+                    .tokens
+                    .get(self.source.cursor)
+                    .map(|tok| tok.text_range.start),
+                self.source
+                    .tokens
+                    .iter()
+                    .skip(self.source.cursor)
+                    .take(5)
+                    .map(|tok| tok.kind)
+                    .collect::<Vec<_>>(),
+            );
+        }
+
         self.source.peek_kind()
     }
 
@@ -274,7 +336,7 @@ impl<'t, 'input> Parser<'t, 'input> {
     /// Returns true if a token was bumped.
     pub fn expect(&mut self, matcher: impl TokenMatcher) -> bool {
         #[cfg(feature = "grammar-tracing")]
-        debug!(?kind, "expect");
+        debug!("expect");
         self.check(matcher).expect()
     }
 

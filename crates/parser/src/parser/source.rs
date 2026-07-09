@@ -3,11 +3,9 @@ use crate::{
     lexer::{Token, TokenKind},
 };
 
-const PARSER_STEP_LIMIT: u32 = 1_000;
-
 #[derive(Debug)]
 pub(super) struct Source<'t, 'input> {
-    tokens: &'t [Token<'input>],
+    pub(super) tokens: &'t [Token<'input>],
     /// The index of the (possibly trivia) token after the previous non-trivia token if it exists.
     ///
     /// ```text
@@ -60,15 +58,15 @@ pub(super) struct Source<'t, 'input> {
     ///          ^ cursor
     ///          ^ prev_next_cursor
     /// ```
-    prev_next_cursor: usize,
+    pub(super) prev_next_cursor: usize,
     /// From which index the next immediate token will be read from.
-    cursor: usize,
-    steps: u32,
+    pub(super) cursor: usize,
+    pub(super) steps: u32,
     // for debugger:
     #[cfg(debug_assertions)]
-    byte_offset: usize,
+    pub(super) byte_offset: usize,
     #[cfg(debug_assertions)]
-    following_src: String,
+    pub(super) following_src: String,
 }
 
 impl<'t, 'input> Source<'t, 'input> {
@@ -203,17 +201,6 @@ impl<'t, 'input> Source<'t, 'input> {
     pub(super) fn peek_kind_immediate(&mut self) -> Option<TokenKind> {
         let _span = tracy_client::span!("parser::Source::peek_kind_immediate");
 
-        assert!(
-            self.steps < PARSER_STEP_LIMIT,
-            "the parser seems stuck! at byte {:?}. next 5 tokens: {:?}",
-            self.tokens.get(self.cursor).map(|tok| tok.text_range.start),
-            self.tokens
-                .iter()
-                .skip(self.cursor)
-                .take(5)
-                .map(|tok| tok.kind)
-                .collect::<Vec<_>>()
-        );
         self.steps += 1;
 
         #[cfg(feature = "visualize")]

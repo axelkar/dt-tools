@@ -4,7 +4,7 @@ use dt_tools_analyzer::string::interpret_escaped_string;
 use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     TextRange,
-    ast::{self, AstNode},
+    ast::{self, AstNode, AstToken},
     cst::RedToken,
     parser::Entrypoint,
 };
@@ -12,12 +12,14 @@ use num_traits::{AsPrimitive, Num};
 
 use super::{IntraFileCtx, lower_phandle, resolve_macro_to_ast};
 use crate::{
-    db::BaseDb,
     diag::{Diag, SourceMap},
     expr_eval::{self, interpret_escaped_char_tok, parse_int_tok},
     extra_num_traits::{Bits, Signedness},
-    lowering::dt_node::{build_path, get_name_and_unit_addr},
-    macros::{MacroCtx, env::TrackedMapEnvMut},
+    lowering::{
+        dt_node::{build_path, get_name_and_unit_addr},
+        item::handle_preprocessor_conditional,
+    },
+    macros::MacroCtx,
     mir::{
         MirCell32, MirCellList, MirDefinition, MirDefinitionValue, MirPhandleTarget,
         MirPropertyData, MirProvenance, MirValue,
@@ -26,12 +28,13 @@ use crate::{
 
 /// Lowers an [`ast::DtProperty`] to a [`MirDefinition`], if valid.
 pub(crate) fn lower_dt_property(
-    ctx: &mut IntraFileCtx<'_, '_, '_, '_>,
+    ctx: &mut IntraFileCtx<'_, '_>,
+    diag: &mut Diag<'_, '_>,
     parent_node_path: &str,
     prop: &ast::DtProperty,
 ) -> Result<(), ()> {
     if parent_node_path.is_empty() {
-        ctx.diag.emit(
+        diag.emit(
             prop.syntax().text_range(),
             "Property must be defined inside a node",
             Severity::Error,
@@ -42,19 +45,15 @@ pub(crate) fn lower_dt_property(
     let mut values = Vec::new();
     let mut expansion_stack = Vec::new();
     for value_ast in prop.values() {
-        if let Ok(value) =
-            lower_prop_value(ctx.db, ctx.env, ctx.diag, &value_ast, &mut expansion_stack)
-        {
-            values.push(value);
-        }
+        let _ = lower_prop_value(ctx, diag, &mut values, &value_ast, &mut expansion_stack);
     }
 
-    let name = get_name_and_unit_addr(ctx.db, ctx.env, ctx.diag, prop)?;
+    let name = get_name_and_unit_addr(ctx.db, ctx.env, diag, prop)?;
     let path = build_path(parent_node_path, &name);
 
     let text_range = prop.syntax().text_range();
     let provenance = MirProvenance {
-        span: ctx.diag.resolve(text_range),
+        span: diag.resolve(text_range),
     };
 
     ctx.mir.definitions.push(MirDefinition {
@@ -66,65 +65,29 @@ pub(crate) fn lower_dt_property(
 }
 
 /// Lowers an [`ast::PropValue`] to a [`MirValue`], if valid.
-pub(crate) fn lower_prop_value<'db>(
-    db: &'db dyn BaseDb,
-    env: &mut TrackedMapEnvMut<'db>,
+pub(crate) fn lower_prop_value(
+    ctx: &mut IntraFileCtx<'_, '_>,
     diag: &mut Diag<'_, '_>,
-    value: &ast::PropValue,
+    output: &mut Vec<MirValue>,
+    ast: &ast::PropValue,
     expansion_stack: &mut Vec<String>,
-) -> Result<MirValue, ()> {
-    match value {
-        ast::PropValue::String(tok) => match interpret_escaped_string(tok.text()) {
-            Ok(path) => Ok(MirValue::String(path)),
-            Err(err) => {
-                diag.emit(
-                    tok.text_range(),
-                    Cow::Owned(format!("Failed to parse string: {err}")),
-                    Severity::Error,
-                );
-                Err(())
-            }
-        },
+) -> Result<(), ()> {
+    match ast {
+        ast::PropValue::String(tok) => {
+            output.push(MirValue::String(interpret_escaped_string_tok(tok, diag)?));
+        }
         ast::PropValue::CellList(cell_list) => {
             let bits_size = BitsSize::from_token(cell_list.bits_number().as_ref(), diag)?;
-            let cells = lower_cell_list(db, env, diag, cell_list, bits_size);
-            Ok(MirValue::CellList(cells))
+            let cells = lower_cell_list(ctx, diag, cell_list, bits_size);
+            output.push(MirValue::CellList(cells));
         }
         ast::PropValue::Bytestring(tok) => {
-            let mut bytes = Vec::new();
-            let mut first_nibble = None;
-            for ch in tok.text().chars() {
-                if ch == ']' {
-                    break;
-                }
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "to_digit returns values 0-15"
-                )]
-                if let Some(nibble) = ch.to_digit(16) {
-                    let nibble = nibble as u8;
-                    if let Some(first_nibble) = first_nibble.take() {
-                        bytes.push(nibble + (first_nibble << 4));
-                    } else {
-                        first_nibble = Some(nibble);
-                    }
-                }
-            }
-
-            if first_nibble.is_some() {
-                diag.emit(
-                    tok.text_range(),
-                    Cow::Borrowed("Bytestring is missing a hex digit"),
-                    Severity::Error,
-                );
-                return Err(());
-            }
-
-            Ok(MirValue::Bytestring(bytes))
+            output.push(MirValue::Bytestring(lower_bytestring(diag, tok)?));
         }
         ast::PropValue::Phandle(phandle) => {
-            let target = lower_phandle(db, env, diag, phandle)?;
-            Ok(MirValue::Phandle(target))
+            output.push(MirValue::Phandle(lower_phandle(
+                ctx.db, ctx.env, diag, phandle,
+            )?));
         }
         ast::PropValue::Macro(macro_inv) => {
             let name = macro_inv
@@ -139,8 +102,8 @@ pub(crate) fn lower_prop_value<'db>(
                 return Err(());
             }
             let (ast, expansion) = resolve_macro_to_ast(
-                db,
-                env,
+                ctx.db,
+                ctx.env,
                 diag,
                 &MacroCtx::Explicit(macro_inv),
                 Entrypoint::PropValues,
@@ -152,15 +115,93 @@ pub(crate) fn lower_prop_value<'db>(
                 expansion: &expansion,
             };
             let result = lower_prop_value(
-                db,
-                env,
+                ctx,
                 &mut Diag::new(&mut *diag.sink, &child_map),
+                output,
                 &ast,
                 expansion_stack,
             );
             expansion_stack.pop();
-            Ok(result?)
+            result?;
         }
+        ast::PropValue::DtsDirective(dir) => {
+            //handle_dts_directive(ctx, parent_node_path, &dir, files);
+            // TODO: implement
+            diag.emit(
+                dir.syntax().text_range(),
+                Cow::Borrowed("Currently unimplemented in property values"),
+                Severity::Error,
+            );
+        }
+        ast::PropValue::PreprocessorConditional(cond) => {
+            let Some(branch) = handle_preprocessor_conditional(ctx, diag, cond) else {
+                return Ok(());
+            };
+            for ast in branch.prop_values() {
+                let _ = lower_prop_value(ctx, diag, output, &ast, expansion_stack);
+            }
+        }
+        ast::PropValue::PreprocessorDirective(dir) => {
+            //handle_preprocessor_directive(ctx, parent_node_path, files, text_range, &dir);
+            // TODO: implement
+            diag.emit(
+                dir.syntax().text_range(),
+                Cow::Borrowed("Currently unimplemented in property values"),
+                Severity::Error,
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Wraps [`interpret_escaped_string`], handling errors.
+pub fn interpret_escaped_string_tok(
+    tok: &Arc<RedToken>,
+    diag: &mut Diag<'_, '_>,
+) -> Result<String, ()> {
+    match interpret_escaped_string(tok.text()) {
+        Ok(path) => Ok(path),
+        Err(err) => {
+            diag.emit(
+                tok.text_range(),
+                Cow::Owned(format!("Failed to parse string: {err}")),
+                Severity::Error,
+            );
+            Err(())
+        }
+    }
+}
+
+fn lower_bytestring(diag: &mut Diag<'_, '_>, tok: &Arc<RedToken>) -> Result<Vec<u8>, ()> {
+    let mut bytes = Vec::new();
+    let mut first_nibble = None;
+    for ch in tok.text().chars() {
+        if ch == ']' {
+            break;
+        }
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "to_digit returns values 0-15"
+        )]
+        if let Some(nibble) = ch.to_digit(16) {
+            let nibble = nibble as u8;
+            if let Some(first_nibble) = first_nibble.take() {
+                bytes.push(nibble + (first_nibble << 4));
+            } else {
+                first_nibble = Some(nibble);
+            }
+        }
+    }
+
+    if first_nibble.is_some() {
+        diag.emit(
+            tok.text_range(),
+            Cow::Borrowed("Bytestring is missing a hex digit"),
+            Severity::Error,
+        );
+        Err(())
+    } else {
+        Ok(bytes)
     }
 }
 
@@ -206,44 +247,30 @@ impl BitsSize {
 }
 
 /// Lower a cell list into the correct [`MirCellList`] variant.
-fn lower_cell_list<'db>(
-    db: &'db dyn BaseDb,
-    env: &mut TrackedMapEnvMut<'db>,
+fn lower_cell_list(
+    ctx: &mut IntraFileCtx<'_, '_>,
     diag: &mut Diag<'_, '_>,
     cell_list: &ast::DtCellList,
     bits_size: BitsSize,
 ) -> MirCellList {
     match bits_size {
-        BitsSize::Bits8 => {
-            // TODO: return Err on any Err, but run lower_cell on all child cells
-            let cells: Vec<u8> = cell_list
-                .cells()
-                .filter_map(|c| lower_cell::<u8>(db, env, diag, &c).ok())
-                .collect();
-            MirCellList::Bits8(cells)
-        }
-        BitsSize::Bits16 => {
-            let cells: Vec<u16> = cell_list
-                .cells()
-                .filter_map(|c| lower_cell::<u16>(db, env, diag, &c).ok())
-                .collect();
-            MirCellList::Bits16(cells)
-        }
-        BitsSize::Bits32 => {
-            let cells: Vec<MirCell32> = cell_list
-                .cells()
-                .filter_map(|c| lower_cell::<MirCell32>(db, env, diag, &c).ok())
-                .collect();
-            MirCellList::Bits32(cells)
-        }
-        BitsSize::Bits64 => {
-            let cells: Vec<u64> = cell_list
-                .cells()
-                .filter_map(|c| lower_cell::<u64>(db, env, diag, &c).ok())
-                .collect();
-            MirCellList::Bits64(cells)
-        }
+        BitsSize::Bits8 => MirCellList::Bits8(collect_cells(ctx, diag, cell_list)),
+        BitsSize::Bits16 => MirCellList::Bits16(collect_cells(ctx, diag, cell_list)),
+        BitsSize::Bits32 => MirCellList::Bits32(collect_cells(ctx, diag, cell_list)),
+        BitsSize::Bits64 => MirCellList::Bits64(collect_cells(ctx, diag, cell_list)),
     }
+}
+
+fn collect_cells<T: LowerCell>(
+    ctx: &mut IntraFileCtx<'_, '_>,
+    diag: &mut Diag<'_, '_>,
+    cell_list: &ast::DtCellList,
+) -> Vec<T> {
+    let mut cells: Vec<T> = Vec::new();
+    cell_list.cells().for_each(|c| {
+        let _ = lower_cell::<T>(ctx, diag, &mut cells, &c);
+    });
+    cells
 }
 
 /// Trait abstracting over what a cell lowers to: `u8`, `u16`, `u64`, or [`MirCell32`].
@@ -280,20 +307,22 @@ trait LowerCell: Sized {
 }
 
 /// Lower a single [`ast::Cell`] using the [`LowerCell`] trait for type-specific conversion.
-fn lower_cell<'db, T: LowerCell>(
-    db: &'db dyn BaseDb,
-    env: &mut TrackedMapEnvMut<'db>,
+fn lower_cell<T: LowerCell>(
+    ctx: &mut IntraFileCtx<'_, '_>,
     diag: &mut Diag<'_, '_>,
-    cell: &ast::Cell,
-) -> Result<T, ()> {
-    match cell {
-        ast::Cell::Number(tok) => parse_int_tok::<T::Number>(tok, diag).map(T::from_number),
+    output: &mut Vec<T>,
+    ast: &ast::Cell,
+) -> Result<(), ()> {
+    match ast {
+        ast::Cell::Number(tok) => {
+            output.push(parse_int_tok::<T::Number>(tok, diag).map(T::from_number)?);
+        }
         ast::Cell::Char(tok) => {
             let ch = interpret_escaped_char_tok(tok, diag)?;
 
             let val = u32::from(ch);
             if let Ok(v) = T::Number::try_from(val) {
-                Ok(T::from_number(v))
+                output.push(T::from_number(v));
             } else {
                 diag.emit(
                     tok.text_range(),
@@ -303,31 +332,35 @@ fn lower_cell<'db, T: LowerCell>(
                     )),
                     Severity::Error,
                 );
-                Err(())
+                return Err(());
             }
         }
         ast::Cell::Phandle(phandle) => {
-            let target = lower_phandle(db, env, diag, phandle)?;
-            T::from_phandle(target, phandle.syntax().text_range(), diag)
+            let target = lower_phandle(ctx.db, ctx.env, diag, phandle)?;
+            output.push(T::from_phandle(
+                target,
+                phandle.syntax().text_range(),
+                diag,
+            )?);
         }
         ast::Cell::DtExpr(dt_expr) => {
             let expr = dt_expr.expr().ok_or(())?;
-            let num = expr_eval::eval(db, env, expr, diag)?;
+            let num = expr_eval::eval(ctx.db, ctx.env, expr, diag)?;
 
             if let Ok(v) = T::Number::try_from(num) {
-                Ok(T::from_number(v))
+                output.push(T::from_number(v));
             } else if let Ok(v) = <T::Signed>::try_from(num) {
                 // Two's complement bitwise reinterpretation
-                Ok(T::from_number(v.as_()))
+                output.push(T::from_number(v.as_()));
             } else {
                 emit_overflow(num, dt_expr.syntax().text_range(), T::Number::BITS, diag);
-                Err(())
+                return Err(());
             }
         }
         ast::Cell::Macro(macro_inv) => {
             let (ast, expansion) = resolve_macro_to_ast(
-                db,
-                env,
+                ctx.db,
+                ctx.env,
                 diag,
                 &MacroCtx::Explicit(macro_inv),
                 Entrypoint::Cells,
@@ -338,14 +371,41 @@ fn lower_cell<'db, T: LowerCell>(
                 parent: diag.map,
                 expansion: &expansion,
             };
-            Ok(lower_cell::<T>(
-                db,
-                env,
+            lower_cell::<T>(
+                ctx,
                 &mut Diag::new(&mut *diag.sink, &child_map),
+                output,
                 &ast,
-            )?)
+            )?;
+        }
+        ast::Cell::DtsDirective(dir) => {
+            //handle_dts_directive(ctx, parent_node_path, &dir, files);
+            // TODO: implement
+            diag.emit(
+                dir.syntax().text_range(),
+                Cow::Borrowed("Currently unimplemented in cells"),
+                Severity::Error,
+            );
+        }
+        ast::Cell::PreprocessorConditional(cond) => {
+            let Some(branch) = handle_preprocessor_conditional(ctx, diag, cond) else {
+                return Ok(());
+            };
+            for ast in branch.cells() {
+                let _ = lower_cell::<T>(ctx, diag, output, &ast);
+            }
+        }
+        ast::Cell::PreprocessorDirective(dir) => {
+            //handle_preprocessor_directive(ctx, parent_node_path, files, text_range, &dir);
+            // TODO: implement
+            diag.emit(
+                dir.syntax().text_range(),
+                Cow::Borrowed("Currently unimplemented in cells"),
+                Severity::Error,
+            );
         }
     }
+    Ok(())
 }
 
 /// Helper function that isn't monomorphized
@@ -530,7 +590,7 @@ mod tests {
                 property = CellList(Bits32([Number(1), Number(4294967295)])) /prop /main.dts L3:5-L3:22
 
                 --- errors ---
-                Error L3:13: Expected cell or ‘>’, but found ‘-’ [dt-tools(syntax-error)]
+                Error L3:13: Expected cell, ‘/include/‘, preprocessor directive or ‘>’, but found ‘-’ [dt-tools(syntax-error)]
             "#]],
         );
     }
