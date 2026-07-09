@@ -3,7 +3,7 @@
 //! Macro substitution, parameters, ternary operator are evaluated here
 // TODO: rewrite the parser to understand UTF-8 and to have clearer code
 
-use std::{iter::Peekable, str::Chars};
+use std::{borrow::Cow, iter::Peekable, str::Chars};
 
 use dt_tools_parser::{TextRange, ast, parser::Entrypoint};
 
@@ -242,6 +242,7 @@ fn parse_params(
         }
 
         if last.is_vararg && last.name.is_empty() {
+            // Specifying the name is a GNU extension. This is the default.
             "__VA_ARGS__".clone_into(&mut last.name);
         }
     }
@@ -335,6 +336,7 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
 
                 if let Some('#') = p.peek() {
                     p.next();
+                    // concat operator
                     let concat_text_range = TextRange {
                         start: p.offset - 2,
                         end: p.offset,
@@ -516,15 +518,48 @@ impl MacroDefinition {
         })
     }
 
+    /// Value of parameter `idx`. For the trailing variadic parameter, joins the
+    /// remaining arguments with `, ` like the C preprocessor's `__VA_ARGS__`.
+    ///
+    /// Returns `Err` if a parameter (variadic or not) doesn't have a corresponding argument.
+    fn param_value<'a>(&self, arguments: &'a [String], idx: usize) -> Result<Cow<'a, str>, &Param> {
+        let param = self.params.get(idx).unwrap();
+        let arg = arguments.get(idx).ok_or(param)?;
+
+        if param.is_vararg {
+            Ok(Cow::Owned(arguments.get(idx..).unwrap().join(", ")))
+        } else {
+            Ok(Cow::Borrowed(arg))
+        }
+    }
+
     #[expect(clippy::too_many_lines, reason = "Hard to make this shorter")]
-    fn substitute(&self, arguments: &[String]) -> SubstitutedBody {
+    fn substitute(&self, arguments: &[String]) -> Result<SubstitutedBody, MacroSubstitutionError> {
         let mut s = String::new();
         let mut iter = self.body_tokens.iter().peekable();
         let mut push_ws = false;
         let mut trmaps = Vec::new();
 
-        if self.params.len() != arguments.len() {
-            // TODO: return error
+        let is_variadic = self.params.last().is_some_and(|p| p.is_vararg);
+        if is_variadic {
+            // The variadic parameter may match zero arguments.
+            let required = self.params.len() - 1;
+            if arguments.len() < required {
+                return Err(MacroSubstitutionError::TooFewVariadic {
+                    expected: required,
+                    got: arguments.len(),
+                });
+            }
+        } else if arguments.len() < self.params.len() {
+            return Err(MacroSubstitutionError::TooFew {
+                expected: self.params.len(),
+                got: arguments.len(),
+            });
+        } else if arguments.len() > self.params.len() {
+            return Err(MacroSubstitutionError::TooMany {
+                expected: self.params.len(),
+                got: arguments.len(),
+            });
         }
 
         while let Some(token) = iter.next() {
@@ -540,15 +575,35 @@ impl MacroDefinition {
                     s.push_str(text);
                 }
                 MacroTokenKind::Parameter(idx) => {
-                    let text = &arguments[*idx];
                     if push_ws {
                         s.push(' ');
                     }
-                    trmaps.push(TextRangeMap {
-                        from_offset: s.len(),
-                        to: TextRangeMapTo::ArgumentIdx(*idx),
-                    });
-                    s.push_str(text);
+                    if self.params.get(*idx).is_some_and(|p| p.is_vararg) {
+                        // Expand each argument separately so a diagnostic can blame the
+                        // exact argument, and the injected `, ` on the vararg parameter.
+                        for (i, arg) in arguments.iter().enumerate().skip(*idx) {
+                            if i != *idx {
+                                trmaps.push(TextRangeMap {
+                                    from_offset: s.len(),
+                                    to: TextRangeMapTo::VarargSeparator {
+                                        macro_text: token.text_range,
+                                    },
+                                });
+                                s.push_str(", ");
+                            }
+                            trmaps.push(TextRangeMap {
+                                from_offset: s.len(),
+                                to: TextRangeMapTo::ArgumentIdx(i),
+                            });
+                            s.push_str(arg);
+                        }
+                    } else {
+                        trmaps.push(TextRangeMap {
+                            from_offset: s.len(),
+                            to: TextRangeMapTo::ArgumentIdx(*idx),
+                        });
+                        s.push_str(arguments.get(*idx).map_or("", String::as_str));
+                    }
                 }
                 MacroTokenKind::WordNoWhitespace(text) => {
                     trmaps.push(TextRangeMap {
@@ -560,7 +615,9 @@ impl MacroDefinition {
                     continue;
                 }
                 MacroTokenKind::ConcatOperator => {
-                    let map_to = match iter.next() {
+                    let mut vararg_trailing: Option<(TextRange, usize)> = None;
+
+                    let source = match iter.next() {
                         Some(MacroToken {
                             kind: MacroTokenKind::Word(text),
                             ..
@@ -570,10 +627,15 @@ impl MacroDefinition {
                         }
                         Some(MacroToken {
                             kind: MacroTokenKind::Parameter(idx),
-                            ..
+                            text_range,
                         }) => {
-                            let text = &arguments[*idx];
-                            s.push_str(text);
+                            s.push_str(arguments.get(*idx).map_or("", String::as_str));
+                            // TODO: GNU behavior removes comma if no arguments: ", ##__VA_ARGS__"
+
+                            let is_vararg = self.params.get(*idx).is_some_and(|p| p.is_vararg);
+                            if is_vararg && arguments.len() > *idx + 1 {
+                                vararg_trailing = Some((*text_range, *idx + 1));
+                            }
                             TextRangeMapTo::ArgumentIdx(*idx)
                         }
                         Some(MacroToken {
@@ -592,22 +654,37 @@ impl MacroDefinition {
                     // The parser assures that there is a token before a concat
                     let prev = trmaps.last_mut().unwrap();
 
-                    // Extend previous concat or make a new text range
-                    if let TextRangeMapTo::Concat(concat) = &mut prev.to {
-                        concat.push(map_to);
-                    } else {
-                        prev.to = TextRangeMapTo::Concat(vec![prev.to.clone(), map_to]);
+                    prev.to = TextRangeMapTo::Concat {
+                        operator: token.text_range,
+                        sources: Box::new([prev.to.clone(), source]),
+                    };
+
+                    // Append the remaining vararg arguments after the paste.
+                    if let Some((macro_text, first_trailing)) = vararg_trailing {
+                        for (i, arg) in arguments.iter().enumerate().skip(first_trailing) {
+                            trmaps.push(TextRangeMap {
+                                from_offset: s.len(),
+                                to: TextRangeMapTo::VarargSeparator { macro_text },
+                            });
+                            s.push_str(", ");
+                            trmaps.push(TextRangeMap {
+                                from_offset: s.len(),
+                                to: TextRangeMapTo::ArgumentIdx(i),
+                            });
+                            s.push_str(arg);
+                        }
                     }
                 }
                 MacroTokenKind::StringifyOperator => {
-                    let argument_idx = match iter.next() {
+                    let from_offset = s.len();
+                    let (argument_idx, param_range) = match iter.next() {
                         Some(MacroToken {
                             kind: MacroTokenKind::Parameter(idx),
-                            ..
+                            text_range,
                         }) => {
-                            let text = &arguments[*idx];
-                            s.push_str(&stringify(text));
-                            idx
+                            let text = self.param_value(arguments, *idx).unwrap_or_default();
+                            s.push_str(&stringify(&text));
+                            (idx, text_range)
                         }
                         Some(MacroToken {
                             kind:
@@ -623,9 +700,9 @@ impl MacroDefinition {
                         }
                     };
                     trmaps.push(TextRangeMap {
-                        from_offset: s.len(),
+                        from_offset,
                         to: TextRangeMapTo::Stringify {
-                            macro_text_offset: token.text_range.start,
+                            macro_text: token.text_range.to(*param_range),
                             argument_idx: *argument_idx,
                         },
                     });
@@ -633,11 +710,22 @@ impl MacroDefinition {
             }
             push_ws = true;
         }
-        SubstitutedBody {
+
+        Ok(SubstitutedBody {
             source_mappings: trmaps,
             substituted_text: s,
-        }
+        })
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, displaydoc::Display)]
+pub enum MacroSubstitutionError {
+    /// too few arguments: expected at least {expected}, got {got}
+    TooFewVariadic { expected: usize, got: usize },
+    /// too few arguments: expected {expected}, got {got}
+    TooFew { expected: usize, got: usize },
+    /// too many arguments: expected {expected}, got {got}
+    TooMany { expected: usize, got: usize },
 }
 
 /// A mapping from text in the output to some text ranges related to macros.
@@ -660,19 +748,28 @@ impl TextRangeMap {
     }
 }
 
-// TODO: concat into stringification?
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextRangeMapTo {
     /// Forward to argument at index
     ArgumentIdx(usize),
     /// Forward to offset in macro definition string
     MacroTextOffset(usize),
-    /// Forward to two or more places
-    Concat(Vec<TextRangeMapTo>),
+    /// Forward to sources
+    Concat {
+        /// The concat operator's range in the macro body.
+        operator: TextRange,
+        /// The left and right sources.
+        sources: Box<[TextRangeMapTo; 2]>,
+    },
+    /// The `, ` joining two variadic arguments; not present in the source.
+    VarargSeparator {
+        /// The vararg parameter's range in the macro body.
+        macro_text: TextRange,
+    },
     /// Forward to offset in macro definition and argument at index
     Stringify {
-        macro_text_offset: usize,
+        /// [ `TextRange` ] instead of offset because we aren't doing precise mapping in strings.
+        macro_text: TextRange,
         argument_idx: usize,
     },
 }
@@ -683,17 +780,20 @@ impl TextRangeMapTo {
         match self {
             Self::ArgumentIdx(idx) => write!(f, "arg_{idx}"),
             Self::MacroTextOffset(offset) => write!(f, "macro+{offset}"),
-            Self::Concat(vec) => {
-                for (i, to) in vec.iter().enumerate() {
+            Self::Concat { operator, sources } => {
+                for (i, to) in sources.iter().enumerate() {
                     if i != 0 {
-                        f.write_str(" ## ")?;
+                        write!(f, " ## ({operator}) ")?;
                     }
                     to.test_fmt(f)?;
                 }
                 Ok(())
             }
+            Self::VarargSeparator { macro_text } => {
+                write!(f, "vararg_separator(macro+{macro_text})")
+            }
             Self::Stringify {
-                macro_text_offset: macro_text,
+                macro_text,
                 argument_idx: argument,
             } => write!(f, "stringify(macro+{macro_text}, arg_{argument})"),
         }
@@ -726,7 +826,7 @@ pub struct SubstitutedBody {
 pub fn substitute_macro(
     ast: Option<&ast::MacroInvocation>,
     def: &MacroDefinition,
-) -> Result<SubstitutedBody, String> {
+) -> Result<SubstitutedBody, MacroSubstitutionError> {
     let arguments = ast
         .map(|ast| {
             ast.arguments()
@@ -742,16 +842,7 @@ pub fn substitute_macro(
 
     // TODO: argument prescan so some macros with indirection tricks work
 
-    // TODO: vararg macros
-    if def.params.len() != arguments.len() {
-        return Err(format!(
-            "Invalid argument length. Got {}, expected {}.",
-            arguments.len(),
-            def.params.len()
-        ));
-    }
-    let out = def.substitute(&arguments);
-    Ok(out)
+    def.substitute(&arguments)
 }
 
 /// Stringifies `input` like Clang.
@@ -854,7 +945,13 @@ mod tests {
         let SubstitutedBody {
             source_mappings,
             substituted_text,
-        } = def.substitute(arguments);
+        } = match def.substitute(arguments) {
+            Ok(val) => val,
+            Err(err) => {
+                output_expect.assert_eq(&format!("--- substitution error ---\n{err}"));
+                return;
+            }
+        };
 
         output_expect.assert_eq(&substituted_text);
 
@@ -873,7 +970,7 @@ mod tests {
             &["foo".to_owned(), "bar".to_owned()],
             expect![[r#"foobar"#]],
             expect![[r#"
-                0.. arg_0 ## arg_1
+                0.. arg_0 ## (23..25) arg_1
             "#]],
         );
     }
@@ -885,7 +982,7 @@ mod tests {
             &["1 + 2".to_owned()],
             expect![[r#""1 + 2""#]],
             expect![[r#"
-                7.. stringify(macro+21, arg_0)
+                0.. stringify(macro+21..23, arg_0)
             "#]],
         );
     }
@@ -907,6 +1004,7 @@ mod tests {
             "#]],
         );
     }
+
     /// Like above. Example from Linux `include/dt-bindings/input/input.h`
     // TODO: combine applicable macro trmaps; the trmaps expect below could be a lot smaller
     #[test]
@@ -957,7 +1055,7 @@ mod tests {
     #[test]
     fn substitute_double_special_characters() {
         check_substitute(
-            r#"#define FOO < < > > & & | |"#,
+            "#define FOO < < > > & & | |",
             &[],
             expect!["< < > > & & | |"],
             expect![[r#"
@@ -972,7 +1070,7 @@ mod tests {
             "#]],
         );
         check_substitute(
-            r#"#define FOO << >> && ||"#,
+            "#define FOO << >> && ||",
             &[],
             expect!["<< >> && ||"],
             expect![[r#"
@@ -980,6 +1078,115 @@ mod tests {
                 3.. macro+15
                 6.. macro+18
                 9.. macro+21
+            "#]],
+        );
+    }
+
+    #[test]
+    fn substitute_vararg_comma() {
+        check_substitute(
+            "#define MACRO(...) function(argument, __VA_ARGS__)",
+            &["foo".to_owned(), "bar".to_owned()],
+            expect![r#"function(argument, foo, bar)"#],
+            expect![[r#"
+                0.. macro+19
+                8.. macro+27
+                9.. macro+28
+                19.. arg_0
+                22.. vararg_separator(macro+38..49)
+                24.. arg_1
+                27.. macro+49
+            "#]],
+        );
+    }
+
+    #[test]
+    fn substitute_vararg_empty_comma() {
+        check_substitute(
+            "#define MACRO(...) function(argument, __VA_ARGS__)",
+            &[],
+            expect![r#"function(argument, )"#],
+            expect![[r#"
+                0.. macro+19
+                8.. macro+27
+                9.. macro+28
+                19.. macro+49
+            "#]],
+        );
+    }
+
+    // TODO: implement
+    #[test]
+    #[ignore = "TODO: implement"]
+    fn substitute_vararg_empty_gnu_comma() {
+        // GNU extension to remove the comma
+        check_substitute(
+            "#define MACRO(...) function(argument, ##__VA_ARGS__)",
+            &[],
+            expect![r#"function(argument)"#],
+            expect![[r#"
+                0.. stringify(macro+23..35, arg_0)
+            "#]],
+        );
+    }
+
+    // TODO: implement
+    #[test]
+    #[ignore = "TODO: implement"]
+    fn substitute_vararg_empty_va_opt_comma() {
+        // TODO
+        check_substitute(
+            "#define MACRO(...) function(argument __VA_OPT__(,) __VA_ARGS__)",
+            &[],
+            expect![r#"function(argument)"#],
+            expect![[r#"
+                0.. stringify(macro+23..35, arg_0)
+            "#]],
+        );
+    }
+
+    #[test]
+    fn parse_vararg_empty_va_opt_comma() {
+        check_parse(
+            "#define MACRO(...) function(argument __VA_OPT__(,) __VA_ARGS__)",
+            expect![[r#"
+                MACRO(__VA_ARGS__...)
+                Word("function") 19..27
+                WordNoWhitespace("(") 27..28
+                Word("argument") 28..36
+                Word("__VA_OPT__") 37..47
+                WordNoWhitespace("(") 47..48
+                Word(",") 48..49
+                WordNoWhitespace(")") 49..50
+                Parameter(0) 51..62
+                WordNoWhitespace(")") 62..63
+                dont_prescan_indices: []
+            "#]],
+        );
+    }
+
+    #[test]
+    fn substitute_stringify_vararg() {
+        check_substitute(
+            "#define STRINGIFY(...) #__VA_ARGS__",
+            &["foo".to_owned(), "bar".to_owned()],
+            expect![r#""foo, bar""#],
+            expect![[r#"
+                0.. stringify(macro+23..35, arg_0)
+            "#]],
+        );
+    }
+
+    #[test]
+    fn substitute_concat_vararg() {
+        check_substitute(
+            "#define __concat_1(x, y...)     x ## y",
+            &["foo".to_owned(), "bar".to_owned(), "baz".to_owned()],
+            expect![r#"foobar, baz"#],
+            expect![[r#"
+                0.. arg_0 ## (34..36) arg_1
+                6.. vararg_separator(macro+37..38)
+                8.. arg_2
             "#]],
         );
     }

@@ -65,10 +65,7 @@ impl Mir {
                 kind,
                 def.path,
                 def.provenance.span.file.path(db),
-                DisplaySpanLineColumn(
-                    &def.provenance.span,
-                    db
-                )
+                DisplaySpanLineColumn(&def.provenance.span, db)
             );
         }
         if !self.unresolved_extensions.is_empty() {

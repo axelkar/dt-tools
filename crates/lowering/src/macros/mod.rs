@@ -81,7 +81,7 @@ pub(crate) fn substitute_macro_tok<'db>(
     ) {
         Ok(substituted_body) => Ok(Some((substituted_body, macro_def))),
         Err(err) => {
-            diag.emit(macro_ctx.text_range(), Cow::Owned(err), Severity::Error);
+            diag.emit(macro_ctx.text_range(), err.to_string(), Severity::Error);
             Err(())
         }
     }

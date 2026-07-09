@@ -75,8 +75,12 @@ impl MacroExpansion {
             TextRangeMapTo::ArgumentIdx(idx) => {
                 parent.resolve(*self.args.get(*idx).unwrap_or(&self.invocation))
             }
+            // The separator isn't in the source; blame the vararg parameter.
+            TextRangeMapTo::VarargSeparator { macro_text } => {
+                self.macro_def.subspan_inside(*macro_text)
+            }
             // TODO: map Concat and Stringify precisely
-            TextRangeMapTo::Concat(_) | TextRangeMapTo::Stringify { .. } => {
+            TextRangeMapTo::Concat { .. } | TextRangeMapTo::Stringify { .. } => {
                 parent.resolve(self.invocation)
             }
         }
