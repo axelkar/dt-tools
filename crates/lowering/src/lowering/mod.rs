@@ -293,7 +293,7 @@ pub(crate) mod tests {
     use expect_test::{Expect, expect};
 
     use super::*;
-    use crate::db::BaseDb;
+    use crate::{db::BaseDb, file::DisplaySpanLineColumn};
 
     /// Run the preprocessor on virtual files and snapshot MIR + diagnostics.
     ///
@@ -326,13 +326,19 @@ pub(crate) mod tests {
             out.push_str("\n--- errors ---\n");
             for d in diags {
                 use std::fmt::Write;
-                let range = d
+                let span = d
                     .span
                     .primary_spans
                     .first()
-                    .expect("Should have at least one primary span")
-                    .text_range;
-                let _ = writeln!(out, "{:?} {range}: {}", d.severity, d.msg);
+                    .expect("Should have at least one primary span");
+
+                let _ = writeln!(
+                    out,
+                    "{:?} {}: {}",
+                    d.severity,
+                    DisplaySpanLineColumn(span, &db),
+                    d.msg
+                );
             }
         }
         expect.assert_eq(&out);
@@ -346,7 +352,7 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
+                dts-v1  /main.dts L2:1-L2:10
             "#]],
         );
     }
@@ -360,8 +366,8 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..16
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L3:1-L3:6
             "#]],
         );
     }
@@ -378,9 +384,9 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 50..76
-                property = CellList(Bits32([Number(42)])), String("example") /prop /main.dts 54..73
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L6:1-L6:27
+                property = CellList(Bits32([Number(42)])), String("example") /prop /main.dts L6:5-L6:24
             "#]],
         );
     }
@@ -397,11 +403,11 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 30..51
-                node   / /main.dts 52..73
-                node labels=[FOO] /foo /main.dts 34..48
-                property = CellList(Bits32([Phandle(Label("FOO"))])) /prop /main.dts 56..70
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L5:1-L5:22
+                node   / /main.dts L6:1-L6:22
+                node labels=[FOO] /foo /main.dts L5:5-L5:19
+                property = CellList(Bits32([Phandle(Label("FOO"))])) /prop /main.dts L6:5-L6:19
             "#]],
         );
     }
@@ -418,11 +424,11 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 30..49
-                node   / /main.dts 50..73
-                node labels=[FOO] /foo /main.dts 34..46
-                property = CellList(Bits32([Phandle(Label("FOO"))])) /prop /main.dts 54..70
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L5:1-L5:20
+                node   / /main.dts L6:1-L6:24
+                node labels=[FOO] /foo /main.dts L5:5-L5:17
+                property = CellList(Bits32([Phandle(Label("FOO"))])) /prop /main.dts L6:5-L6:21
             "#]],
         );
     }
@@ -439,11 +445,11 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 36..54
-                node   / /main.dts 55..73
-                node   /SUBSTITUTED@bar /main.dts 40..51
-                node   /bar@SUBSTITUTED /main.dts 59..70
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L5:1-L5:19
+                node   / /main.dts L6:1-L6:19
+                node   /SUBSTITUTED@bar /main.dts L5:5-L5:16
+                node   /bar@SUBSTITUTED /main.dts L6:5-L6:16
             "#]],
         );
     }
@@ -460,9 +466,9 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 60..74
-                node   /BAR /main.dts 64..71
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L6:1-L6:15
+                node   /BAR /main.dts L6:5-L6:12
             "#]],
         );
     }
@@ -476,14 +482,14 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..44
-                property = CellList(Bits32([])) /prop /main.dts 15..28
-                property =  /prop2 /main.dts 29..41
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L3:1-L3:34
+                property = CellList(Bits32([])) /prop /main.dts L3:5-L3:18
+                property =  /prop2 /main.dts L3:19-L3:31
 
                 --- errors ---
-                Error 23..26: Macro `VAL` is not defined
-                Error 37..40: Macro `VAL` is not defined
+                Error L3:13-L3:16: Macro `VAL` is not defined
+                Error L3:27-L3:30: Macro `VAL` is not defined
             "#]],
         );
     }

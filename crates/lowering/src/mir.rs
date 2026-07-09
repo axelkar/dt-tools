@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, fmt};
 
 use dt_tools_parser::TextRange;
 
-use crate::file::File;
+use crate::file::{DisplaySpanLineColumn, File};
 
 /// Mid-level intermediate representation of devicetrees.
 ///
@@ -65,7 +65,10 @@ impl Mir {
                 kind,
                 def.path,
                 def.provenance.file.path(db),
-                def.provenance.text_range
+                DisplaySpanLineColumn(
+                    &def.provenance.text_range.within_file(def.provenance.file),
+                    db
+                )
             );
         }
         if !self.unresolved_extensions.is_empty() {
@@ -380,10 +383,10 @@ mod tests {
         };
 
         expect![[r#"
-            node   /qux /main.dts 161..261
-            node   /qux/quux /main.dts 175..254
-            node   /qux/quux/bar /main.dts 194..243
-            property = CellList(Bits32([Number(2)])) /qux/quux/bar/prop2 /main.dts 216..228
+            node   /qux /main.dts L16:5-L22:7
+            node   /qux/quux /main.dts L17:9-L21:11
+            node   /qux/quux/bar /main.dts L18:13-L20:15
+            property = CellList(Bits32([Number(2)])) /qux/quux/bar/prop2 /main.dts L19:17-L19:29
         "#]]
         .assert_eq(&new_mir.display(&db));
     }

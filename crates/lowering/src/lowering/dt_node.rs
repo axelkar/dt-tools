@@ -287,9 +287,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..31
-                node labels=[LBL] /node /main.dts 15..28
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L3:1-L3:21
+                node labels=[LBL] /node /main.dts L3:5-L3:18
             "#]],
         );
     }
@@ -304,11 +304,11 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..31
-                node labels=[LBL] /node /main.dts 15..28
-                node   /node /main.dts 32..53
-                property = CellList(Bits32([Number(1)])) /node/prop /main.dts 39..50
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L3:1-L3:21
+                node labels=[LBL] /node /main.dts L3:5-L3:18
+                node   /node /main.dts L4:1-L4:22
+                property = CellList(Bits32([Number(1)])) /node/prop /main.dts L4:8-L4:19
             "#]],
         );
     }
@@ -323,8 +323,8 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                plugin  /main.dts 11..20
+                dts-v1  /main.dts L2:1-L2:10
+                plugin  /main.dts L3:1-L3:10
                 --- unresolved ---
                   label=UNKNOWN (1 definitions)
             "#]],
@@ -340,10 +340,10 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
+                dts-v1  /main.dts L2:1-L2:10
 
                 --- errors ---
-                Error 11..17: Label not found: BOGUS
+                Error L3:1-L3:7: Label not found: BOGUS
             "#]],
         );
     }
@@ -358,14 +358,14 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..30
-                node   / /main.dts 31..50
-                node labels=[foo] /bar /main.dts 15..27
-                node   /baz /main.dts 35..47
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L3:1-L3:20
+                node   / /main.dts L4:1-L4:20
+                node labels=[foo] /bar /main.dts L3:5-L3:17
+                node   /baz /main.dts L4:5-L4:17
 
                 --- errors ---
-                Warn 35..39: Duplicate label `foo`
+                Warn L4:5-L4:9: Duplicate label `foo`
             "#]],
         );
     }
@@ -379,9 +379,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..42
-                /omit-if-no-ref/ node /foo /main.dts 15..39
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L3:1-L3:32
+                /omit-if-no-ref/ node /foo /main.dts L3:5-L3:29
             "#]],
         );
     }
@@ -400,12 +400,12 @@ bar {};
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..17
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L3:1-L3:7
 
                 --- errors ---
-                Error 25..32: Subnode must be defined inside a node
-                Error 40..47: Subnode must be defined inside a node
+                Error L6:1-L6:8: Subnode must be defined inside a node
+                Error L8:1-L8:8: Subnode must be defined inside a node
             "#]],
         );
     }
@@ -423,12 +423,12 @@ bar {};
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts 1..10
-                node   / /main.dts 11..49
-                node   /foo /main.dts 19..46
+                dts-v1  /main.dts L2:1-L2:10
+                node   / /main.dts L3:1-L7:3
+                node   /foo /main.dts L4:5-L6:7
 
                 --- errors ---
-                Error 33..39: Root node (`/`) must be defined outside other nodes
+                Error L5:9-L5:15: Root node (`/`) must be defined outside other nodes
             "#]],
         );
     }

@@ -1,6 +1,9 @@
 //! Holds the [`File`] database input.
 
+use std::fmt;
+
 use camino::{Utf8Path, Utf8PathBuf};
+use dt_tools_diagnostic::Span;
 use salsa::Durability;
 
 use crate::{db::BaseDb, includes::IncludeDirs};
@@ -28,6 +31,9 @@ pub struct File {
 
 impl File {
     /// Returns the zero-indexed line and column of an offset in this file.
+    ///
+    /// Returns `None` if the file doesn't exist or the offset doesn't correspond to any line
+    /// and column.
     pub fn line_column(self, db: &dyn BaseDb, offset: usize) -> Option<(usize, usize)> {
         let rope = crate::rope(db, self).as_ref()?;
 
@@ -95,6 +101,29 @@ impl Files {
             .new(db);
         self.by_path.insert(path, file);
         file
+    }
+}
+
+/// Wrapper struct implementing [`fmt::Display`] for [`Span<File>`].
+pub struct DisplaySpanLineColumn<'a>(pub &'a Span<File>, pub &'a dyn BaseDb);
+impl fmt::Display for DisplaySpanLineColumn<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let fmt_line_column = |f: &mut fmt::Formatter<'_>, offset| {
+            let (line, column) = self
+                .0
+                .file
+                .line_column(self.1, offset)
+                .expect("Span should be valid");
+
+            write!(f, "L{}:{}", line + 1, column + 1)
+        };
+
+        fmt_line_column(f, self.0.text_range.start)?;
+        if self.0.text_range.length() > 1 {
+            f.write_str("-")?;
+            fmt_line_column(f, self.0.text_range.end)?;
+        }
+        Ok(())
     }
 }
 
