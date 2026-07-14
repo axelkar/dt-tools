@@ -2,6 +2,7 @@
 vim.lsp.config('dt-tools', {
   --cmd = {'../../target/debug/dt-tools-lsp'},
   cmd = {'cargo', 'run', '-p', 'dt-tools-lsp'},
+  -- For use with dt-tools-lsp-auto-runner
   --cmd = vim.lsp.rpc.connect('127.0.0.1', 9257),
 
   filetypes = {

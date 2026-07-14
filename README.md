@@ -29,11 +29,11 @@
 
 ## Crates
 
-* [`dt-tools-parser`](crates/dt-tools-parser) implements an error-resistant parser inspired by rust-analyzer
-* [`dt-tools-analyzer`](crates/dt-tools-analyzer) is a source file analyzer
-* [`dt-tools-lsp`](crates/dt-tools-lsp) is a [language server](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide#why-language-server). It basically adds IDE support.
-* [`dt-tools-lint`](crates/dt-tools-lint) is a linter for DTS
-* [`dt-tools-binding`](crates/dt-tools-binding) is a crate supposed to validate and match devicetree binding YAMLs
+* [`dt-tools-parser`](crates/parser) implements an error-resistant parser inspired by rust-analyzer
+* [`dt-tools-analyzer`](crates/analyzer) is a source file analyzer
+* [`dt-tools-lsp`](crates/lsp) is a [language server](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide#why-language-server). It basically adds IDE support.
+* [`dt-tools-lint`](crates/lint) is a linter for DTS
+* [`dt-tools-binding`](crates/binding) is a crate supposed to validate and match devicetree binding YAMLs
 
 ## Screenshots
 
@@ -57,11 +57,11 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The VSCode extension's documentation can be found [here](vscode/README.md).
 
-The language server is also packaged for Neovim with the Lua script in `./crates/dt-tools-lsp/lsp.lua`.
+The language server is also packaged for Neovim with the Lua script in [`./crates/lsp/lsp.lua`](./crates/lsp/lsp.lua).
 
 ```sh
-cargo build -p dt-tools-lsp
-nvim --cmd 'luafile ./crates/dt-tools-lsp/lsp.lua' lint_showcase.dts
+cargo build -p lsp
+nvim --cmd 'luafile ./crates/lsp/lsp.lua' lint_showcase.dts
 ```
 
 Features:
