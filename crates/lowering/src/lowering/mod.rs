@@ -216,7 +216,7 @@ pub(crate) fn resolve_macro_to_ast<'db, AstType: AstNodeOrToken>(
     if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
         diag.emit(
             macro_ctx.text_range(),
-            format!("Failed to parse the result of this macro invocation ({substituted_text:?})"),
+            format!("Failed to parse the result of this macro invocation ({substituted_text:?}) as {entrypoint:?}"),
             Severity::Error,
         );
     }

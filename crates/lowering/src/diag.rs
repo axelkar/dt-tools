@@ -23,6 +23,7 @@ pub enum SourceMap<'a> {
     },
     /// Ranges are byte offsets into a macro expansion.
     Macro {
+        /// The invocation's source map
         parent: &'a SourceMap<'a>,
         expansion: &'a MacroExpansion,
     },

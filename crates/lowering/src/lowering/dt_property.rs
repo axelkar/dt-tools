@@ -1,30 +1,100 @@
 use std::{borrow::Cow, num::ParseIntError, str::FromStr, sync::Arc};
 
-use dt_tools_analyzer::string::interpret_escaped_string;
+use dt_tools_analyzer::{macros::SubstitutedBody, string::interpret_escaped_string};
 use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     TextRange,
-    ast::{self, AstNode, AstToken},
+    ast::{self, AstNode, AstToken, HasMacroInvocation, HasName},
     cst::RedToken,
+    lexer::TokenKind,
     parser::Entrypoint,
 };
 use num_traits::{AsPrimitive, Num};
 
 use super::{IntraFileCtx, lower_phandle, resolve_macro_to_ast};
 use crate::{
-    diag::{Diag, SourceMap},
+    diag::{Diag, MacroExpansion, SourceMap},
+    emit_parse_errors,
     expr_eval::{self, interpret_escaped_char_tok, parse_int_tok},
     extra_num_traits::{Bits, Signedness},
     lowering::{
         dt_node::{build_path, get_name_and_unit_addr},
-        item::handle_preprocessor_conditional,
+        item::{handle_preprocessor_conditional, lower_item},
     },
-    macros::MacroCtx,
+    macros::{MacroCtx, substitute_macro_tok},
     mir::{
         MirCell32, MirCellList, MirDefinition, MirDefinitionValue, MirPhandleTarget,
         MirPropertyData, MirProvenance, MirValue,
     },
 };
+
+fn try_lower_macro_expanded_items(
+    ctx: &mut IntraFileCtx<'_, '_>,
+    diag: &mut Diag<'_, '_>,
+    parent_node_path: &str,
+    prop: &ast::DtProperty,
+) -> Result<bool, ()> {
+    let is_not_bare = prop
+        .syntax()
+        .child_tokens()
+        .any(|tok| tok.green.kind == TokenKind::Equals);
+
+    if is_not_bare {
+        return Ok(false);
+    }
+
+    let name_ast = prop.name();
+    let invoc = prop.macro_invocation();
+    let macro_ctx = if let Some(ref invoc) = invoc {
+        MacroCtx::Explicit(invoc)
+    } else if let Some(ref name) = name_ast {
+        MacroCtx::Implicit(name)
+    } else {
+        return Ok(false);
+    };
+
+    let Some((
+        SubstitutedBody {
+            source_mappings,
+            substituted_text,
+        },
+        macro_def,
+    )) = substitute_macro_tok(ctx.db, ctx.env, diag, &macro_ctx)?
+    else {
+        // Implicit macro not defined
+        return Ok(false);
+    };
+
+    // Append a `;` so the parser sees a complete DTS fragment.
+    let text_with_semicolon = format!("{substituted_text};");
+
+    let parse = Entrypoint::SourceFile.parse(&text_with_semicolon);
+    let source_file = parse.source_file();
+    let items: Vec<ast::Item> = source_file.items().collect();
+
+    if items.is_empty() {
+        return Ok(false);
+    }
+
+    let expansion = MacroExpansion {
+        source_mappings,
+        macro_def,
+        args: macro_ctx.arg_ranges(),
+        invocation: macro_ctx.text_range(),
+    };
+    let child_map = SourceMap::Macro {
+        parent: diag.map,
+        expansion: &expansion,
+    };
+    let mut child_diag = Diag::new(&mut *diag.sink, &child_map);
+    emit_parse_errors(&parse, &mut child_diag);
+
+    for item in items {
+        lower_item(ctx, &mut child_diag, parent_node_path, item);
+    }
+
+    Ok(true)
+}
 
 /// Lowers an [`ast::DtProperty`] to a [`MirDefinition`], if valid.
 pub(crate) fn lower_dt_property(
@@ -33,6 +103,10 @@ pub(crate) fn lower_dt_property(
     parent_node_path: &str,
     prop: &ast::DtProperty,
 ) -> Result<(), ()> {
+    if try_lower_macro_expanded_items(ctx, diag, parent_node_path, prop)? {
+        return Ok(());
+    }
+
     if parent_node_path.is_empty() {
         diag.emit(
             prop.syntax().text_range(),
@@ -634,5 +708,132 @@ bar = "baz";
                 Error L8:1-L8:13: Property must be defined inside a node
             "#]],
         );
+    }
+
+    mod mir_bare_property_macro {
+        use super::*;
+
+        #[test]
+        fn no_macro() {
+            check_mir(
+                r#"
+/dts-v1/;
+/ { bare; };
+"#,
+                &[],
+                expect![[r#"
+                    dts-v1  /main.dts L2:1-L2:10
+                    node   / /main.dts L3:1-L3:13
+                    property =  /bare /main.dts L3:5-L3:10
+                "#]],
+            );
+        }
+
+        #[test]
+        fn alias() {
+            check_mir(
+                r#"
+/dts-v1/;
+#define MACRO bare
+/ { MACRO; };
+"#,
+                &[],
+                expect![[r#"
+                    dts-v1  /main.dts L2:1-L2:10
+                    node   / /main.dts L4:1-L4:14
+                    property =  /bare /main.dts L3:15-L4:1
+                "#]],
+            );
+        }
+
+        #[test]
+        fn node() {
+            check_mir(
+                r#"
+/dts-v1/;
+#define MACRO LBL: foo { bar = "baz"; }
+/ { MACRO; };
+"#,
+                &[],
+                expect![[r#"
+                    dts-v1  /main.dts L2:1-L2:10
+                    node   / /main.dts L4:1-L4:14
+                    node labels=[LBL] /foo /main.dts L3:15-L3:36
+                    property = String("baz") /foo/bar /main.dts L3:26-L3:37
+                "#]],
+            );
+        }
+
+        #[test]
+        fn property() {
+            check_mir(
+                r#"
+/dts-v1/;
+#define MACRO bar = <42>
+/ { MACRO; };
+"#,
+                &[],
+                expect![[r#"
+                    dts-v1  /main.dts L2:1-L2:10
+                    node   / /main.dts L4:1-L4:14
+                    property = CellList(Bits32([Number(42)])) /bar /main.dts L3:15-L4:3
+                "#]],
+            );
+        }
+
+        #[test]
+        fn multiple_items() {
+            check_mir(
+                r#"
+/dts-v1/;
+#define MACRO a {}; b {}
+/ { MACRO; };
+"#,
+                &[],
+                expect![[r#"
+                    dts-v1  /main.dts L2:1-L2:10
+                    node   / /main.dts L4:1-L4:14
+                    node   /a /main.dts L3:15-L3:19
+                    node   /b /main.dts L3:21-L3:25
+                "#]],
+            );
+        }
+
+        #[test]
+        fn top_level() {
+            check_mir(
+                r#"
+/dts-v1/;
+#define MACRO / { foo {}; }
+MACRO;
+"#,
+                &[],
+                expect![[r#"
+                    dts-v1  /main.dts L2:1-L2:10
+                    node   / /main.dts L3:15-L3:25
+                    node   /foo /main.dts L3:19-L3:25
+                "#]],
+            );
+        }
+
+        #[test]
+        fn extra_semicolon_error() {
+            check_mir(
+                r#"
+/dts-v1/;
+#define MACRO bar = <42>;
+/ { MACRO; };
+"#,
+                &[],
+                expect![[r#"
+                    dts-v1  /main.dts L2:1-L2:10
+                    node   / /main.dts L4:1-L4:14
+                    property = CellList(Bits32([Number(42)])) /bar /main.dts L3:15-L4:2
+
+                    --- errors ---
+                    Error L3:26: Unmatched `;` [dt-tools(syntax-error)]
+                "#]],
+            );
+        }
     }
 }
