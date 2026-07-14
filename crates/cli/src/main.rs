@@ -27,7 +27,7 @@ use dt_tools_workspace::{
 };
 use owo_colors::OwoColorize;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 fn styles() -> Styles {
     Styles::styled()
@@ -88,12 +88,22 @@ fn main() -> Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
+
+    let mut tracing_env_filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy()
+        // Too noisy logging at info level
+        .add_directive("salsa::function::execute=warn".parse()?);
+
+    if cfg!(debug_assertions) || cli.verbose {
+        tracing_env_filter = tracing_env_filter
+            .add_directive("dt_tools_lsp=debug".parse()?)
+            .add_directive("dt_tools_lowering=debug".parse()?)
+            .add_directive("dt_tools_parser=debug".parse()?);
+    }
+
     tracing_subscriber::fmt()
-        .with_max_level(if cli.verbose {
-            LevelFilter::INFO
-        } else {
-            LevelFilter::WARN
-        })
+        .with_env_filter(tracing_env_filter)
         .init();
 
     let cwd = Utf8PathBuf::from_path_buf(Path::new(".").canonicalize()?)

@@ -416,6 +416,8 @@ impl Backend {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    color_eyre::install()?;
+
     let first_arg = std::env::args().nth(1);
 
     let (service, socket) = LspService::new(|client| Backend {
@@ -443,6 +445,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     let tracing_env_filter = tracing_env_filter
         .add_directive("dt_tools_lsp=debug".parse()?)
+        .add_directive("dt_tools_lowering=debug".parse()?)
         .add_directive("dt_tools_parser=debug".parse()?);
 
     if first_arg == Some("tcp".to_owned()) {

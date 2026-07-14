@@ -47,7 +47,7 @@ const LABEL_NAME_SET: [TokenKind; 2] = [TokenKind::Ident, TokenKind::Number];
 
 /// The result from the parser.
 ///
-/// To traverse the syntax tree up and down, wrap `green_node` with [`RedNode`](crate::cst::RedNode).
+/// To traverse the syntax tree up and down, wrap `green_node` with [`RedNode`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Parse<'input> {
     pub green_node: GreenNode,

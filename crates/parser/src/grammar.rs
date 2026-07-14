@@ -1,12 +1,13 @@
 use std::borrow::Cow;
 
+use constcat::concat_slices;
+
 use crate::{
     cst::NodeKind,
     grammar::preprocessor_directive::{BEGIN_COND_SET, CONTINUE_COND_SET},
     lexer::TokenKind,
     parser::{CompletedMarker, Expected, LabelName, Marker, NAME_SET, Name, Parser, TokenMatcher},
 };
-use constcat::concat_slices;
 
 pub(crate) mod expr;
 mod preprocessor_directive;

@@ -283,7 +283,7 @@ impl SourceFile {
     pub fn items(&self) -> impl Iterator<Item = Item> + '_ {
         self.syntax.children().filter_map(Item::cast_either)
     }
-    /// Returns an iterator over direct [`Directive`] children.
+    /// Returns an iterator over direct [`DtsDirective`] children.
     pub fn directives(&self) -> impl Iterator<Item = DtsDirective> + '_ {
         self.syntax.child_nodes().filter_map(DtsDirective::cast)
     }
@@ -624,7 +624,7 @@ impl DtNode {
         self.syntax.child_nodes().filter_map(DtProperty::cast)
     }
 
-    /// Returns an iterator over direct [`Directive`] children.
+    /// Returns an iterator over direct [`DtsDirective`] children.
     pub fn directives(&self) -> impl Iterator<Item = DtsDirective> + '_ {
         self.syntax.child_nodes().filter_map(DtsDirective::cast)
     }

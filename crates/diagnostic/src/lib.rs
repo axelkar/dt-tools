@@ -63,6 +63,16 @@ pub struct MultiSpan<F> {
     /// Additional hints in the error
     pub span_labels: Vec<SpanLabel<F>>,
 }
+impl<F> MultiSpan<F> {
+    /// Returns a new, empty [`MultiSpan`].
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            primary_spans: Vec::new(),
+            span_labels: Vec::new(),
+        }
+    }
+}
 
 impl<F> From<Span<F>> for MultiSpan<F> {
     fn from(value: Span<F>) -> Self {

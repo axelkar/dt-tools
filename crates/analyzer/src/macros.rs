@@ -21,6 +21,7 @@ enum MacroTokenKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MacroToken {
     kind: MacroTokenKind,
+    /// Text range in macro definition string
     text_range: TextRange,
 }
 
@@ -384,6 +385,8 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
 pub struct MacroDefinition {
     /// Macro name
     pub name: String,
+    /// Macro name text range inside the input string
+    pub name_range: TextRange,
     /// Parameter names
     params: Vec<Param>,
     /// Parsed macro body tokens, used for substitution
@@ -419,20 +422,25 @@ impl MacroDefinition {
         let mut iter = s.chars().peekable();
         let mut offset = subslice_offset(input, s).ok_or(MacroDefinitionParseError::LexError)?;
 
-        let mut macro_name = String::new();
+        let mut name = String::new();
 
         while let Some(&ch) = iter.peek() {
             if ch.is_whitespace() || ch == '(' {
                 break;
             }
-            macro_name.push(ch);
+            name.push(ch);
             iter.next(); // Consume the character
             offset += ch.len_utf8();
         }
 
-        if macro_name.is_empty() {
+        if name.is_empty() {
             return Err(MacroDefinitionParseError::MissingName);
         }
+
+        let name_range = TextRange {
+            start: offset - name.len(),
+            end: offset,
+        };
 
         let params = parse_params(&mut iter, &mut offset)?;
 
@@ -470,7 +478,8 @@ impl MacroDefinition {
         p.dont_prescan_indices.dedup();
 
         Ok(MacroDefinition {
-            name: macro_name,
+            name,
+            name_range,
             body_tokens: p.body_tokens,
             dont_prescan_indices: p.dont_prescan_indices,
             params,
@@ -487,6 +496,42 @@ impl MacroDefinition {
     #[must_use]
     pub fn param_count(&self) -> usize {
         self.params.len()
+    }
+
+    /// Returns the name of an argument.
+    ///
+    /// If there is a variadic parameter and the argument is out of bounds, the variadic
+    /// parameter's name is returned.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::borrow::Cow;
+    ///
+    /// use dt_tools_analyzer::macros::{MacroDefinition, MacroDefinitionParseError};
+    ///
+    /// let def = MacroDefinition::parse("#define MACRO(a, b...) func((a) + 42, b)").unwrap();
+    /// assert_eq!(def.arg_name(0), Some("a"));
+    /// assert_eq!(def.arg_name(1), Some("b"));
+    /// assert_eq!(def.arg_name(2), Some("b"));
+    ///
+    /// let def = MacroDefinition::parse("#define SUM(a, b) (a) + (b)").unwrap();
+    /// assert_eq!(def.arg_name(0), Some("a"));
+    /// assert_eq!(def.arg_name(1), Some("b"));
+    /// assert_eq!(def.arg_name(2), None);
+    /// ```
+    #[must_use]
+    pub fn arg_name(&self, idx: usize) -> Option<&str> {
+        self.params
+            .get(idx)
+            .or_else(|| self.variadic_param())
+            .map(|p| p.name.as_str())
+    }
+
+    /// Returns the index of the variadic parameter.
+    #[must_use]
+    fn variadic_param(&self) -> Option<&Param> {
+        self.params.iter().find(|p| p.is_vararg)
     }
 
     /// Returns the index of the variadic parameter.
@@ -526,10 +571,12 @@ impl MacroDefinition {
         &self,
         arguments: &[String],
     ) -> Result<SubstitutedBody, MacroSubstitutionError> {
-        let mut s = String::new();
+        let mut sink = SubstitutedBody {
+            source_mappings: Vec::new(),
+            substituted_text: String::new(),
+        };
         let mut iter = self.body_tokens.iter().peekable();
         let mut push_ws = false;
-        let mut trmaps = Vec::new();
 
         let is_variadic = self.params.last().is_some_and(|p| p.is_vararg);
         if is_variadic {
@@ -557,153 +604,162 @@ impl MacroDefinition {
             match &token.kind {
                 MacroTokenKind::Word(text) => {
                     if push_ws {
-                        s.push(' ');
+                        sink.push_ws();
                     }
-                    trmaps.push(TextRangeMap {
-                        from_offset: s.len(),
-                        to: TextRangeMapTo::MacroTextOffset(token.text_range.start),
-                    });
-                    s.push_str(text);
+                    sink.push_str(text, TextRangeMapTo::MacroTextOffset(token.text_range));
                 }
+
                 MacroTokenKind::Parameter(idx) => {
                     if push_ws {
-                        s.push(' ');
+                        sink.push_ws();
                     }
                     if self.params.get(*idx).is_some_and(|p| p.is_vararg) {
                         // Expand each argument separately so a diagnostic can blame the
                         // exact argument, and the injected `, ` on the vararg parameter.
                         for (i, arg) in arguments.iter().enumerate().skip(*idx) {
                             if i != *idx {
-                                trmaps.push(TextRangeMap {
-                                    from_offset: s.len(),
-                                    to: TextRangeMapTo::VarargSeparator {
+                                sink.push_str(
+                                    ", ",
+                                    TextRangeMapTo::GeneratedVarargSeparator {
                                         macro_text: token.text_range,
                                     },
-                                });
-                                s.push_str(", ");
+                                );
                             }
-                            trmaps.push(TextRangeMap {
-                                from_offset: s.len(),
-                                to: TextRangeMapTo::ArgumentIdx(i),
-                            });
-                            s.push_str(arg);
+                            sink.push_str(arg, TextRangeMapTo::ArgumentIdx(i));
                         }
                     } else {
-                        trmaps.push(TextRangeMap {
-                            from_offset: s.len(),
-                            to: TextRangeMapTo::ArgumentIdx(*idx),
-                        });
-                        s.push_str(arguments.get(*idx).map_or("", String::as_str));
+                        let arg = arguments.get(*idx).map_or("", String::as_str);
+                        sink.push_str(arg, TextRangeMapTo::ArgumentIdx(*idx));
                     }
                 }
+
                 MacroTokenKind::WordNoWhitespace(text) => {
-                    trmaps.push(TextRangeMap {
-                        from_offset: s.len(),
-                        to: TextRangeMapTo::MacroTextOffset(token.text_range.start),
-                    });
-                    s.push_str(text);
+                    sink.push_str(text, TextRangeMapTo::MacroTextOffset(token.text_range));
                     push_ws = false;
                     continue;
                 }
-                MacroTokenKind::ConcatOperator => {
-                    let mut vararg_trailing: Option<(TextRange, usize)> = None;
 
-                    let source = match iter.next() {
-                        Some(MacroToken {
-                            kind:
-                                MacroTokenKind::Word(text) | MacroTokenKind::WordNoWhitespace(text),
-                            ..
-                        }) => {
-                            s.push_str(text);
-                            TextRangeMapTo::MacroTextOffset(token.text_range.start)
-                        }
-                        Some(MacroToken {
-                            kind: MacroTokenKind::Parameter(idx),
-                            text_range,
-                        }) => {
-                            s.push_str(arguments.get(*idx).map_or("", String::as_str));
-                            // TODO: GNU behavior removes comma if no arguments: ", ##__VA_ARGS__"
+                MacroTokenKind::ConcatOperator => match iter.next() {
+                    Some(MacroToken {
+                        kind: MacroTokenKind::Word(text) | MacroTokenKind::WordNoWhitespace(text),
+                        ..
+                    }) => sink.push_concat_str(
+                        text.as_str(),
+                        TextRangeMapTo::MacroTextOffset(token.text_range),
+                        token,
+                    ),
 
-                            let is_vararg = self.params.get(*idx).is_some_and(|p| p.is_vararg);
-                            if is_vararg && arguments.len() > *idx + 1 {
-                                vararg_trailing = Some((*text_range, *idx + 1));
+                    Some(MacroToken {
+                        kind: MacroTokenKind::Parameter(idx),
+                        text_range,
+                    }) => {
+                        let arg = arguments.get(*idx).map_or("", String::as_str);
+                        // TODO: GNU behavior removes comma if no arguments: ", ##__VA_ARGS__"
+
+                        let is_vararg_param = self.params.get(*idx).is_some_and(|p| p.is_vararg);
+                        let vararg_trailing = if is_vararg_param && arguments.len() > *idx + 1 {
+                            Some((*text_range, *idx + 1))
+                        } else {
+                            None
+                        };
+
+                        sink.push_concat_str(arg, TextRangeMapTo::ArgumentIdx(*idx), token);
+
+                        // Append the remaining vararg arguments after the paste.
+                        if let Some((macro_text, first_trailing)) = vararg_trailing {
+                            for (i, arg) in arguments.iter().enumerate().skip(first_trailing) {
+                                sink.push_str(
+                                    ", ",
+                                    TextRangeMapTo::GeneratedVarargSeparator { macro_text },
+                                );
+
+                                sink.push_str(arg, TextRangeMapTo::ArgumentIdx(i));
                             }
-                            TextRangeMapTo::ArgumentIdx(*idx)
-                        }
-                        Some(MacroToken {
-                            kind: MacroTokenKind::ConcatOperator | MacroTokenKind::StringifyOperator,
-                            ..
-                        })
-                        | None => {
-                            // Forbidden by parser
-                            unreachable!()
-                        }
-                    };
-
-                    // The parser assures that there is a token before a concat
-                    let prev = trmaps.last_mut().expect("should be a token before concat");
-
-                    prev.to = TextRangeMapTo::Concat {
-                        operator: token.text_range,
-                        sources: Box::new([prev.to.clone(), source]),
-                    };
-
-                    // Append the remaining vararg arguments after the paste.
-                    if let Some((macro_text, first_trailing)) = vararg_trailing {
-                        for (i, arg) in arguments.iter().enumerate().skip(first_trailing) {
-                            trmaps.push(TextRangeMap {
-                                from_offset: s.len(),
-                                to: TextRangeMapTo::VarargSeparator { macro_text },
-                            });
-                            s.push_str(", ");
-                            trmaps.push(TextRangeMap {
-                                from_offset: s.len(),
-                                to: TextRangeMapTo::ArgumentIdx(i),
-                            });
-                            s.push_str(arg);
                         }
                     }
-                }
-                MacroTokenKind::StringifyOperator => {
-                    let from_offset = s.len();
-                    let (argument_idx, param_range) = match iter.next() {
-                        Some(MacroToken {
-                            kind: MacroTokenKind::Parameter(idx),
-                            text_range,
-                        }) => {
-                            let text = self.param_value(arguments, *idx).unwrap_or_default();
-                            s.push_str(&stringify(&text));
-                            (idx, text_range)
-                        }
-                        Some(MacroToken {
-                            kind:
-                                MacroTokenKind::Word(_)
-                                | MacroTokenKind::WordNoWhitespace(_)
-                                | MacroTokenKind::ConcatOperator
-                                | MacroTokenKind::StringifyOperator,
-                            ..
-                        })
-                        | None => {
-                            // Forbidden by parser
-                            unreachable!()
-                        }
-                    };
-                    trmaps.push(TextRangeMap {
-                        from_offset,
-                        to: TextRangeMapTo::Stringify {
-                            macro_text: token.text_range.to(*param_range),
-                            argument_idx: *argument_idx,
-                        },
-                    });
-                }
+
+                    Some(MacroToken {
+                        kind: MacroTokenKind::ConcatOperator | MacroTokenKind::StringifyOperator,
+                        ..
+                    })
+                    | None => {
+                        // Forbidden by parser
+                        unreachable!()
+                    }
+                },
+
+                MacroTokenKind::StringifyOperator => match iter.next() {
+                    Some(MacroToken {
+                        kind: MacroTokenKind::Parameter(idx),
+                        text_range,
+                    }) => {
+                        let text = self.param_value(arguments, *idx).unwrap_or_default();
+
+                        sink.push_str(
+                            &stringify(&text),
+                            TextRangeMapTo::Stringify {
+                                macro_text: token.text_range.to(*text_range),
+                                argument_idx: *idx,
+                            },
+                        );
+                    }
+                    Some(MacroToken {
+                        kind:
+                            MacroTokenKind::Word(_)
+                            | MacroTokenKind::WordNoWhitespace(_)
+                            | MacroTokenKind::ConcatOperator
+                            | MacroTokenKind::StringifyOperator,
+                        ..
+                    })
+                    | None => {
+                        // Forbidden by parser
+                        unreachable!()
+                    }
+                },
             }
             push_ws = true;
         }
 
-        Ok(SubstitutedBody {
-            source_mappings: trmaps,
-            substituted_text: s,
-        })
+        Ok(sink)
+    }
+}
+
+/// Substituted macro body from [`MacroDefinition::substitute`].
+pub struct SubstitutedBody {
+    pub source_mappings: Vec<TextRangeMap>,
+    pub substituted_text: String,
+}
+
+/// Parser-internal sink functions
+impl SubstitutedBody {
+    /// Pushes whitespace.
+    fn push_ws(&mut self) {
+        self.push_str(" ", TextRangeMapTo::GeneratedWhitespace);
+    }
+
+    /// Pushes a new source mapping and text.
+    fn push_str(&mut self, text: &str, to: TextRangeMapTo) {
+        self.source_mappings.push(TextRangeMap {
+            from_offset: self.substituted_text.len(),
+            to,
+        });
+        self.substituted_text.push_str(text);
+    }
+
+    /// Concatenates to the previous source mapping and text.
+    fn push_concat_str(&mut self, text: &str, to: TextRangeMapTo, token: &MacroToken) {
+        // The parser assures that there is a token before a concat
+        let prev = self
+            .source_mappings
+            .last_mut()
+            .expect("should be a token before concat");
+
+        prev.to = TextRangeMapTo::Concat {
+            operator: token.text_range,
+            sources: Box::new([prev.to.clone(), to]),
+        };
+
+        self.substituted_text.push_str(text);
     }
 }
 
@@ -724,7 +780,7 @@ pub enum MacroSubstitutionError {
 /// Also known as `trmap`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextRangeMap {
-    /// Map ranges in the output from `from_offset` to the next `TextRangeMap`'s `from_offset`
+    /// The starting offset of this source mapping inside [`SubstitutedBody::substituted_text`].
     pub from_offset: usize,
     /// Where to map it to
     pub to: TextRangeMapTo,
@@ -739,10 +795,10 @@ impl TextRangeMap {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextRangeMapTo {
-    /// Forward to argument at index
+    /// Forward to the argument at index
     ArgumentIdx(usize),
     /// Forward to offset in macro definition string
-    MacroTextOffset(usize),
+    MacroTextOffset(TextRange),
     /// Forward to sources
     Concat {
         /// The concat operator's range in the macro body.
@@ -750,17 +806,19 @@ pub enum TextRangeMapTo {
         /// The left and right sources.
         sources: Box<[TextRangeMapTo; 2]>,
     },
-    /// The `, ` joining two variadic arguments; not present in the source.
-    VarargSeparator {
+    /// The `, ` joining two variadic arguments
+    GeneratedVarargSeparator {
         /// The vararg parameter's range in the macro body.
         macro_text: TextRange,
     },
-    /// Forward to offset in macro definition and argument at index
+    /// Forward to offset in macro definition string and argument at index
     Stringify {
-        /// [ `TextRange` ] instead of offset because we aren't doing precise mapping in strings.
+        /// [`TextRange`] instead of offset because we aren't doing precise mapping in strings.
         macro_text: TextRange,
         argument_idx: usize,
     },
+    /// A single space ` `
+    GeneratedWhitespace,
 }
 
 impl TextRangeMapTo {
@@ -768,7 +826,7 @@ impl TextRangeMapTo {
     fn test_fmt(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
         match self {
             Self::ArgumentIdx(idx) => write!(f, "arg_{idx}"),
-            Self::MacroTextOffset(offset) => write!(f, "macro+{offset}"),
+            Self::MacroTextOffset(range) => write!(f, "macro+{}", range.start),
             Self::Concat { operator, sources } => {
                 for (i, to) in sources.iter().enumerate() {
                     if i != 0 {
@@ -778,21 +836,16 @@ impl TextRangeMapTo {
                 }
                 Ok(())
             }
-            Self::VarargSeparator { macro_text } => {
+            Self::GeneratedVarargSeparator { macro_text } => {
                 write!(f, "vararg_separator(macro+{macro_text})")
             }
             Self::Stringify {
                 macro_text,
                 argument_idx: argument,
             } => write!(f, "stringify(macro+{macro_text}, arg_{argument})"),
+            Self::GeneratedWhitespace => f.write_str("whitespace"),
         }
     }
-}
-
-/// Substituted macro body from [`MacroDefinition::substitute`].
-pub struct SubstitutedBody {
-    pub source_mappings: Vec<TextRangeMap>,
-    pub substituted_text: String,
 }
 
 /// Substitutes a macro's arguments from a macro invocation AST.
@@ -939,6 +992,10 @@ mod tests {
 
         let mut trmaps_str = String::new();
         for trmap in source_mappings {
+            if let TextRangeMapTo::GeneratedWhitespace = trmap.to {
+                continue;
+            }
+
             trmap.test_fmt(&mut trmaps_str).ok();
             trmaps_str.push('\n');
         }

@@ -114,7 +114,7 @@ pub fn eval(
 
             let child_map = SourceMap::Macro {
                 parent: diag.map,
-                expansion: &expansion,
+                substitution: &expansion,
             };
             eval(
                 db,

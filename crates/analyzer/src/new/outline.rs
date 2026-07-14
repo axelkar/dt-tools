@@ -73,12 +73,12 @@ pub enum PPIncludeParseError {
 }
 
 pub(crate) fn subslice_offset(this: &str, inner: &str) -> Option<usize> {
-    let self_beg = this.as_ptr() as usize;
+    let this_start = this.as_ptr() as usize;
     let inner = inner.as_ptr() as usize;
-    if inner < self_beg || inner > self_beg.wrapping_add(this.len()) {
+    if inner < this_start || inner > this_start.wrapping_add(this.len()) {
         None
     } else {
-        Some(inner.wrapping_sub(self_beg))
+        Some(inner.wrapping_sub(this_start))
     }
 }
 

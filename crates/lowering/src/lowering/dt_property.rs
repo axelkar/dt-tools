@@ -1,6 +1,6 @@
-use std::{borrow::Cow, num::ParseIntError, str::FromStr, sync::Arc};
+use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
-use dt_tools_analyzer::{macros::SubstitutedBody, string::interpret_escaped_string};
+use dt_tools_analyzer::string::interpret_escaped_string;
 use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     TextRange,
@@ -13,7 +13,7 @@ use num_traits::{AsPrimitive, Num};
 
 use super::{IntraFileCtx, lower_phandle, resolve_macro_to_ast};
 use crate::{
-    diag::{Diag, MacroExpansion, SourceMap},
+    diag::{Diag, SourceMap},
     emit_parse_errors,
     expr_eval::{self, interpret_escaped_char_tok, parse_int_tok},
     extra_num_traits::{Bits, Signedness},
@@ -45,21 +45,16 @@ fn try_lower_macro_expanded_items(
 
     let name_ast = prop.name();
     let invoc = prop.macro_invocation();
-    let macro_ctx = if let Some(ref invoc) = invoc {
+    let macro_ctx = if let Some(invoc) = &invoc {
         MacroCtx::Explicit(invoc)
-    } else if let Some(ref name) = name_ast {
+    } else if let Some(name) = &name_ast {
         MacroCtx::Implicit(name)
     } else {
         return Ok(false);
     };
 
-    let Some((
-        SubstitutedBody {
-            source_mappings,
-            substituted_text,
-        },
-        macro_def,
-    )) = substitute_macro_tok(ctx.db, ctx.env, diag, &macro_ctx)?
+    let Some((expansion, substituted_text)) =
+        substitute_macro_tok(ctx.db, ctx.env, diag, &macro_ctx)?
     else {
         // Implicit macro not defined
         return Ok(false);
@@ -76,15 +71,9 @@ fn try_lower_macro_expanded_items(
         return Ok(false);
     }
 
-    let expansion = MacroExpansion {
-        source_mappings,
-        macro_def,
-        args: macro_ctx.arg_ranges(),
-        invocation: macro_ctx.text_range(),
-    };
     let child_map = SourceMap::Macro {
         parent: diag.map,
-        expansion: &expansion,
+        substitution: &expansion,
     };
     let mut child_diag = Diag::new(&mut *diag.sink, &child_map);
     emit_parse_errors(&parse, &mut child_diag);
@@ -126,9 +115,7 @@ pub(crate) fn lower_dt_property(
     let path = build_path(parent_node_path, &name);
 
     let text_range = prop.syntax().text_range();
-    let provenance = MirProvenance {
-        span: diag.resolve(text_range),
-    };
+    let provenance = MirProvenance::from_diag(diag, text_range);
 
     ctx.mir.definitions.push(MirDefinition {
         path,
@@ -186,7 +173,7 @@ pub(crate) fn lower_prop_value(
             expansion_stack.push(name);
             let child_map = SourceMap::Macro {
                 parent: diag.map,
-                expansion: &expansion,
+                substitution: &expansion,
             };
             let result = lower_prop_value(
                 ctx,
@@ -203,7 +190,7 @@ pub(crate) fn lower_prop_value(
             // TODO: implement
             diag.emit(
                 dir.syntax().text_range(),
-                Cow::Borrowed("Currently unimplemented in property values"),
+                "Currently unimplemented in property values",
                 Severity::Error,
             );
         }
@@ -220,7 +207,7 @@ pub(crate) fn lower_prop_value(
             // TODO: implement
             diag.emit(
                 dir.syntax().text_range(),
-                Cow::Borrowed("Currently unimplemented in property values"),
+                "Currently unimplemented in property values",
                 Severity::Error,
             );
         }
@@ -238,7 +225,7 @@ pub fn interpret_escaped_string_tok(
         Err(err) => {
             diag.emit(
                 tok.text_range(),
-                Cow::Owned(format!("Failed to parse string: {err}")),
+                format!("Failed to parse string: {err}"),
                 Severity::Error,
             );
             Err(())
@@ -270,7 +257,7 @@ fn lower_bytestring(diag: &mut Diag<'_, '_>, tok: &Arc<RedToken>) -> Result<Vec<
     if first_nibble.is_some() {
         diag.emit(
             tok.text_range(),
-            Cow::Borrowed("Bytestring is missing a hex digit"),
+            "Bytestring is missing a hex digit",
             Severity::Error,
         );
         Err(())
@@ -309,9 +296,7 @@ impl BitsSize {
             _ => {
                 diag.emit(
                     bits_number_tok.text_range(),
-                    Cow::Owned(format!(
-                        "Unsupported /bits/: {bits}. Cells must be 8, 16, 32 or 64 bits."
-                    )),
+                    format!("Unsupported /bits/: {bits}. Cells must be 8, 16, 32 or 64 bits."),
                     Severity::Error,
                 );
                 return Err(());
@@ -400,10 +385,10 @@ fn lower_cell<T: LowerCell>(
             } else {
                 diag.emit(
                     tok.text_range(),
-                    Cow::Owned(format!(
+                    format!(
                         "character value {ch:?}={val} too large for {}-bit cell",
                         T::Number::BITS
-                    )),
+                    ),
                     Severity::Error,
                 );
                 return Err(());
@@ -444,7 +429,7 @@ fn lower_cell<T: LowerCell>(
 
             let child_map = SourceMap::Macro {
                 parent: diag.map,
-                expansion: &expansion,
+                substitution: &expansion,
             };
             lower_cell::<T>(
                 ctx,
@@ -458,7 +443,7 @@ fn lower_cell<T: LowerCell>(
             // TODO: implement
             diag.emit(
                 dir.syntax().text_range(),
-                Cow::Borrowed("Currently unimplemented in cells"),
+                "Currently unimplemented in cells",
                 Severity::Error,
             );
         }
@@ -475,7 +460,7 @@ fn lower_cell<T: LowerCell>(
             // TODO: implement
             diag.emit(
                 dir.syntax().text_range(),
-                Cow::Borrowed("Currently unimplemented in cells"),
+                "Currently unimplemented in cells",
                 Severity::Error,
             );
         }
@@ -488,10 +473,10 @@ fn emit_overflow(num: i64, range: TextRange, bits: u32, diag: &mut Diag<'_, '_>)
     let cmp = if num < 0 { "small" } else { "large" };
     diag.emit(
         range,
-        Cow::Owned(format!(
+        format!(
             "number {num} too {cmp} to fit in {bits}-bit signed integer \
              (using two's complement) or {bits}-bit unsigned integer"
-        )),
+        ),
         Severity::Error,
     );
 }
@@ -500,9 +485,9 @@ fn emit_overflow(num: i64, range: TextRange, bits: u32, diag: &mut Diag<'_, '_>)
 fn emit_phandle_rejected(phandle_range: TextRange, bits: u32, diag: &mut Diag<'_, '_>) {
     diag.emit(
         phandle_range,
-        Cow::Owned(format!(
+        format!(
             "phandle reference not valid in {bits}-bit cells (only 32-bit cell lists support phandles)"
-        )),
+        ),
         Severity::Error,
     );
 }
@@ -741,7 +726,7 @@ bar = "baz";
                 expect![[r#"
                     dts-v1 /main.dts L2:1-L2:10
                     node / /main.dts L4:1-L4:14
-                    property /bare; /main.dts L3:15-L4:1
+                    property /bare; /main.dts L3:15-L3:19
                 "#]],
             );
         }
@@ -758,8 +743,8 @@ bar = "baz";
                 expect![[r#"
                     dts-v1 /main.dts L2:1-L2:10
                     node / /main.dts L4:1-L4:14
-                    node /foo labels=[LBL] /main.dts L3:15-L3:36
-                    property /foo/bar = "baz"; /main.dts L3:26-L3:37
+                    node /foo labels=[LBL] /main.dts L3:15-L3:40
+                    property /foo/bar = "baz"; /main.dts L3:26-L3:38
                 "#]],
             );
         }
@@ -776,7 +761,7 @@ bar = "baz";
                 expect![[r#"
                     dts-v1 /main.dts L2:1-L2:10
                     node / /main.dts L4:1-L4:14
-                    property /bar = <42>; /main.dts L3:15-L4:3
+                    property /bar = <42>; /main.dts L3:15-L3:25
                 "#]],
             );
         }
@@ -793,7 +778,7 @@ bar = "baz";
                 expect![[r#"
                     dts-v1 /main.dts L2:1-L2:10
                     node / /main.dts L4:1-L4:14
-                    node /a /main.dts L3:15-L3:19
+                    node /a /main.dts L3:15-L3:20
                     node /b /main.dts L3:21-L3:25
                 "#]],
             );
@@ -810,8 +795,8 @@ MACRO;
                 &[],
                 expect![[r#"
                     dts-v1 /main.dts L2:1-L2:10
-                    node / /main.dts L3:15-L3:25
-                    node /foo /main.dts L3:19-L3:25
+                    node / /main.dts L3:15-L3:28
+                    node /foo /main.dts L3:19-L3:26
                 "#]],
             );
         }
@@ -828,10 +813,10 @@ MACRO;
                 expect![[r#"
                     dts-v1 /main.dts L2:1-L2:10
                     node / /main.dts L4:1-L4:14
-                    property /bar = <42>; /main.dts L3:15-L4:2
+                    property /bar = <42>; /main.dts L3:15-L3:26
 
                     --- errors ---
-                    Error L3:26: Unmatched `;` [dt-tools(syntax-error)]
+                    Error L4:5-L4:10: Unmatched `;` [dt-tools(syntax-error)]
                 "#]],
             );
         }

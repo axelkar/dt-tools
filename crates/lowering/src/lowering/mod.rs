@@ -6,7 +6,6 @@
 use std::borrow::Cow;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use dt_tools_analyzer::macros::SubstitutedBody;
 use dt_tools_diagnostic::{Diagnostic, Severity, Span};
 use dt_tools_parser::{
     ast::{self, AstNode, AstNodeOrToken, AstToken, HasMacroInvocation, HasName},
@@ -15,7 +14,7 @@ use dt_tools_parser::{
 
 use crate::{
     db::BaseDb,
-    diag::{Diag, MacroExpansion, SourceMap},
+    diag::{Diag, MacroSubstitutionProvenance, SourceMap},
     emit_parse_errors,
     file::File,
     includes::IncludeDirs,
@@ -184,23 +183,11 @@ pub(crate) fn resolve_macro_to_ast<'db, AstType: AstNodeOrToken>(
     diag: &mut Diag<'_, '_>,
     macro_ctx: &MacroCtx,
     entrypoint: Entrypoint,
-) -> Result<Option<(AstType, MacroExpansion)>, ()> {
-    let Some((
-        SubstitutedBody {
-            source_mappings,
-            substituted_text,
-        },
-        macro_def,
-    )) = substitute_macro_tok(db, env, diag, macro_ctx)?
+) -> Result<Option<(AstType, MacroSubstitutionProvenance)>, ()> {
+    let Some((expansion, substituted_text)) = substitute_macro_tok(db, env, diag, macro_ctx)?
     else {
+        // Implicit macro not defined
         return Ok(None);
-    };
-
-    let expansion = MacroExpansion {
-        source_mappings,
-        macro_def,
-        args: macro_ctx.arg_ranges(),
-        invocation: macro_ctx.text_range(),
     };
 
     let parse = entrypoint.parse(&substituted_text);
@@ -208,7 +195,7 @@ pub(crate) fn resolve_macro_to_ast<'db, AstType: AstNodeOrToken>(
     {
         let child_map = SourceMap::Macro {
             parent: diag.map,
-            expansion: &expansion,
+            substitution: &expansion,
         };
         emit_parse_errors(&parse, &mut Diag::new(&mut *diag.sink, &child_map));
     }
@@ -269,7 +256,7 @@ fn lower_phandle<'db>(
 
         let child_map = SourceMap::Macro {
             parent: diag.map,
-            expansion: &expansion,
+            substitution: &expansion,
         };
         Ok(lower_phandle(
             db,
@@ -307,7 +294,7 @@ fn lower_phandle<'db>(
         .map(|(ast, expansion)| {
             let child_map = SourceMap::Macro {
                 parent: diag.map,
-                expansion: &expansion,
+                substitution: &expansion,
             };
             lower_phandle(db, env, &mut Diag::new(&mut *diag.sink, &child_map), &ast)
         })

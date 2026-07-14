@@ -286,17 +286,13 @@ pub(crate) fn handle_dts_directive(
         ctx.mir.definitions.push(MirDefinition {
             path: parent_node_path.to_owned(),
             value: MirDefinitionValue::V1Directive,
-            provenance: MirProvenance {
-                span: diag.resolve(dir.syntax().text_range()),
-            },
+            provenance: MirProvenance::from_diag(diag, dir.syntax().text_range()),
         });
     } else if kind == Some(TokenKind::PluginDirective) {
         ctx.mir.definitions.push(MirDefinition {
             path: parent_node_path.to_owned(),
             value: MirDefinitionValue::PluginDirective,
-            provenance: MirProvenance {
-                span: diag.resolve(dir.syntax().text_range()),
-            },
+            provenance: MirProvenance::from_diag(diag, dir.syntax().text_range()),
         });
     } else {
         emit_delete_directive(ctx, diag, parent_node_path, dir);
@@ -314,9 +310,7 @@ pub(crate) fn emit_delete_directive(
     let Some(args) = dir.arguments() else { return };
 
     let text_range = dir.syntax().text_range();
-    let provenance = MirProvenance {
-        span: diag.resolve(text_range),
-    };
+    let provenance = MirProvenance::from_diag(diag, text_range);
 
     if kind == Some(TokenKind::DeleteNodeDirective) {
         let target_path = if let Ok(name) = get_name_and_unit_addr(ctx.db, ctx.env, diag, &args) {

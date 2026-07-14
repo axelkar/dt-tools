@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use dt_tools_analyzer::macros::{MacroDefinition, SubstitutedBody};
-use dt_tools_diagnostic::{Severity, Span};
+use dt_tools_analyzer::macros::MacroDefinition;
+use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstToken},
@@ -9,7 +9,20 @@ use dt_tools_parser::{
 };
 use rustc_hash::FxHashSet;
 
-use crate::{db::BaseDb, diag::Diag, file::File, macros::env::TrackedMapEnvMut};
+use crate::{
+    db::BaseDb,
+    diag::{Diag, MacroSubstitutionProvenance},
+    macros::env::TrackedMapEnvMut,
+};
+
+/// A macro expansion that happened during argument prescan.
+#[derive(Debug, Clone)]
+pub(crate) struct PrescanExpansion {
+    /// The macro substitution provenance.
+    pub substitution: MacroSubstitutionProvenance,
+    /// This expansion's output within the prescan output text.
+    pub output_range: TextRange,
+}
 
 pub mod env;
 
@@ -49,31 +62,57 @@ impl MacroCtx<'_> {
     }
 }
 
-/// Split a `MACRO(a, b, c)` token stream into argument strings.
+/// Collects the trimmed argument string and its non-empty token range from a span of tokens.
+fn collect_arg(tokens: &[lexer::Token<'_>]) -> (String, TextRange) {
+    let arg = tokens.iter().map(|t| t.text).collect::<String>();
+    let trimmed = arg.trim().to_owned();
+    let mut first = None;
+    let mut last = None;
+    for t in tokens {
+        if !t.text.trim().is_empty() {
+            first.get_or_insert(t.text_range.start);
+            last = Some(t.text_range.end);
+        }
+    }
+    let range = match (first, last) {
+        (Some(s), Some(e)) => TextRange::new(s, e),
+        _ => tokens
+            .first()
+            .map_or(TextRange::new(0, 0), |t| t.text_range),
+    };
+    (trimmed, range)
+}
+
+/// Split a `MACRO(a, b, c)` token stream into argument strings plus range metadata.
 ///
-/// `lparen_idx` is the index of the `(` token.
+/// `lparen_idx` is the index of the `(` token. `name_range` is the range of the macro name token.
 fn extract_args_from_tokens(
     tokens: &[lexer::Token<'_>],
     lparen_idx: usize,
-) -> (usize, Vec<String>) {
+    name_range: TextRange,
+) -> (usize, Vec<String>, Vec<TextRange>, TextRange) {
     let mut level = 0u32;
     let mut start = lparen_idx + 1;
     let mut args = Vec::new();
+    let mut arg_ranges = Vec::new();
 
     for (i, tok) in tokens.iter().enumerate().skip(lparen_idx + 1) {
         match tok.kind {
             Ok(TokenKind::LParen) => level += 1,
             Ok(TokenKind::RParen) if level == 0 => {
-                let arg = tokens[start..i].iter().map(|t| t.text).collect::<String>();
-                if !arg.trim().is_empty() || !args.is_empty() {
-                    args.push(arg.trim().to_owned());
+                let (arg, range) = collect_arg(&tokens[start..i]);
+                if !arg.is_empty() || !args.is_empty() {
+                    args.push(arg);
+                    arg_ranges.push(range);
                 }
-                return (i, args);
+                let invoc = TextRange::new(name_range.start, tok.text_range.end);
+                return (i, args, arg_ranges, invoc);
             }
             Ok(TokenKind::RParen) => level -= 1,
             Ok(TokenKind::Comma) if level == 0 => {
-                let arg = tokens[start..i].iter().map(|t| t.text).collect::<String>();
-                args.push(arg.trim().to_owned());
+                let (arg, range) = collect_arg(&tokens[start..i]);
+                args.push(arg);
+                arg_ranges.push(range);
                 start = i + 1;
             }
             _ => {}
@@ -81,7 +120,7 @@ fn extract_args_from_tokens(
     }
 
     // No matching RParen found
-    (tokens.len().saturating_sub(1), args)
+    (tokens.len().saturating_sub(1), args, arg_ranges, name_range)
 }
 
 /// Single-pass macro expansion with inline replacement.
@@ -96,10 +135,7 @@ fn expand_macros_in_text<'db>(
     let mut i = 0;
 
     while let Some(tok) = tokens.get(i) {
-        if tok.kind != Ok(TokenKind::Ident)
-            || disabled.contains(tok.text)
-            || env.get_macro_def(db, tok.text).is_none()
-        {
+        if tok.kind != Ok(TokenKind::Ident) || env.get_macro_def(db, tok.text).is_none() {
             out.push_str(tok.text);
             i += 1;
             continue;
@@ -107,6 +143,12 @@ fn expand_macros_in_text<'db>(
 
         let macro_name = tok.text.to_owned();
         let def = env.get_macro_def(db, &macro_name).unwrap();
+
+        if disabled.contains(&macro_name) {
+            out.push_str(tok.text);
+            i += 1;
+            continue;
+        }
 
         // Gather arguments (empty vec for object-like macros).
         let (args, advance_to) = if def.param_count() == 0 {
@@ -121,7 +163,8 @@ fn expand_macros_in_text<'db>(
             if let Some(tok) = tokens.get(j)
                 && tok.kind == Ok(TokenKind::LParen)
             {
-                let (rparen_idx, args) = extract_args_from_tokens(&tokens, j);
+                let (rparen_idx, args, _arg_ranges, _invoc) =
+                    extract_args_from_tokens(&tokens, j, tok.text_range);
                 (args, rparen_idx + 1)
             } else {
                 // Names a function-like macro but isn't followed by `(`.
@@ -141,8 +184,6 @@ fn expand_macros_in_text<'db>(
         let expanded = expand_macros_in_text(db, env, &sub.substituted_text, disabled);
         out.push_str(&expanded);
         disabled.remove(&macro_name);
-
-        // TODO: source mapping for prescan. we need (File, TextRange) provenance (TextRangeMap isn't enough for multi-file)
 
         i = advance_to;
     }
@@ -187,7 +228,7 @@ pub(crate) fn substitute_macro_tok<'db>(
     env: &TrackedMapEnvMut<'db>,
     diag: &mut Diag<'_, '_>,
     macro_ctx: &MacroCtx,
-) -> Result<Option<(SubstitutedBody, Span<File>)>, ()> {
+) -> Result<Option<(MacroSubstitutionProvenance, String)>, ()> {
     let name = macro_ctx.name();
 
     let Some((def, def_span)) = env.get_macro(db, name).map(|(def, span)| (def, *span)) else {
@@ -221,9 +262,21 @@ pub(crate) fn substitute_macro_tok<'db>(
     let mut disabled: FxHashSet<String> = FxHashSet::default();
 
     let arguments = prescan_arguments(db, env, &raw_arguments, def, &mut disabled);
+    // TODO: map back prescanned arguments too (PrescanExpansion). currently maps to raw_arguments...
 
     match def.substitute(&arguments) {
-        Ok(substituted_body) => Ok(Some((substituted_body, def_span))),
+        Ok(substituted_body) => Ok(Some((
+            MacroSubstitutionProvenance {
+                name: macro_ctx.name().to_owned(),
+                source_mappings: substituted_body.source_mappings,
+                substituted_text_len: substituted_body.substituted_text.len(),
+                def: def.clone(),
+                def_span,
+                args: macro_ctx.arg_ranges(),
+                invocation: macro_ctx.text_range(),
+            },
+            substituted_body.substituted_text,
+        ))),
         Err(err) => {
             diag.emit(macro_ctx.text_range(), err.to_string(), Severity::Error);
             Err(())

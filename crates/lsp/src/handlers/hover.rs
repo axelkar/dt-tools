@@ -165,12 +165,12 @@ fn mir_definition_section(
             ),
             MirDefinitionValue::DeletedNode => format!("Node {path_part}deleted "),
             MirDefinitionValue::DeletedProperty => format!("Property {path_part}deleted "),
-            MirDefinitionValue::V1Directive => "`/dts-v1/;`".to_owned(),
-            MirDefinitionValue::PluginDirective => "`/plugin/;`".to_owned(),
+            MirDefinitionValue::V1Directive => "`/dts-v1/;` defined ".to_owned(),
+            MirDefinitionValue::PluginDirective => "`/plugin/;` defined ".to_owned(),
         };
 
         let is_here = def == most_precise;
-        fmt_span(db, &def.provenance.span, is_here, &mut s);
+        fmt_span(db, &def.provenance.primary_span(), is_here, &mut s);
 
         s
     }
@@ -182,10 +182,10 @@ fn mir_definition_section(
         .definitions
         .iter()
         .filter(|def| {
-            def.provenance.span.file == file
+            def.provenance.primary_span().file == file
                 && def
                     .provenance
-                    .span
+                    .primary_span()
                     .text_range
                     .byte_range()
                     .contains(&offset)
@@ -206,7 +206,7 @@ fn mir_definition_section(
                 .collect_vec()
                 .join("\n- ")
         ),
-        most_precise.provenance.span.text_range,
+        most_precise.provenance.primary_span().text_range,
     ))
 }
 

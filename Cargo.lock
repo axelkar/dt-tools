@@ -475,6 +475,7 @@ name = "dt-tools-diagnostic"
 version = "0.1.0"
 dependencies = [
  "codespan-reporting",
+ "expect-test",
  "parking_lot",
 ]
 
@@ -520,6 +521,7 @@ name = "dt-tools-lsp"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "color-eyre",
  "dashmap 7.0.0-rc2",
  "dt-tools-analyzer",
  "dt-tools-diagnostic",

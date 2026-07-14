@@ -32,9 +32,7 @@ pub(crate) fn lower_dt_node(
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
-    let provenance = MirProvenance {
-        span: diag.resolve(dt_node.syntax().text_range()),
-    };
+    let provenance = MirProvenance::from_diag(diag, dt_node.syntax().text_range());
     let omit_if_no_ref = dt_node.omit_if_no_ref();
 
     let lower_resolved = |ctx: &mut _, diag: &mut _, provenance, node_path: &String| {
@@ -247,7 +245,7 @@ pub(crate) fn resolve_name_or_macro<'db, Ast: HasName + HasMacroInvocation>(
 
     let child_map = SourceMap::Macro {
         parent: diag.map,
-        expansion: &expansion,
+        substitution: &expansion,
     };
     resolve_name_or_macro(db, env, &mut Diag::new(&mut *diag.sink, &child_map), &ast)
 }

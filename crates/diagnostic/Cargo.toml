@@ -15,6 +15,9 @@ license.workspace = true
 parking_lot = { workspace = true, optional = true }
 codespan-reporting = { workspace = true, optional = true }
 
+[dev-dependencies]
+expect-test.workspace = true
+
 [features]
 ## Enables implementation of DiagnosticCollector for parking_lot::Mutex<Vec<Diagnostic>>
 parking_lot = ["dep:parking_lot"]

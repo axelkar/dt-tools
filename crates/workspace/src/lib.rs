@@ -8,7 +8,7 @@ pub mod config;
 mod search;
 
 /// A marker to determine the Linux kernel tree root
-const LINUX_MARKER: &str = "include/dt-bindings";
+pub const LINUX_MARKER: &str = "include/dt-bindings";
 
 #[derive(Debug)]
 pub struct Workspace {

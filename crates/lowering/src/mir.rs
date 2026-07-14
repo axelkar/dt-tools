@@ -1,8 +1,12 @@
 use std::{borrow::Cow, collections::BTreeSet, fmt};
 
-use dt_tools_diagnostic::Span;
+use dt_tools_diagnostic::{MultiSpan, Span};
+use dt_tools_parser::TextRange;
 
-use crate::file::{DisplaySpanLineColumn, File};
+use crate::{
+    diag::Diag,
+    file::{DisplaySpanLineColumn, File},
+};
 
 fn strip_base<'a>(this: &'a str, base: &str) -> Option<&'a str> {
     if this == base {
@@ -92,14 +96,16 @@ impl Mir {
                 format!(" {}", def.path)
             };
 
+            let primary_span = def.provenance.primary_span();
+
             let _ = writeln!(
                 out,
                 "{}{}{} {} {}",
                 kind,
                 path_part,
                 after_path,
-                def.provenance.span.file.path(db),
-                DisplaySpanLineColumn(&def.provenance.span, db)
+                primary_span.file.path(db),
+                DisplaySpanLineColumn(&primary_span, db)
             );
         }
         if !self.unresolved_extensions.is_empty() {
@@ -209,10 +215,53 @@ impl Mir {
     }
 }
 
-/// One source location that contributed to a definition.
+/// Source locations that contributed to a definition, with notes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MirProvenance {
-    pub span: Span<File>,
+pub struct MirProvenance(pub MultiSpan<File>);
+
+impl MirProvenance {
+    /// Creates a `MirProvenance` from a single span with no labels.
+    #[must_use]
+    pub fn new(span: Span<File>) -> Self {
+        Self(MultiSpan::from(span))
+    }
+
+    /// Creates a `MirProvenance` from a [`Diag`] by resolving `range` through the full source map.
+    ///
+    /// Captures both the first primary span and all provenance labels.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the source map resolution yields no primary spans (should never happen;
+    /// `SourceMap::File` always produces at least one).
+    #[must_use]
+    pub fn from_diag(diag: &Diag<'_, '_>, range: TextRange) -> Self {
+        Self(diag.resolve_full(range))
+    }
+
+    /// Returns the first primary span of the [`MultiSpan`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if there are no primary spans.
+    #[must_use]
+    pub fn primary_span(&self) -> Span<File> {
+        *self
+            .0
+            .primary_spans
+            .first()
+            .expect("multispan should have at least one primary span")
+    }
+}
+impl From<MirProvenance> for MultiSpan<File> {
+    fn from(value: MirProvenance) -> Self {
+        value.0
+    }
+}
+impl From<MultiSpan<File>> for MirProvenance {
+    fn from(value: MultiSpan<File>) -> Self {
+        Self(value)
+    }
 }
 
 /// Flat MIR definition with a path

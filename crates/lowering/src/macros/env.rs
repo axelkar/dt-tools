@@ -30,14 +30,14 @@ pub struct TrackedMapEnv<'db> {
 #[salsa::tracked]
 impl<'db> TrackedMapEnv<'db> {
     /// Salsa ingredients like [`TrackedMapEnv`] changing won't directly cause a tracked function to
-    /// get recomputed but the results of queries like [`TrackedMapEnv::own_map()`] or
-    /// [`TrackedMapEnv::get()`] will.
+    /// get recomputed but the results of queries like [`TrackedMapEnv::own_macro_map()`] or
+    /// [`TrackedMapEnv::get_macro()`] will.
     ///
-    /// We can use backdating and a wrapping tracked function (this `get`) to our advantage. The
+    /// We can use backdating and a wrapping tracked function (this `get_macro`) to our advantage. The
     /// depending tracked function only gets recomputed if the output of `get` changes.
     ///
     /// We have to clone the output value because it has to be stored in the Salsa database without
-    /// referring to [`TrackedMapEnv::own_map`].
+    /// referring to [`TrackedMapEnv::own_macro_map`].
     #[salsa::tracked(returns(as_ref), lru = 512)]
     pub fn get_macro(
         self,
