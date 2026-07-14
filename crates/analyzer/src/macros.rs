@@ -1,41 +1,12 @@
 //! Preprocessor macro implementation
 //!
 //! Macro substitution, parameters, ternary operator are evaluated here
-// TODO: rewrite the parser to understand UTF-8 and to have clearer code
 
 use std::{borrow::Cow, iter::Peekable, str::Chars};
 
-use dt_tools_parser::{TextRange, ast, parser::Entrypoint};
+use dt_tools_parser::{TextRange, ast};
 
 use crate::new::outline::subslice_offset;
-
-// TODO: use this enum
-#[expect(dead_code, reason = "not yet implemented")]
-pub(crate) enum MacroContext {
-    /// In value context or extension name context, after ampersand: `foo = &BAR(baz);`
-    Reference,
-    /// Node, property or label name, e.g. `FOO(baz): BAR(baz) {};`
-    NameDefinition,
-    /// Property value context, e.g. `foo = BAR(baz);`
-    Value,
-    /// Cell value context, e.g. `foo = <BAR(baz)>;`
-    Cell,
-    /// Item context, e.g. `/ { FOO(bar); };`
-    Item,
-}
-#[expect(dead_code, reason = "not yet implemented")]
-impl MacroContext {
-    /// Returns the entrypoint for parsing the macro's output.
-    fn entrypoint(&self) -> Entrypoint {
-        match self {
-            Self::Reference => Entrypoint::ReferenceNoamp,
-            Self::NameDefinition => Entrypoint::Name,
-            Self::Value => Entrypoint::PropValues,
-            Self::Cell => Entrypoint::Cells,
-            Self::Item => Entrypoint::SourceFile,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MacroTokenKind {
@@ -55,7 +26,6 @@ struct MacroToken {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Param {
-    // TODO: handle vararg substitution with commas etc.
     is_vararg: bool,
     name: String,
 }
@@ -70,8 +40,13 @@ struct Parser<'params, 'input> {
     /// List of (already) processed tokens
     body_tokens: Vec<MacroToken>,
     dont_prescan_indices: Vec<usize>,
-    expect_stringify_param: bool,
-    /// If expecting a concat param, the concat token's range is stored here
+    /// Whether the parser is expecting something after a stringify operator.
+    ///
+    /// The stringify operator's range is stored here
+    expect_stringify_param: Option<TextRange>,
+    /// Whether the parser is expecting something after a concat operator.
+    ///
+    /// The concat operator's range is stored here
     expect_concat_param: Option<TextRange>,
 }
 impl Parser<'_, '_> {
@@ -129,18 +104,10 @@ impl Parser<'_, '_> {
     }
     #[inline]
     fn push_tok(&mut self, tok: MacroToken) -> Result<(), MacroDefinitionParseError> {
-        if self.expect_concat_param.is_some() {
-            if let MacroTokenKind::Parameter(i) = tok.kind {
-                self.dont_prescan_indices.push(i);
-            } else if let MacroTokenKind::Word(_) = tok.kind {
-            } else {
-                return Err(MacroDefinitionParseError::ConcatInvalidToken {
-                    text_range: tok.text_range,
-                });
-            }
+        if self.expect_concat_param.take().is_some() {
+            Self::handle_concat_param(&mut self.dont_prescan_indices, &tok)?;
         }
-        self.expect_concat_param = None;
-        if self.expect_stringify_param {
+        if self.expect_stringify_param.take().is_some() {
             if let MacroTokenKind::Parameter(i) = tok.kind {
                 self.dont_prescan_indices.push(i);
             } else {
@@ -149,9 +116,26 @@ impl Parser<'_, '_> {
                 });
             }
         }
-        self.expect_stringify_param = false;
 
         self.body_tokens.push(tok);
+        Ok(())
+    }
+
+    fn handle_concat_param(
+        dont_prescan_indices: &mut Vec<usize>,
+        tok: &MacroToken,
+    ) -> Result<(), MacroDefinitionParseError> {
+        match tok.kind {
+            MacroTokenKind::Word(_) | MacroTokenKind::WordNoWhitespace(_) => {}
+            MacroTokenKind::Parameter(i) => {
+                dont_prescan_indices.push(i);
+            }
+            MacroTokenKind::ConcatOperator | MacroTokenKind::StringifyOperator => {
+                return Err(MacroDefinitionParseError::ConcatInvalidToken {
+                    text_range: tok.text_range,
+                });
+            }
+        }
         Ok(())
     }
 }
@@ -313,7 +297,7 @@ fn parse_double_special_characters(
 }
 
 fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
-    // TODO: comment support
+    // TODO: comment support?
     while let Some(ch) = p.next() {
         match ch {
             '\\' => {
@@ -343,20 +327,8 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
                     };
 
                     match p.body_tokens.last() {
-                        Some(MacroToken {
-                            kind: MacroTokenKind::Parameter(i),
-                            ..
-                        }) => {
-                            p.dont_prescan_indices.push(*i);
-                        }
-                        Some(MacroToken {
-                            kind: MacroTokenKind::Word(_),
-                            ..
-                        }) => {}
                         Some(tok) => {
-                            return Err(MacroDefinitionParseError::ConcatInvalidToken {
-                                text_range: tok.text_range,
-                            });
+                            Parser::handle_concat_param(&mut p.dont_prescan_indices, tok)?;
                         }
                         None => {
                             return Err(MacroDefinitionParseError::ConcatAtStart {
@@ -372,15 +344,16 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
                     p.expect_concat_param = Some(concat_text_range);
                 } else {
                     // stringify operator
+                    let stringify_text_range = TextRange {
+                        start: p.offset - 1,
+                        end: p.offset,
+                    };
+
                     p.push_tok(MacroToken {
                         kind: MacroTokenKind::StringifyOperator,
-                        text_range: TextRange {
-                            start: p.offset - 1,
-                            end: p.offset,
-                        },
+                        text_range: stringify_text_range,
                     })?;
-
-                    p.expect_stringify_param = true;
+                    p.expect_stringify_param = Some(stringify_text_range);
                 }
             }
             _ if ch.is_whitespace() => {
@@ -388,7 +361,7 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
             }
             // Special characters, break the word
             '<' | '>' | '&' | '|' => parse_double_special_characters(p, ch)?,
-            '(' | ')' | '{' | '}' | ';' | '+' | '*' | '/' | '~' | '?' | ':' => {
+            '(' | ')' | '{' | '}' | ';' | '+' | '*' | '/' | '~' | '?' | ':' | '-' | ',' => {
                 p.complete_token()?;
                 p.push_tok(MacroToken {
                     text_range: TextRange {
@@ -396,17 +369,6 @@ fn parse_body(p: &mut Parser) -> Result<(), MacroDefinitionParseError> {
                         end: p.offset,
                     },
                     kind: MacroTokenKind::WordNoWhitespace(ch.to_string()),
-                })?;
-            }
-            '-' | ',' => {
-                // Can't be pasted next to words
-                p.complete_token()?;
-                p.push_tok(MacroToken {
-                    text_range: TextRange {
-                        start: p.offset - 1,
-                        end: p.offset,
-                    },
-                    kind: MacroTokenKind::Word(ch.to_string()),
                 })?;
             }
             _ => {
@@ -482,19 +444,16 @@ impl MacroDefinition {
             current_token: String::new(),
             params: &params,
             dont_prescan_indices: Vec::new(),
-            expect_stringify_param: false,
+            expect_stringify_param: None,
             expect_concat_param: None,
         };
 
         parse_body(&mut p)?;
 
         if p.current_token.is_empty() {
-            if p.expect_stringify_param {
+            if let Some(stringify_text_range) = p.expect_stringify_param {
                 return Err(MacroDefinitionParseError::StringifyNotAParam {
-                    text_range: TextRange {
-                        start: p.offset - 1,
-                        end: p.offset,
-                    },
+                    text_range: stringify_text_range,
                 });
             }
 
@@ -651,7 +610,8 @@ impl MacroDefinition {
 
                     let source = match iter.next() {
                         Some(MacroToken {
-                            kind: MacroTokenKind::Word(text),
+                            kind:
+                                MacroTokenKind::Word(text) | MacroTokenKind::WordNoWhitespace(text),
                             ..
                         }) => {
                             s.push_str(text);
@@ -671,10 +631,7 @@ impl MacroDefinition {
                             TextRangeMapTo::ArgumentIdx(*idx)
                         }
                         Some(MacroToken {
-                            kind:
-                                MacroTokenKind::WordNoWhitespace(_)
-                                | MacroTokenKind::ConcatOperator
-                                | MacroTokenKind::StringifyOperator,
+                            kind: MacroTokenKind::ConcatOperator | MacroTokenKind::StringifyOperator,
                             ..
                         })
                         | None => {
@@ -964,6 +921,8 @@ mod tests {
         output_expect: Expect,
         trmaps_expect: Expect,
     ) {
+        // TODO: all expects into one
+
         let def = MacroDefinition::parse(def_input).unwrap();
         let SubstitutedBody {
             source_mappings,
@@ -1110,16 +1069,16 @@ mod tests {
         check_substitute(
             "#define MACRO(...) function(argument, __VA_ARGS__)",
             &["foo".to_owned(), "bar".to_owned()],
-            expect!["function(argument , foo, bar)"],
+            expect!["function(argument,foo, bar)"],
             expect![[r#"
                 0.. macro+19
                 8.. macro+27
                 9.. macro+28
-                18.. macro+36
-                20.. arg_0
-                23.. vararg_separator(macro+38..49)
-                25.. arg_1
-                28.. macro+49
+                17.. macro+36
+                18.. arg_0
+                21.. vararg_separator(macro+38..49)
+                23.. arg_1
+                26.. macro+49
             "#]],
         );
     }
@@ -1129,13 +1088,13 @@ mod tests {
         check_substitute(
             "#define MACRO(...) function(argument, __VA_ARGS__)",
             &[],
-            expect!["function(argument , )"],
+            expect!["function(argument,)"],
             expect![[r#"
                 0.. macro+19
                 8.. macro+27
                 9.. macro+28
-                18.. macro+36
-                20.. macro+49
+                17.. macro+36
+                18.. macro+49
             "#]],
         );
     }
@@ -1181,7 +1140,7 @@ mod tests {
                 Word("argument") 28..36
                 Word("__VA_OPT__") 37..47
                 WordNoWhitespace("(") 47..48
-                Word(",") 48..49
+                WordNoWhitespace(",") 48..49
                 WordNoWhitespace(")") 49..50
                 Parameter(0) 51..62
                 WordNoWhitespace(")") 62..63
@@ -1212,6 +1171,68 @@ mod tests {
                 0.. arg_0 ## (34..36) arg_1
                 6.. vararg_separator(macro+37..38)
                 8.. arg_2
+            "#]],
+        );
+    }
+
+    #[test]
+    fn substitute_minus_concat() {
+        // Clang and GCC output:
+        // pin-gpa-0-0 { samsung,pins = "gpa-0-0"; samsung,pin-function = <0>; samsung,pin-pud = <1>; samsung,pin-drv = <0>; };
+
+        check_substitute(
+            r#"#define PIN(_pin, _func, _pull, _drv)					\
+	pin- ## _pin {							\
+		samsung,pins = #_pin;					\
+		samsung,pin-function = <EXYNOS_PIN_FUNC_ ##_func>;	\
+		samsung,pin-pud = <EXYNOS_PIN_PULL_ ##_pull>;		\
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_ ##_drv>;		\
+	}"#,
+            &["gpa-0-0", "INPUT", "DOWN", "FAST_SR1"].map(ToOwned::to_owned),
+            expect![[
+                r#"pin-gpa-0-0{samsung,pins ="gpa-0-0";samsung,pin-function = < EXYNOS_PIN_FUNC_INPUT >;samsung,pin-pud = < EXYNOS_PIN_PULL_DOWN >;samsung,pin-drv = < EXYNOS5433_PIN_DRV_FAST_SR1 >;}"#
+            ]],
+            expect![[r#"
+                0.. macro+45
+                3.. macro+48 ## (50..52) arg_0
+                11.. macro+58
+                12.. macro+70
+                19.. macro+77
+                20.. macro+78
+                25.. macro+83
+                26.. stringify(macro+85..90, arg_0)
+                35.. macro+90
+                36.. macro+100
+                43.. macro+107
+                44.. macro+108
+                47.. macro+111
+                48.. macro+112
+                57.. macro+121
+                59.. macro+123
+                61.. macro+124 ## (141..143) arg_1
+                83.. macro+148
+                84.. macro+149
+                85.. macro+155
+                92.. macro+162
+                93.. macro+163
+                96.. macro+166
+                97.. macro+167
+                101.. macro+171
+                103.. macro+173
+                105.. macro+174 ## (191..193) arg_2
+                126.. macro+198
+                127.. macro+199
+                128.. macro+206
+                135.. macro+213
+                136.. macro+214
+                139.. macro+217
+                140.. macro+218
+                144.. macro+222
+                146.. macro+224
+                148.. macro+225 ## (245..247) arg_3
+                176.. macro+251
+                177.. macro+252
+                178.. macro+258
             "#]],
         );
     }
@@ -1315,6 +1336,38 @@ mod tests {
                 dont_prescan_indices: [0, 1]
             "#]],
         );
+
+        check_parse(
+            r#"#define FOO "abc" ## def"#,
+            expect![[r#"
+                FOO()
+                WordNoWhitespace("\"abc\"") 12..17
+                ConcatOperator 18..20
+                Word("def") 21..24
+                dont_prescan_indices: []
+            "#]],
+        );
+        check_parse(
+            r#"#define FOO(a) a ## ##"#,
+            expect![[r#"
+                --- error ---
+                invalid token for '##' (17..19)
+            "#]],
+        );
+        check_parse(
+            "#define FOO(a) abc ##",
+            expect![[r#"
+                --- error ---
+                '##' cannot be at end (19..21)
+            "#]],
+        );
+        check_parse(
+            "#define FOO(a) ##",
+            expect![[r#"
+                --- error ---
+                '##' cannot be at start (15..17)
+            "#]],
+        );
     }
 
     #[test]
@@ -1348,7 +1401,7 @@ mod tests {
             "#define FOO(a) #   ",
             expect![[r#"
                 --- error ---
-                '#' not followed by a macro parameter (18..19)
+                '#' not followed by a macro parameter (15..16)
             "#]],
         );
         check_parse(
@@ -1363,38 +1416,6 @@ mod tests {
             expect![[r#"
                 --- error ---
                 '#' not followed by a macro parameter (16..18)
-            "#]],
-        );
-    }
-
-    #[test]
-    fn parse_concat_errors() {
-        check_parse(
-            r#"#define FOO(a) "abc" ## def"#,
-            expect![[r#"
-                --- error ---
-                invalid token for '##' (15..20)
-            "#]],
-        );
-        check_parse(
-            r#"#define FOO(a) abc ## "def""#,
-            expect![[r#"
-                --- error ---
-                invalid token for '##' (22..27)
-            "#]],
-        );
-        check_parse(
-            "#define FOO(a) abc ##",
-            expect![[r#"
-                --- error ---
-                '##' cannot be at end (19..21)
-            "#]],
-        );
-        check_parse(
-            "#define FOO(a) ##",
-            expect![[r#"
-                --- error ---
-                '##' cannot be at start (15..17)
             "#]],
         );
     }
