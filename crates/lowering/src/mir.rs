@@ -7,6 +7,8 @@ use crate::file::{DisplaySpanLineColumn, File};
 fn strip_base<'a>(this: &'a str, base: &str) -> Option<&'a str> {
     if this == base {
         Some("")
+    } else if base == "/" {
+        this.starts_with('/').then_some(this)
     } else {
         this.strip_prefix(base)
             .filter(|stripped| stripped.starts_with('/'))
@@ -117,6 +119,8 @@ impl Mir {
     /// Returns an iterator over live/effective nodes and properties that are either `path_base` or children of it.
     ///
     /// Pass `""` to iterate all live definitions in the tree.
+    ///
+    /// Note that the order is reversed.
     pub fn iter_live_defs_under(&self, path_base: &str) -> impl Iterator<Item = &MirDefinition> {
         let mut deleted = BTreeSet::<&str>::new();
 
@@ -133,21 +137,25 @@ impl Mir {
                 let stripped = strip_base(&def.path, path_base)?;
 
                 match def.value {
-                    MirDefinitionValue::Node(_) | MirDefinitionValue::Property(_)
-                        if btreeset_find_base_of(&deleted, stripped).is_none() =>
-                    {
-                        if let MirDefinitionValue::Property(_) = def.value {
-                            // Overwritten
-                            deleted.insert(stripped);
-                        }
+                    MirDefinitionValue::Node(_)
+                    | MirDefinitionValue::Property(_)
+                    | MirDefinitionValue::V1Directive
+                    | MirDefinitionValue::PluginDirective => {
+                        if btreeset_find_base_of(&deleted, stripped).is_none() {
+                            if let MirDefinitionValue::Property(_) = def.value {
+                                // Overwritten
+                                deleted.insert(stripped);
+                            }
 
-                        Some(def)
+                            Some(def)
+                        } else {
+                            None
+                        }
                     }
                     MirDefinitionValue::DeletedNode | MirDefinitionValue::DeletedProperty => {
                         deleted.insert(stripped);
                         None
                     }
-                    _ => None,
                 }
             })
     }
@@ -406,14 +414,35 @@ pub struct UnresolvedExtension {
     reason = "expect-test auto update adds r#"
 )]
 mod tests {
-    use expect_test::expect;
+    use expect_test::{Expect, expect};
 
     use super::*;
     use crate::{db::BaseDb, includes::IncludeDirs, lowering::lower_root_file};
 
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn check_iter_live_defs_under(input: &str, path_base: &str, expect: Expect) {
+        let db = crate::db::BaseDatabase::default();
+        IncludeDirs::new(&db, vec![]);
+
+        let root_file = db
+            .get_files()
+            .add_virtual(&db, "/main.dts".into(), input.to_owned());
+
+        let result = lower_root_file(&db, root_file).expect("Should be a readable file");
+        let mir = result.mir(&db);
+
+        let new_mir = Mir {
+            definitions: Mir::iter_live_defs_under(mir, path_base).cloned().collect(),
+            unresolved_extensions: Vec::new(),
+        };
+
+        expect.assert_eq(&new_mir.display(&db));
+    }
+
     #[test]
-    fn iter_live_defs_under() {
-        let contents = r"/dts-v1/;
+    fn iter_live_defs_under_node() {
+        check_iter_live_defs_under(
+            r"/dts-v1/;
 
 / {
     qux {
@@ -436,30 +465,49 @@ mod tests {
         };
     };
 };
-";
-        let path_base = "/qux";
+",
+            "/qux",
+            expect![[r#"
+                property /qux/quux/bar/prop2 = <2>; /main.dts L19:17-L19:29
+                node /qux/quux/bar /main.dts L18:13-L20:15
+                node /qux/quux /main.dts L17:9-L21:11
+                node /qux /main.dts L16:5-L22:7
+            "#]],
+        );
+    }
 
-        let db = crate::db::BaseDatabase::default();
-        IncludeDirs::new(&db, vec![]);
+    #[test]
+    fn iter_live_defs_under_root() {
+        check_iter_live_defs_under(
+            r#"/dts-v1/;
 
-        let root_file = db
-            .get_files()
-            .add_virtual(&db, "/main.dts".into(), contents.to_owned());
+/ {
+    foo = "bar";
+};
+"#,
+            "/",
+            expect![[r#"
+                property /foo = "bar"; /main.dts L4:5-L4:17
+                node / /main.dts L3:1-L5:3
+            "#]],
+        );
+    }
 
-        let result = lower_root_file(&db, root_file).expect("Should be a readable file");
-        let mir = result.mir(&db);
+    #[test]
+    fn iter_live_defs_under_nothing() {
+        check_iter_live_defs_under(
+            r#"/dts-v1/;
 
-        let new_mir = Mir {
-            definitions: Mir::iter_live_defs_under(mir, path_base).cloned().collect(),
-            unresolved_extensions: Vec::new(),
-        };
-
-        expect![[r#"
-            property /qux/quux/bar/prop2 = <2>; /main.dts L19:17-L19:29
-            node /qux/quux/bar /main.dts L18:13-L20:15
-            node /qux/quux /main.dts L17:9-L21:11
-            node /qux /main.dts L16:5-L22:7
-        "#]]
-        .assert_eq(&new_mir.display(&db));
+/ {
+    foo = "bar";
+};
+"#,
+            "",
+            expect![[r#"
+                property /foo = "bar"; /main.dts L4:5-L4:17
+                node / /main.dts L3:1-L5:3
+                dts-v1 /main.dts L1:1-L1:10
+            "#]],
+        );
     }
 }
