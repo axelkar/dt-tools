@@ -109,11 +109,15 @@ pub struct DisplaySpanLineColumn<'a>(pub &'a Span<File>, pub &'a dyn BaseDb);
 impl fmt::Display for DisplaySpanLineColumn<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let fmt_line_column = |f: &mut fmt::Formatter<'_>, offset| {
-            let (line, column) = self
-                .0
-                .file
-                .line_column(self.1, offset)
-                .expect("Span should be valid");
+            let Some((line, column)) = self.0.file.line_column(self.1, offset) else {
+                panic!(
+                    "Span should be valid. file.path={}, file.is_readable_file={}. text_range={}. offset={}",
+                    self.0.file.path(self.1),
+                    self.0.file.is_readable_file(self.1),
+                    self.0.text_range,
+                    offset,
+                );
+            };
 
             write!(f, "L{}:{}", line + 1, column + 1)
         };

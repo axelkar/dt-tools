@@ -86,6 +86,7 @@ fn check_phandle(
 fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<File>>) {
     // Validate the existence and order of /dts-v1/; and /plugin/;
     let mut dts_v1: Option<mir::MirProvenance> = None;
+    let mut errored_about_dts_v1 = false;
     let mut overlay_mode: Option<mir::MirProvenance> = None;
     for def in &mir.definitions {
         match def.value {
@@ -118,7 +119,8 @@ fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<File>>) {
             | mir::MirDefinitionValue::Property(_)
             | mir::MirDefinitionValue::DeletedNode
             | mir::MirDefinitionValue::DeletedProperty => {
-                if dts_v1.is_none() {
+                if dts_v1.is_none() && !errored_about_dts_v1 {
+                    errored_about_dts_v1 = true;
                     diagnostics.push(Diagnostic::new(
                         def.provenance.span,
                         "Definition before /dts-v1/;".into(),

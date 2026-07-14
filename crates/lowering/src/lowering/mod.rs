@@ -27,7 +27,7 @@ use crate::{
     mir::{Mir, MirPhandleTarget},
 };
 
-mod dt_node;
+pub(crate) mod dt_node;
 mod dt_property;
 #[cfg(test)]
 mod dtc_tests;
@@ -156,7 +156,7 @@ pub(crate) fn lower_file<'db>(
 }
 
 /// Mutable context threaded through the tree traversal in a single [file](File).
-struct IntraFileCtx<'a, 'db> {
+pub(crate) struct IntraFileCtx<'a, 'db> {
     db: &'db dyn BaseDb,
     file: File,
     env: &'a mut TrackedMapEnvMut<'db>,
@@ -327,6 +327,26 @@ pub(crate) mod tests {
     use super::*;
     use crate::{db::BaseDb, file::DisplaySpanLineColumn};
 
+    pub(crate) fn fmt_diags(db: &dyn BaseDb, out: &mut String, diags: &[Diagnostic<File>]) {
+        out.push_str("--- errors ---\n");
+        for d in diags {
+            use std::fmt::Write;
+            let span = d
+                .span
+                .primary_spans
+                .first()
+                .expect("Should have at least one primary span");
+
+            let _ = writeln!(
+                out,
+                "{:?} {}: {}",
+                d.severity,
+                DisplaySpanLineColumn(span, db),
+                d.msg
+            );
+        }
+    }
+
     /// Run the preprocessor on virtual files and snapshot MIR + diagnostics.
     ///
     /// The root file is named "/main.dts".
@@ -355,23 +375,8 @@ pub(crate) mod tests {
 
         let mut out = mir.display(&db);
         if !diags.is_empty() {
-            out.push_str("\n--- errors ---\n");
-            for d in diags {
-                use std::fmt::Write;
-                let span = d
-                    .span
-                    .primary_spans
-                    .first()
-                    .expect("Should have at least one primary span");
-
-                let _ = writeln!(
-                    out,
-                    "{:?} {}: {}",
-                    d.severity,
-                    DisplaySpanLineColumn(span, &db),
-                    d.msg
-                );
-            }
+            out.push('\n');
+            fmt_diags(&db, &mut out, diags);
         }
         expect.assert_eq(&out);
     }

@@ -224,7 +224,7 @@ pub(crate) fn build_path(parent: &str, name: &str) -> String {
 /// Resolves a macro-substitutable name into a concrete name.
 pub(crate) fn resolve_name_or_macro<'db, Ast: HasName + HasMacroInvocation>(
     db: &'db dyn BaseDb,
-    env: &mut TrackedMapEnvMut<'db>,
+    env: &TrackedMapEnvMut<'db>,
     diag: &mut Diag<'_, '_>,
     ast: &Ast,
 ) -> Result<String, ()> {

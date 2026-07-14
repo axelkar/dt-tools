@@ -10,7 +10,11 @@ use std::{
 
 use expect_test::expect;
 
-use crate::{db::BaseDb, includes::IncludeDirs, lowering::lower_root_file};
+use crate::{
+    db::BaseDb,
+    includes::IncludeDirs,
+    lowering::{lower_root_file, tests::fmt_diags},
+};
 
 fn run_dtc(contents: &str) -> Result<String, String> {
     let dtc = std::env::var("DTC");
@@ -74,17 +78,8 @@ fn cross_check_dtc_success(contents: &str) -> Result<(), ()> {
 
     match (our_result, dtc_output) {
         (Err(()), Ok(dtc_output)) => {
-            let mut out = "--- errors ---\n".to_owned();
-            for d in diags {
-                use std::fmt::Write;
-                let range = d
-                    .span
-                    .primary_spans
-                    .first()
-                    .expect("Should have at least one primary span")
-                    .text_range;
-                let _ = writeln!(out, "{:?} {range}: {}", d.severity, d.msg);
-            }
+            let mut out = String::new();
+            fmt_diags(&db, &mut out, diags);
 
             panic!(
                 "we should succeed like dtc.\n\n--- input ---\n{contents}\n\n{out}\n--- dtc DTS output ---\n{dtc_output}"

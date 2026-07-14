@@ -100,6 +100,7 @@ pub fn eval(
         }
         ast::Expr::ParenExpr(paren_expr) => eval(db, env, paren_expr.expr().ok_or(())?, diag),
         ast::Expr::MacroInvocation(macro_invocation) => {
+            // TODO: expansion_stack
             let (expr_ast, expansion) = resolve_macro_to_ast::<ast::Expr>(
                 db,
                 env,

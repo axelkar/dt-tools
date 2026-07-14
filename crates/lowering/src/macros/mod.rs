@@ -132,11 +132,12 @@ fn expand_macros_in_text<'db>(
         };
 
         // Expand = prescan + substitute + rescan.
-        disabled.insert(macro_name.clone());
         let prescanned = prescan_arguments(db, env, &args, def, disabled);
         let sub = def
             .substitute(&prescanned)
-            .expect("argument count validated during parse");
+            .expect("argument count should be validated during parse");
+        // Disable only for rescanning, not prescanning.
+        disabled.insert(macro_name.clone());
         let expanded = expand_macros_in_text(db, env, &sub.substituted_text, disabled);
         out.push_str(&expanded);
         disabled.remove(&macro_name);
@@ -189,7 +190,7 @@ pub(crate) fn substitute_macro_tok<'db>(
 ) -> Result<Option<(SubstitutedBody, Span<File>)>, ()> {
     let name = macro_ctx.name();
 
-    let Some((def, macro_def)) = env.get_macro(db, name).map(|(def, span)| (def, *span)) else {
+    let Some((def, def_span)) = env.get_macro(db, name).map(|(def, span)| (def, *span)) else {
         let is_explicit_macro = matches!(macro_ctx, MacroCtx::Explicit(_));
         return if is_explicit_macro {
             diag.emit(
@@ -218,20 +219,147 @@ pub(crate) fn substitute_macro_tok<'db>(
     };
 
     let mut disabled: FxHashSet<String> = FxHashSet::default();
-    disabled.insert(name.to_owned());
 
-    let arguments = if def.param_count() > 0 && !raw_arguments.is_empty() {
-        // Prescan arguments for macro invocation
-        prescan_arguments(db, env, &raw_arguments, def, &mut disabled)
-    } else {
-        raw_arguments
-    };
+    let arguments = prescan_arguments(db, env, &raw_arguments, def, &mut disabled);
 
     match def.substitute(&arguments) {
-        Ok(substituted_body) => Ok(Some((substituted_body, macro_def))),
+        Ok(substituted_body) => Ok(Some((substituted_body, def_span))),
         Err(err) => {
             diag.emit(macro_ctx.text_range(), err.to_string(), Severity::Error);
             Err(())
         }
+    }
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::needless_raw_string_hashes,
+    reason = "expect-test auto update adds r#"
+)]
+mod tests {
+    use dt_tools_analyzer::macros::MacroDefinition;
+    use dt_tools_parser::{
+        TextRange,
+        ast::{self, AstNodeOrToken},
+        parser::Entrypoint,
+    };
+    use expect_test::{Expect, expect};
+
+    use crate::{
+        db::BaseDb,
+        diag::{Diag, SourceMap},
+        emit_parse_errors,
+        lowering::{dt_node::resolve_name_or_macro, tests::fmt_diags},
+        macros::env::TrackedMapEnvMut,
+    };
+
+    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
+    fn check(macros: &[&str], input: &str, expect: Expect) {
+        let db = crate::db::BaseDatabase::default();
+        let file = db
+            .get_files()
+            .add_virtual(&db, "/main.dts".into(), String::new());
+
+        let mut env = TrackedMapEnvMut::default();
+
+        for macro_src in macros.iter().copied() {
+            let def = MacroDefinition::parse(macro_src).unwrap();
+
+            let file = db.get_files().add_virtual(
+                &db,
+                format!("/macro_{}.h", def.name).into(),
+                macro_src.to_owned(),
+            );
+
+            let span = TextRange::new(0, macro_src.len()).within_file(file);
+
+            env.insert_macro(def, span);
+        }
+
+        let mut diags = Vec::new();
+        let map = SourceMap::File(file);
+        let mut diag = Diag::new(&mut diags, &map);
+
+        // --- parse input ---
+        let parse = Entrypoint::Name.parse(input);
+        emit_parse_errors(&parse, &mut diag);
+
+        let red_node = parse.red_node();
+        let ast = ast::EntryName::cast_node(red_node.clone()).unwrap();
+
+        let Ok(text) = resolve_name_or_macro(&db, &env, &mut diag, &ast) else {
+            let mut out = "Failed to resolve\n".to_owned();
+            fmt_diags(&db, &mut out, &diags);
+
+            expect.assert_eq(&out);
+            return;
+        };
+
+        let mut out = String::new();
+        out.push_str("--- substituted ---\n");
+        out.push_str(&text);
+        out.push('\n');
+
+        if !diags.is_empty() {
+            out.push('\n');
+            fmt_diags(&db, &mut out, &diags);
+        }
+        expect.assert_eq(&out);
+    }
+
+    #[test]
+    fn no_macro() {
+        check(
+            &[],
+            "foo",
+            expect![[r#"
+                --- substituted ---
+                foo
+            "#]],
+        );
+    }
+
+    #[test]
+    fn basic() {
+        check(
+            &["#define FOO bar"],
+            "FOO",
+            expect![[r#"
+                --- substituted ---
+                bar
+            "#]],
+        );
+    }
+
+    #[test]
+    fn marvell_dt_example() {
+        check(
+            &[
+                "#define CP11X_NAME cp0",
+                // also known as CAT
+                "#define PASTER(x, y) x ## y",
+                // also known as XCAT
+                "#define EVALUATOR(x, y) PASTER(x, y)",
+                "#define CP11X_LABEL(name) EVALUATOR(CP11X_NAME, EVALUATOR(_, name))",
+            ],
+            "CP11X_LABEL(thermal_ic)",
+            expect![[r#"
+                --- substituted ---
+                cp0_thermal_ic
+            "#]],
+        );
+    }
+
+    #[test]
+    fn prescan_recursion() {
+        // allow prescanning the inner MACRO in MACRO(MACRO(...))
+        check(
+            &["#define CAT(x, y) x ## y", "#define XCAT(x, y) CAT(x, y)"],
+            "XCAT(foo, XCAT(bar, baz))",
+            expect![[r#"
+                --- substituted ---
+                foobarbaz
+            "#]],
+        );
     }
 }

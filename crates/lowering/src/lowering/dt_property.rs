@@ -358,6 +358,7 @@ fn lower_cell<T: LowerCell>(
             }
         }
         ast::Cell::Macro(macro_inv) => {
+            // TODO: expansion_stack
             let (ast, expansion) = resolve_macro_to_ast(
                 ctx.db,
                 ctx.env,
