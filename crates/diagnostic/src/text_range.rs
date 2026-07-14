@@ -66,28 +66,6 @@ impl TextRange {
         }
     }
 
-    /// Offsets the text range by the specified amount, possibly negative.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use dt_tools_diagnostic::text_range::TextRange;
-    ///
-    /// let text_range = TextRange { start: 4, end: 7 };
-    /// assert_eq!(text_range.offset_wrapping_signed(-2), TextRange { start: 2, end: 5 });
-    ///
-    /// let text_range = TextRange { start: 0, end: 2 };
-    /// assert_eq!(text_range.offset_wrapping_signed(-2), TextRange { start: usize::MAX - 1, end: 0 });
-    /// ```
-    #[inline]
-    #[must_use]
-    pub const fn offset_wrapping_signed(self, offset: isize) -> Self {
-        TextRange {
-            start: self.start.wrapping_add_signed(offset),
-            end: self.end.wrapping_add_signed(offset),
-        }
-    }
-
     /// Returns the text as referenced from `source`.
     ///
     /// # Example

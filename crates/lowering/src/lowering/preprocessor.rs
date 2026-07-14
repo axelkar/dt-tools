@@ -156,24 +156,13 @@ pub(crate) fn pp_cond_directive_eval(
         return Err(());
     };
 
-    let (mut condition, mut condition_text_range) =
+    let (condition, condition_text_range) =
         get_pp_directive_args(input, directive_name, directive_text_range);
 
     if directive_name == "ifdef" || directive_name == "elifdef" {
-        // TODO: add a test for this and preprocessor directives in general
-        condition.insert_str(0, "defined(");
-        condition.push(')');
-
-        condition_text_range =
-            condition_text_range.offset_wrapping_signed(-"defined(".len().cast_signed());
-        condition_text_range.end -= 1;
+        return is_defined(db, env, diag, &condition, condition_text_range);
     } else if directive_name == "ifndef" || directive_name == "elifndef" {
-        condition.insert_str(0, "!defined(");
-        condition.push(')');
-
-        condition_text_range =
-            condition_text_range.offset_wrapping_signed(-"!defined(".len().cast_signed());
-        condition_text_range.end -= 1;
+        return is_defined(db, env, diag, &condition, condition_text_range).map(|defined| !defined);
     } else if directive_name == "else" {
         if !condition.is_empty() {
             diag.emit(
@@ -207,3 +196,25 @@ pub(crate) fn pp_cond_directive_eval(
 
     Ok(val != 0)
 }
+
+fn is_defined(
+    db: &dyn BaseDb,
+    env: &mut TrackedMapEnvMut<'_>,
+    diag: &mut Diag<'_, '_>,
+    condition: &str,
+    condition_text_range: TextRange,
+) -> Result<bool, ()> {
+    let macro_name = condition.trim();
+    if macro_name.is_empty() || macro_name.contains(char::is_whitespace) {
+        diag.emit(
+            condition_text_range,
+            Cow::Borrowed("Expected a single identifier for this preprocessor directive"),
+            Severity::Error,
+        );
+        Err(())
+    } else {
+        Ok(env.get_macro(db, macro_name).is_some())
+    }
+}
+
+// TODO: tests for preprocessor directives
