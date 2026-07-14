@@ -294,9 +294,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:21
-                node labels=[LBL] /node /main.dts L3:5-L3:18
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:21
+                node /node labels=[LBL] /main.dts L3:5-L3:18
             "#]],
         );
     }
@@ -311,11 +311,11 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:21
-                node labels=[LBL] /node /main.dts L3:5-L3:18
-                node   /node /main.dts L4:1-L4:22
-                property = CellList(Bits32([Number(1)])) /node/prop /main.dts L4:8-L4:19
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:21
+                node /node labels=[LBL] /main.dts L3:5-L3:18
+                node /node /main.dts L4:1-L4:22
+                property /node/prop = <1>; /main.dts L4:8-L4:19
             "#]],
         );
     }
@@ -330,9 +330,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                plugin  /main.dts L3:1-L3:10
-                --- unresolved ---
+                dts-v1 /main.dts L2:1-L2:10
+                plugin /main.dts L3:1-L3:10
+                --- unresolved extensions ---
                   label=UNKNOWN (1 definitions)
             "#]],
         );
@@ -347,7 +347,7 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
+                dts-v1 /main.dts L2:1-L2:10
 
                 --- errors ---
                 Error L3:1-L3:7: Label not found: BOGUS
@@ -365,11 +365,11 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:20
-                node   / /main.dts L4:1-L4:20
-                node labels=[foo] /bar /main.dts L3:5-L3:17
-                node   /baz /main.dts L4:5-L4:17
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:20
+                node /bar labels=[foo] /main.dts L3:5-L3:17
+                node / /main.dts L4:1-L4:20
+                node /baz /main.dts L4:5-L4:17
 
                 --- errors ---
                 Warn L4:5-L4:9: Duplicate label `foo`
@@ -386,9 +386,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:32
-                /omit-if-no-ref/ node /foo /main.dts L3:5-L3:29
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:32
+                node /foo [omit-if-no-ref] /main.dts L3:5-L3:29
             "#]],
         );
     }
@@ -407,8 +407,8 @@ bar {};
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:7
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:7
 
                 --- errors ---
                 Error L6:1-L6:8: Subnode must be defined inside a node
@@ -430,9 +430,9 @@ bar {};
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L7:3
-                node   /foo /main.dts L4:5-L6:7
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L7:3
+                node /foo /main.dts L4:5-L6:7
 
                 --- errors ---
                 Error L5:9-L5:15: Root node (`/`) must be defined outside other nodes

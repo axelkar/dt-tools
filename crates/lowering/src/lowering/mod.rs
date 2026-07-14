@@ -389,7 +389,7 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
+                dts-v1 /main.dts L2:1-L2:10
             "#]],
         );
     }
@@ -403,8 +403,8 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:6
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:6
             "#]],
         );
     }
@@ -421,9 +421,9 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L6:1-L6:27
-                property = CellList(Bits32([Number(42)])), String("example") /prop /main.dts L6:5-L6:24
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L6:1-L6:27
+                property /prop = <42>, "example"; /main.dts L6:5-L6:24
             "#]],
         );
     }
@@ -440,11 +440,11 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L5:1-L5:22
-                node   / /main.dts L6:1-L6:22
-                node labels=[FOO] /foo /main.dts L5:5-L5:19
-                property = CellList(Bits32([Phandle(Label("FOO"))])) /prop /main.dts L6:5-L6:19
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L5:1-L5:22
+                node /foo labels=[FOO] /main.dts L5:5-L5:19
+                node / /main.dts L6:1-L6:22
+                property /prop = <&FOO>; /main.dts L6:5-L6:19
             "#]],
         );
     }
@@ -461,11 +461,11 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L5:1-L5:20
-                node   / /main.dts L6:1-L6:24
-                node labels=[FOO] /foo /main.dts L5:5-L5:17
-                property = CellList(Bits32([Phandle(Label("FOO"))])) /prop /main.dts L6:5-L6:21
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L5:1-L5:20
+                node /foo labels=[FOO] /main.dts L5:5-L5:17
+                node / /main.dts L6:1-L6:24
+                property /prop = <&FOO>; /main.dts L6:5-L6:21
             "#]],
         );
     }
@@ -482,11 +482,11 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L5:1-L5:19
-                node   / /main.dts L6:1-L6:19
-                node   /SUBSTITUTED@bar /main.dts L5:5-L5:16
-                node   /bar@SUBSTITUTED /main.dts L6:5-L6:16
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L5:1-L5:19
+                node /SUBSTITUTED@bar /main.dts L5:5-L5:16
+                node / /main.dts L6:1-L6:19
+                node /bar@SUBSTITUTED /main.dts L6:5-L6:16
             "#]],
         );
     }
@@ -503,9 +503,9 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L6:1-L6:15
-                node   /BAR /main.dts L6:5-L6:12
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L6:1-L6:15
+                node /BAR /main.dts L6:5-L6:12
             "#]],
         );
     }
@@ -519,10 +519,10 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:34
-                property = CellList(Bits32([])) /prop /main.dts L3:5-L3:18
-                property =  /prop2 /main.dts L3:19-L3:31
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:34
+                property /prop = <>; /main.dts L3:5-L3:18
+                property /prop2; /main.dts L3:19-L3:31
 
                 --- errors ---
                 Error L3:13-L3:16: Macro `VAL` is not defined
@@ -543,9 +543,9 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L6:1-L6:38
-                property = CellList(Bits32([])), CellList(Bits32([Number(5)])) /prop /main.dts L6:5-L6:35
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L6:1-L6:38
+                property /prop = <>, <5>; /main.dts L6:5-L6:35
 
                 --- errors ---
                 Error L3:13-L3:22: number 1099511627776 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer
@@ -574,10 +574,10 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L9:1-L12:3
-                property = String("FOO") /no_prescan /main.dts L10:5-L10:33
-                property = String("bar") /prescanned /main.dts L11:5-L11:34
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L9:1-L12:3
+                property /no_prescan = "FOO"; /main.dts L10:5-L10:33
+                property /prescanned = "bar"; /main.dts L11:5-L11:34
             "#]],
         );
     }
@@ -602,10 +602,10 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L9:1-L12:3
-                node   /PREFIX_suffix /main.dts L10:5-L10:29
-                node   /foo_suffix /main.dts L11:5-L11:30
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L9:1-L12:3
+                node /PREFIX_suffix /main.dts L10:5-L10:29
+                node /foo_suffix /main.dts L11:5-L11:30
             "#]],
         );
     }
@@ -621,9 +621,9 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L5:1-L5:20
-                property =  /prop /main.dts L5:5-L5:17
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L5:1-L5:20
+                property /prop; /main.dts L5:5-L5:17
 
                 --- errors ---
                 Error L3:14-L3:18: macro `SELF` expanded recursively
@@ -643,9 +643,9 @@ pub(crate) mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L6:1-L6:24
-                property =  /prop /main.dts L6:5-L6:21
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L6:1-L6:24
+                property /prop; /main.dts L6:5-L6:21
 
                 --- errors ---
                 Error L3:14-L3:18: macro `SELF` expanded recursively

@@ -431,11 +431,11 @@ mod tests {
 "#,
             &[("/inc.dtsi", r#"/ { inc_prop = <2>; };"#)],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /inc.dtsi L1:1-L1:23
-                node   / /main.dts L4:1-L4:24
-                property = CellList(Bits32([Number(2)])) /inc_prop /inc.dtsi L1:5-L1:20
-                property = CellList(Bits32([Number(1)])) /main_prop /main.dts L4:5-L4:21
+                dts-v1 /main.dts L2:1-L2:10
+                node / /inc.dtsi L1:1-L1:23
+                property /inc_prop = <2>; /inc.dtsi L1:5-L1:20
+                node / /main.dts L4:1-L4:24
+                property /main_prop = <1>; /main.dts L4:5-L4:21
             "#]],
         );
     }
@@ -450,11 +450,11 @@ mod tests {
 "#,
             &[("/inc.dtsi", r#"/ { inc_prop = <BOGUS>; };"#)],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /inc.dtsi L1:1-L1:27
-                node   / /main.dts L4:1-L4:24
-                property = CellList(Bits32([])) /inc_prop /inc.dtsi L1:5-L1:24
-                property = CellList(Bits32([Number(1)])) /main_prop /main.dts L4:5-L4:21
+                dts-v1 /main.dts L2:1-L2:10
+                node / /inc.dtsi L1:1-L1:27
+                property /inc_prop = <>; /inc.dtsi L1:5-L1:24
+                node / /main.dts L4:1-L4:24
+                property /main_prop = <1>; /main.dts L4:5-L4:21
 
                 --- errors ---
                 Error L1:17-L1:22: Macro `BOGUS` is not defined
@@ -471,9 +471,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:34
-                node   /foo /main.dts L3:5-L3:12
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:34
+                node /foo /main.dts L3:5-L3:12
                 delete-node /foo /main.dts L3:13-L3:31
             "#]],
         );
@@ -488,9 +488,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:40
-                node labels=[foo] /bar /main.dts L3:5-L3:17
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:40
+                node /bar labels=[foo] /main.dts L3:5-L3:17
                 delete-node /bar /main.dts L3:18-L3:37
             "#]],
         );
@@ -505,9 +505,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:38
-                node   /foo /main.dts L3:5-L3:12
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:38
+                node /foo /main.dts L3:5-L3:12
                 delete-node /foo /main.dts L3:13-L3:35
             "#]],
         );
@@ -522,9 +522,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:41
-                property = CellList(Bits32([Number(1)])) /foo /main.dts L3:5-L3:15
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:41
+                property /foo = <1>; /main.dts L3:5-L3:15
                 delete-property /foo /main.dts L3:16-L3:38
             "#]],
         );
@@ -544,9 +544,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L5:1-L5:18
-                property = CellList(Bits32([Number(1)])) /yes /main.dts L5:5-L5:15
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L5:1-L5:18
+                property /yes = <1>; /main.dts L5:5-L5:15
             "#]],
         );
     }
@@ -568,9 +568,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L5:1-L11:3
-                property = CellList(Bits32([Number(1)])) /yes /main.dts L7:5-L7:15
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L5:1-L11:3
+                property /yes = <1>; /main.dts L7:5-L7:15
             "#]],
         );
     }
@@ -594,9 +594,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L5:1-L13:3
-                property = CellList(Bits32([Number(1)])) /prop /main.dts L6:5-L12:7
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L5:1-L13:3
+                property /prop = <1>; /main.dts L6:5-L12:7
             "#]],
         );
     }
@@ -620,9 +620,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L5:1-L13:3
-                property = CellList(Bits32([Number(1)])) /prop /main.dts L6:5-L12:6
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L5:1-L13:3
+                property /prop = <1>; /main.dts L6:5-L12:6
             "#]],
         );
     }
@@ -638,9 +638,9 @@ mod tests {
 "#,
             &[("/inc.dtsi", r#"inc_prop = <2>;"#)],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L5:3
-                property = CellList(Bits32([Number(2)])) /inc_prop /inc.dtsi L1:1-L1:16
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L5:3
+                property /inc_prop = <2>; /inc.dtsi L1:1-L1:16
             "#]],
         );
     }

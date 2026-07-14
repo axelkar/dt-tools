@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fmt};
+use std::{borrow::Cow, collections::BTreeSet, fmt};
 
 use dt_tools_diagnostic::Span;
 
@@ -45,45 +45,63 @@ impl Mir {
     pub fn display(&self, db: &dyn crate::db::BaseDb) -> String {
         use std::fmt::Write;
 
-        let mut defs: Vec<_> = self.definitions.iter().collect();
-        defs.sort_by_key(|d| &d.path);
-
         let mut out = String::new();
-        for def in &defs {
+        for def in &self.definitions {
             let kind = match &def.value {
-                MirDefinitionValue::Node(n) => {
-                    let labels = if n.labels.is_empty() {
+                MirDefinitionValue::Node(_) => "node",
+                MirDefinitionValue::Property(_) => "property",
+                MirDefinitionValue::DeletedNode => "delete-node",
+                MirDefinitionValue::DeletedProperty => "delete-property",
+                MirDefinitionValue::V1Directive => "dts-v1",
+                MirDefinitionValue::PluginDirective => "plugin",
+            };
+
+            let after_path = match &def.value {
+                MirDefinitionValue::Node(data) => {
+                    let labels = if data.labels.is_empty() {
                         String::new()
                     } else {
-                        format!(" labels=[{}]", n.labels.join(", "))
+                        format!(" labels=[{}]", data.labels.join(", "))
                     };
-                    let omit_if_no_ref = if n.omit_if_no_ref {
-                        "/omit-if-no-ref/ "
+
+                    let omit_if_no_ref = if data.omit_if_no_ref {
+                        " [omit-if-no-ref]"
                     } else {
                         ""
                     };
-                    format!("{omit_if_no_ref}node{labels}")
+
+                    Cow::Owned(format!("{omit_if_no_ref}{labels}"))
                 }
-                MirDefinitionValue::Property(p) => {
-                    let vals: Vec<String> = p.values.iter().map(|v| format!("{v:?}")).collect();
-                    format!("property = {}", vals.join(", "))
+                MirDefinitionValue::Property(data) => {
+                    let values: Vec<String> = data.values.iter().map(ToString::to_string).collect();
+
+                    if values.is_empty() {
+                        ";".into()
+                    } else {
+                        Cow::Owned(format!(" = {};", values.join(", ")))
+                    }
                 }
-                MirDefinitionValue::DeletedNode => "delete-node".to_owned(),
-                MirDefinitionValue::DeletedProperty => "delete-property".to_owned(),
-                MirDefinitionValue::V1Directive => "dts-v1".to_owned(),
-                MirDefinitionValue::PluginDirective => "plugin".to_owned(),
+                _ => "".into(),
             };
+
+            let path_part = if def.path.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", def.path)
+            };
+
             let _ = writeln!(
                 out,
-                "{:6} {} {} {}",
+                "{}{}{} {} {}",
                 kind,
-                def.path,
+                path_part,
+                after_path,
                 def.provenance.span.file.path(db),
                 DisplaySpanLineColumn(&def.provenance.span, db)
             );
         }
         if !self.unresolved_extensions.is_empty() {
-            out.push_str("--- unresolved ---\n");
+            out.push_str("--- unresolved extensions ---\n");
             for ext in &self.unresolved_extensions {
                 let _ = writeln!(
                     out,
@@ -246,12 +264,19 @@ pub enum MirValue {
     /// Phandle reference (`&label` or `&{/path}`).
     Phandle(MirPhandleTarget),
 }
+/// Formats the MIR property value into a working DTS property value fragment.
 impl fmt::Display for MirValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MirValue::String(val) => fmt::Debug::fmt(val, f),
             MirValue::CellList(val) => val.fmt(f),
-            MirValue::Bytestring(val) => todo!(), // TODO: display bytestrings??
+            MirValue::Bytestring(val) => {
+                f.write_str("[")?;
+                for byte in val {
+                    write!(f, "{byte:02x}")?;
+                }
+                f.write_str("]")
+            }
             MirValue::Phandle(val) => val.fmt(f),
         }
     }
@@ -266,8 +291,26 @@ pub enum MirCellList {
     Bits32(Vec<MirCell32>),
     Bits64(Vec<u64>),
 }
+impl MirCellList {
+    /// Returns the bit size.
+    #[must_use]
+    pub fn bits(&self) -> u8 {
+        match self {
+            Self::Bits8(_) => 8,
+            Self::Bits16(_) => 16,
+            Self::Bits32(_) => 32,
+            Self::Bits64(_) => 64,
+        }
+    }
+}
+/// Formats the MIR cell list into a working DTS property value fragment.
 impl fmt::Display for MirCellList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bits = self.bits();
+        if bits != 32 {
+            write!(f, "/bits/ {bits} ")?;
+        }
+
         f.write_str("<")?;
         match self {
             Self::Bits8(val) => {
@@ -412,10 +455,10 @@ mod tests {
         };
 
         expect![[r#"
-            node   /qux /main.dts L16:5-L22:7
-            node   /qux/quux /main.dts L17:9-L21:11
-            node   /qux/quux/bar /main.dts L18:13-L20:15
-            property = CellList(Bits32([Number(2)])) /qux/quux/bar/prop2 /main.dts L19:17-L19:29
+            property /qux/quux/bar/prop2 = <2>; /main.dts L19:17-L19:29
+            node /qux/quux/bar /main.dts L18:13-L20:15
+            node /qux/quux /main.dts L17:9-L21:11
+            node /qux /main.dts L16:5-L22:7
         "#]]
         .assert_eq(&new_mir.display(&db));
     }

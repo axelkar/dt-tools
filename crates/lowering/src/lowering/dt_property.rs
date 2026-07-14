@@ -569,11 +569,11 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:50
-                property = CellList(Bits32([Number(1), Number(2), Number(3)])) /baz /main.dts L3:18-L3:32
-                property = String("bar") /foo /main.dts L3:5-L3:17
-                property = Bytestring([171, 205]) /qux /main.dts L3:33-L3:47
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:50
+                property /foo = "bar"; /main.dts L3:5-L3:17
+                property /baz = <1 2 3>; /main.dts L3:18-L3:32
+                property /qux = [abcd]; /main.dts L3:33-L3:47
             "#]],
         );
     }
@@ -587,9 +587,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:30
-                property = CellList(Bits64([1])) /value /main.dts L3:5-L3:27
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:30
+                property /value = /bits/ 64 <1>; /main.dts L3:5-L3:27
             "#]],
         );
     }
@@ -603,9 +603,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:21
-                property = Phandle(Label("BOGUS")) /foo /main.dts L3:5-L3:18
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:21
+                property /foo = &BOGUS; /main.dts L3:5-L3:18
 
                 --- errors ---
                 Error L3:5-L3:18: Label not found: BOGUS [dt_tools_lowering::check_mir_post]
@@ -622,9 +622,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:22
-                property = Phandle(Path("/bar")) /foo /main.dts L3:5-L3:19
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:22
+                property /foo = &{/bar}; /main.dts L3:5-L3:19
 
                 --- errors ---
                 Error L3:5-L3:19: Node at path not found: /bar [dt_tools_lowering::check_mir_post]
@@ -641,9 +641,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:27
-                property = CellList(Bits32([])) /prop /main.dts L3:5-L3:24
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:27
+                property /prop = <>; /main.dts L3:5-L3:24
 
                 --- errors ---
                 Error L3:13-L3:22: number 4294967296 too large to fit in 32-bit signed integer (using two's complement) or 32-bit unsigned integer
@@ -660,9 +660,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:25
-                property = CellList(Bits32([Number(1), Number(4294967295)])) /prop /main.dts L3:5-L3:22
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:25
+                property /prop = <1 4294967295>; /main.dts L3:5-L3:22
 
                 --- errors ---
                 Error L3:13: Expected cell, ‘/include/‘, preprocessor directive or ‘>’, but found ‘-’ [dt-tools(syntax-error)]
@@ -679,9 +679,9 @@ mod tests {
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:26
-                property = CellList(Bits32([Number(0), Number(97)])) /prop /main.dts L3:5-L3:23
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:26
+                property /prop = <0 97>; /main.dts L3:5-L3:23
             "#]],
         );
     }
@@ -700,8 +700,8 @@ bar = "baz";
 "#,
             &[],
             expect![[r#"
-                dts-v1  /main.dts L2:1-L2:10
-                node   / /main.dts L3:1-L3:7
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:7
 
                 --- errors ---
                 Error L6:1-L6:13: Property must be defined inside a node
@@ -722,9 +722,9 @@ bar = "baz";
 "#,
                 &[],
                 expect![[r#"
-                    dts-v1  /main.dts L2:1-L2:10
-                    node   / /main.dts L3:1-L3:13
-                    property =  /bare /main.dts L3:5-L3:10
+                    dts-v1 /main.dts L2:1-L2:10
+                    node / /main.dts L3:1-L3:13
+                    property /bare; /main.dts L3:5-L3:10
                 "#]],
             );
         }
@@ -739,9 +739,9 @@ bar = "baz";
 "#,
                 &[],
                 expect![[r#"
-                    dts-v1  /main.dts L2:1-L2:10
-                    node   / /main.dts L4:1-L4:14
-                    property =  /bare /main.dts L3:15-L4:1
+                    dts-v1 /main.dts L2:1-L2:10
+                    node / /main.dts L4:1-L4:14
+                    property /bare; /main.dts L3:15-L4:1
                 "#]],
             );
         }
@@ -756,10 +756,10 @@ bar = "baz";
 "#,
                 &[],
                 expect![[r#"
-                    dts-v1  /main.dts L2:1-L2:10
-                    node   / /main.dts L4:1-L4:14
-                    node labels=[LBL] /foo /main.dts L3:15-L3:36
-                    property = String("baz") /foo/bar /main.dts L3:26-L3:37
+                    dts-v1 /main.dts L2:1-L2:10
+                    node / /main.dts L4:1-L4:14
+                    node /foo labels=[LBL] /main.dts L3:15-L3:36
+                    property /foo/bar = "baz"; /main.dts L3:26-L3:37
                 "#]],
             );
         }
@@ -774,9 +774,9 @@ bar = "baz";
 "#,
                 &[],
                 expect![[r#"
-                    dts-v1  /main.dts L2:1-L2:10
-                    node   / /main.dts L4:1-L4:14
-                    property = CellList(Bits32([Number(42)])) /bar /main.dts L3:15-L4:3
+                    dts-v1 /main.dts L2:1-L2:10
+                    node / /main.dts L4:1-L4:14
+                    property /bar = <42>; /main.dts L3:15-L4:3
                 "#]],
             );
         }
@@ -791,10 +791,10 @@ bar = "baz";
 "#,
                 &[],
                 expect![[r#"
-                    dts-v1  /main.dts L2:1-L2:10
-                    node   / /main.dts L4:1-L4:14
-                    node   /a /main.dts L3:15-L3:19
-                    node   /b /main.dts L3:21-L3:25
+                    dts-v1 /main.dts L2:1-L2:10
+                    node / /main.dts L4:1-L4:14
+                    node /a /main.dts L3:15-L3:19
+                    node /b /main.dts L3:21-L3:25
                 "#]],
             );
         }
@@ -809,9 +809,9 @@ MACRO;
 "#,
                 &[],
                 expect![[r#"
-                    dts-v1  /main.dts L2:1-L2:10
-                    node   / /main.dts L3:15-L3:25
-                    node   /foo /main.dts L3:19-L3:25
+                    dts-v1 /main.dts L2:1-L2:10
+                    node / /main.dts L3:15-L3:25
+                    node /foo /main.dts L3:19-L3:25
                 "#]],
             );
         }
@@ -826,9 +826,9 @@ MACRO;
 "#,
                 &[],
                 expect![[r#"
-                    dts-v1  /main.dts L2:1-L2:10
-                    node   / /main.dts L4:1-L4:14
-                    property = CellList(Bits32([Number(42)])) /bar /main.dts L3:15-L4:2
+                    dts-v1 /main.dts L2:1-L2:10
+                    node / /main.dts L4:1-L4:14
+                    property /bar = <42>; /main.dts L3:15-L4:2
 
                     --- errors ---
                     Error L3:26: Unmatched `;` [dt-tools(syntax-error)]
