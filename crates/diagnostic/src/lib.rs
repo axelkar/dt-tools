@@ -72,6 +72,13 @@ impl<F> MultiSpan<F> {
             span_labels: Vec::new(),
         }
     }
+
+    /// Returns `self` with a [`SpanLabel`] added.
+    #[must_use]
+    pub fn with_span_label(mut self, span_label: SpanLabel<F>) -> Self {
+        self.span_labels.push(span_label);
+        self
+    }
 }
 
 impl<F> From<Span<F>> for MultiSpan<F> {

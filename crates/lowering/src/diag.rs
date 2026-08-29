@@ -435,7 +435,7 @@ impl<'s, 'm> Diag<'s, 'm> {
 
     /// Emits a diagnostic for `range` in the current text.
     ///
-    /// The diagnostic will include provenance labels from the source map chain (e.g. macro
+    /// The diagnostic will include span labels from the source map chain (e.g. macro
     /// expansion sites).
     pub fn emit<Msg: Into<DiagnosticMessage>>(
         &mut self,
@@ -461,7 +461,7 @@ impl<'s, 'm> Diag<'s, 'm> {
         emit_inner(self, range, msg.into(), severity);
     }
 
-    /// Maps `range` to a [`MultiSpan<File>`] with primary spans and provenance labels.
+    /// Maps `range` to a [`MultiSpan<File>`] with primary spans and span labels.
     #[must_use]
     pub fn resolve_full(&self, range: TextRange) -> MultiSpan<File> {
         self.map.resolve_full(range)

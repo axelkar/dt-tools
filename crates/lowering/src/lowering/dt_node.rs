@@ -141,17 +141,15 @@ pub(crate) fn collect_labels(
             if let Some((old_path, span)) = ctx.env.get_label(ctx.db, &label_name)
                 && old_path != node_path
             {
-                let primary_span = diag.resolve(label_ast.syntax().text_range());
                 diag.push(Diagnostic {
-                    span: MultiSpan {
-                        primary_spans: vec![primary_span],
-                        span_labels: vec![SpanLabel {
+                    span: diag
+                        .resolve_full(label_ast.syntax().text_range())
+                        .with_span_label(SpanLabel {
                             span: *span,
                             msg: Cow::Owned(format!(
                                 "Previous definition of label `{label_name}` here"
                             )),
-                        }],
-                    },
+                        }),
                     msg: Cow::Owned(format!("Duplicate label `{label_name}`")),
                     severity: Severity::Warn,
                 });

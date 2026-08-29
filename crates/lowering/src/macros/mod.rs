@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use dt_tools_analyzer::macros::MacroDefinition;
-use dt_tools_diagnostic::Severity;
+use dt_tools_diagnostic::{Diagnostic, Severity, SpanLabel};
 use dt_tools_parser::{
     TextRange,
     ast::{self, AstNode, AstToken},
@@ -278,7 +278,16 @@ pub(crate) fn substitute_macro_tok<'db>(
             substituted_body.substituted_text,
         ))),
         Err(err) => {
-            diag.emit(macro_ctx.text_range(), err.to_string(), Severity::Error);
+            diag.push(Diagnostic {
+                span: diag
+                    .resolve_full(macro_ctx.text_range())
+                    .with_span_label(SpanLabel {
+                        span: def_span,
+                        msg: Cow::Owned(format!("`{name}` defined here")),
+                    }),
+                msg: Cow::Owned(format!("failed to substitute macro {name}: {err}")),
+                severity: Severity::Error,
+            });
             Err(())
         }
     }
