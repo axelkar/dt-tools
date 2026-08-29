@@ -109,7 +109,8 @@ pub enum LexError {
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[logos(error = LexError)]
 pub enum TokenKind {
-    #[regex("[ \t\r\n]+")]
+    /// Normal whitespace and escaped newlines
+    #[regex(r"([ \t\r\n]|\\\r?\n)+")]
     Whitespace,
 
     // Supports `/* /* */` but not `/* /* */ */` or `/* */ */`
@@ -181,7 +182,11 @@ pub enum TokenKind {
     /// **Combined token**, which is only generated in the parser.
     Name,
 
-    #[regex(r#"[^ \t\r\n"'/*+%|{}<>\[()?;:&=@,\-0-9\^!~][^ \t\r\n"'/*+%|{}<>\[()?;:&=@,\-\^!~]*"#)]
+    // TODO: restrict to dtc's PROPNODECHAR [a-zA-Z0-9,._+*#?@-] ?
+    // But don't allow numbers, @-symbols, etc. so the parsing and lowering don't have to check characters?
+    #[regex(
+        r#"[^ \t\r\n"'/*+%|{}<>\[()?;:&=@,\-0-9\^!~\\][^ \t\r\n"'/*+%|{}<>\[()?;:&=@,\-\^!~\\]*"#
+    )]
     Ident,
 
     #[token("=")]
@@ -915,6 +920,35 @@ mod tests {
             expect![[r#"
                 Ident "hello"
                 Whitespace " "
+                Ident "world"
+            "#]],
+        );
+    }
+
+    #[test]
+    fn lex_backslash_trivia() {
+        // backslash at end of line
+        check(
+            "hello \\\n world",
+            expect![[r#"
+                Ident "hello"
+                Whitespace " \\\n "
+                Ident "world"
+            "#]],
+        );
+        check(
+            "hello \\\r\n world",
+            expect![[r#"
+                Ident "hello"
+                Whitespace " \\\r\n "
+                Ident "world"
+            "#]],
+        );
+        check(
+            "hello\\\nworld",
+            expect![[r#"
+                Ident "hello"
+                Whitespace "\\\n"
                 Ident "world"
             "#]],
         );
