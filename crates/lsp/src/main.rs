@@ -1,4 +1,7 @@
-use std::net::{Ipv4Addr, SocketAddr};
+use std::{
+    borrow::Cow,
+    net::{Ipv4Addr, SocketAddr},
+};
 
 use ::salsa::Setter;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -44,6 +47,12 @@ pub struct OpenDocument {
     pub version: i32,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum WorkspaceSource {
+    LspWorkspaceFolder,
+    RootFile,
+}
+
 /// The global state for the LSP
 pub struct Session {
     /// Files open in the LSP client.
@@ -54,7 +63,8 @@ pub struct Session {
     resolved_client_capabilities: parking_lot::Mutex<Arc<ResolvedClientCapabilities>>,
 
     workspace_folders: Mutex<Vec<WorkspaceFolder>>,
-    dt_tools_workspace: parking_lot::Mutex<Option<dt_tools_workspace::Workspace>>,
+    dt_tools_workspace:
+        parking_lot::Mutex<Option<(WorkspaceSource, dt_tools_workspace::Workspace)>>,
     /// The file where evaluation will start from
     ///
     /// Files not (recursively) included in this file must not be analyzed
@@ -93,49 +103,70 @@ impl Session {
     async fn update_workspace(&self) {
         let folders = self.workspace_folders.lock().await;
         // TODO: actually support multiple workspace folders
-        let folder = folders.first();
-        let dt_tools_workspace = folder.and_then(|folder| {
-            let path = uri_to_path(&folder.uri).expect("Invalid document URI");
-            let res = dt_tools_workspace::Workspace::find_workspace_dir(&path);
-            let workspace_dir = res.workspace_dir();
-
-            let toml_config = match &res {
-                WorkspacePathFindResult::TomlConfig { toml_file_path, .. } => {
-                    Some(TomlConfig::load(toml_file_path))
-                }
-                WorkspacePathFindResult::LinuxMarker { .. } => {
-                    Some(Ok(dt_tools_workspace::linux_default_config(workspace_dir)))
-                }
-                WorkspacePathFindResult::Fallback { .. } => None,
-            };
-
-            let toml_config = match toml_config {
-                Some(Err(err)) => {
-                    tracing::error!(
-                        "Failed to parse TOML config from LSP workspace path {path:?}: {}",
-                        Report::new(err),
-                    );
-                    return None;
-                }
-                Some(Ok(toml_config)) => Some(toml_config),
-                None => None,
-            };
-
-            Some(dt_tools_workspace::Workspace {
-                config: CombinedConfig::merge_no_cli(
-                    EnvConfig::from_env()
-                        .inspect_err(|err| {
-                            tracing::warn!(
-                                "Failed to parse workspace config from environment: {}",
-                                Report::new(err),
-                            );
-                        })
-                        .ok(),
-                    toml_config,
-                ),
-                path: workspace_dir.to_path_buf(),
+        let dt_tools_workspace = folders
+            .first()
+            .map(|folder| {
+                (
+                    WorkspaceSource::LspWorkspaceFolder,
+                    uri_to_path(&folder.uri).expect("Invalid document URI"),
+                )
             })
-        });
+            .or_else(|| {
+                let root_file = self.root_file.lock();
+                Some((
+                    WorkspaceSource::RootFile,
+                    Cow::Owned(
+                        uri_to_path(root_file.as_ref()?)
+                            .expect("Invalid document URI")
+                            .parent()?
+                            .to_owned(),
+                    ),
+                ))
+            })
+            .and_then(|(source, path)| {
+                let res = dt_tools_workspace::Workspace::find_workspace_dir(&path);
+                let workspace_dir = res.workspace_dir();
+
+                let toml_config = match &res {
+                    WorkspacePathFindResult::TomlConfig { toml_file_path, .. } => {
+                        Some(TomlConfig::load(toml_file_path))
+                    }
+                    WorkspacePathFindResult::LinuxMarker { .. } => {
+                        Some(Ok(dt_tools_workspace::linux_default_config(workspace_dir)))
+                    }
+                    WorkspacePathFindResult::Fallback { .. } => None,
+                };
+
+                let toml_config = match toml_config {
+                    Some(Err(err)) => {
+                        tracing::error!(
+                            "Failed to parse TOML config from LSP workspace path {path:?}: {}",
+                            Report::new(err),
+                        );
+                        return None;
+                    }
+                    Some(Ok(toml_config)) => Some(toml_config),
+                    None => None,
+                };
+
+                Some((
+                    source,
+                    dt_tools_workspace::Workspace {
+                        config: CombinedConfig::merge_no_cli(
+                            EnvConfig::from_env()
+                                .inspect_err(|err| {
+                                    tracing::warn!(
+                                        "Failed to parse workspace config from environment: {}",
+                                        Report::new(err),
+                                    );
+                                })
+                                .ok(),
+                            toml_config,
+                        ),
+                        path: workspace_dir.to_path_buf(),
+                    },
+                ))
+            });
         info!(?dt_tools_workspace, "Updated workspace");
 
         let db = &mut *self.db.lock();
@@ -147,7 +178,7 @@ impl Session {
 
         let new_include_dirs = dt_tools_workspace
             .as_ref()
-            .map(|dt_tools_workspace| dt_tools_workspace.config.include_dirs.clone())
+            .map(|dt_tools_workspace| dt_tools_workspace.1.config.include_dirs.clone())
             .unwrap_or_default();
 
         if let Some(include_dirs) = IncludeDirs::try_get(db) {
@@ -187,7 +218,8 @@ impl LanguageServer for Backend {
         if let Some(workspace_folders) = params.workspace_folders {
             tracing::info!("Workspace folders: {workspace_folders:?}");
             *self.session.workspace_folders.lock().await = workspace_folders;
-            self.session.update_workspace().await;
+
+            self.update_workspace().await;
         } else {
             tracing::info!("Connected in single-file mode");
         }
@@ -252,7 +284,6 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         debug!("file opened");
-        self.session.update_workspace().await;
         self.client
             .log_message(MessageType::INFO, "file opened!")
             .await;
@@ -286,6 +317,8 @@ impl LanguageServer for Backend {
         if let Some(msg) = msg {
             self.client.show_message(MessageType::INFO, &msg).await;
         }
+
+        self.update_workspace().await;
 
         // TODO: warn files that aren't included by root_file
 
@@ -358,9 +391,8 @@ impl LanguageServer for Backend {
             }
             folders.extend_from_slice(&params.event.added);
         }
-        self.session.update_workspace().await;
 
-        // TODO: recompute includes etc.
+        self.update_workspace().await;
     }
 }
 
@@ -411,6 +443,24 @@ impl Backend {
                 .publish_diagnostics(uri, lsp_diagnostics, version)
                 .await;
         }
+    }
+
+    async fn update_workspace(&self) {
+        self.session.update_workspace().await;
+
+        self.client
+            .show_message(
+                MessageType::INFO,
+                &format!(
+                    "Loaded workspace: {:?}",
+                    self.session
+                        .dt_tools_workspace
+                        .lock()
+                        .as_ref()
+                        .map(|w| (w.0, &w.1.path))
+                ),
+            )
+            .await;
     }
 }
 
