@@ -1,0 +1,27 @@
+[package]
+name = "dt-tools-preprocessor"
+edition = "2024"
+description = "dt-tools token-level C preprocessor for Devicetree sources"
+keywords = ["devicetree"]
+
+version.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+camino.workspace = true
+displaydoc.workspace = true
+dt-tools-diagnostic.workspace = true
+logos.workspace = true
+rustc-hash.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+dt-tools-parser.workspace = true
+expect-test.workspace = true
+
+[lints]
+workspace = true

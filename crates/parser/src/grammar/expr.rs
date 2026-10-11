@@ -115,7 +115,7 @@ impl InfixOp {
     }
     /// See also [`PrefixOp::binding_power`].
     fn binding_power(&self) -> (u8, u8) {
-        // Order taken from here: https://en.cppreference.com/w/c/language/operator_precedence.html
+        // Order taken from here: https://en.cppreference.com/c/language/operator_precedence
         match self {
             Self::TernaryQuestionMark => (2, 1),
             Self::LogicalOr => (3, 4),
@@ -160,7 +160,7 @@ impl PrefixOp {
     }
     /// See also [`InfixOp::binding_power`].
     fn binding_power() -> ((), u8) {
-        // Order taken from here: https://en.cppreference.com/w/c/language/operator_precedence.html
+        // Order taken from here: https://en.cppreference.com/c/language/operator_precedence
         ((), 23)
     }
 }

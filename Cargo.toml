@@ -16,6 +16,7 @@ dt-tools-diagnostic.path = "./crates/diagnostic"
 dt-tools-lint.path = "./crates/lint"
 dt-tools-lowering.path = "./crates/lowering"
 dt-tools-parser.path = "./crates/parser"
+dt-tools-preprocessor.path = "./crates/preprocessor"
 dt-tools-workspace.path = "./crates/workspace"
 
 tracing = "0.1.40"

@@ -578,6 +578,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dt-tools-preprocessor"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "displaydoc",
+ "dt-tools-diagnostic",
+ "dt-tools-parser",
+ "expect-test",
+ "logos",
+ "rustc-hash",
+ "thiserror",
+]
+
+[[package]]
 name = "dt-tools-workspace"
 version = "0.1.0"
 dependencies = [
