@@ -480,28 +480,19 @@ impl core::fmt::Display for TokenKind {
     }
 }
 
+/// Scans a block comment up to and including its closing `*/`.
 fn lex_block_comment(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
-    let remainder: &str = lex.remainder();
-    let mut asterisk_found = false;
-    let mut total_len = 0;
+    let remainder = lex.remainder();
+    let end = remainder.find("*/");
+    let len = remainder.len();
 
-    for c in remainder.chars() {
-        total_len += c.len_utf8();
-
-        if c == '*' {
-            asterisk_found = true;
-            continue;
-        }
-
-        if c == '/' && asterisk_found {
-            lex.bump(total_len);
-            return Ok(());
-        }
-
-        asterisk_found = false;
+    if let Some(end) = end {
+        lex.bump(end + 2);
+        Ok(())
+    } else {
+        lex.bump(len);
+        Err(LexError::UnexpectedEndBlockComment)
     }
-    lex.bump(total_len);
-    Err(LexError::UnexpectedEndBlockComment)
 }
 
 fn lex_preprocessor_directive(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
