@@ -45,6 +45,8 @@ fluent-uri = "0.4.1"
 codespan-reporting = "0.13.1"
 expect-test = "1.5.1"
 smallvec = "1.15.2"
+arbitrary = { version = "1", features = ["derive"] }
+strum = { version = "0.28.0", features = ["derive"] }
 
 [workspace.lints.rust]
 # https://github.com/rust-lang/rust/issues/95513

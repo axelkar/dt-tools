@@ -1,10 +1,12 @@
 //! Differential tests of the cleaner against GCC, Clang and cpp.
 
 use std::{
+    collections::HashSet,
     io::Write as _,
     process::{Command, Stdio},
 };
 
+use arbitrary::{Arbitrary, Result, Unstructured};
 use camino::Utf8Path;
 use dt_tools_preprocessor::{PpTokenKind, PreprocessorConfig, lex, preprocess};
 use logos::Logos;
@@ -32,43 +34,95 @@ const CPP_ARGS: &[&str] = &[
 ];
 
 /// Inputs that never form a directive. A `#` only appears glued to a non-directive name.
-const FRAGMENTS: &[&str] = &[
+#[derive(Arbitrary, Clone, Copy, strum::Display)]
+enum CleanFragment {
     // Identifiers and `#`-names.
-    "foo",
-    "#address",
+    #[strum(serialize = "foo")]
+    Identifier,
+    #[strum(serialize = "#address")]
+    HashName,
     // Numbers.
-    "0x1f",
-    "12abc",
-    "1.5e+3",
-    "0xE+foo",
+    #[strum(serialize = "0x1f")]
+    HexNumber,
+    #[strum(serialize = "12abc")]
+    NumberSuffix,
+    #[strum(serialize = "1.5e+3")]
+    Float,
+    #[strum(serialize = "0xE+foo")]
+    HexPlus,
     // Comment starters and line continuations.
-    "/",
-    "*",
-    "\\",
+    #[strum(serialize = "/")]
+    Slash,
+    #[strum(serialize = "*")]
+    Star,
+    #[strum(serialize = "\\")]
+    Backslash,
     // `::` is C++ punctuation, so it is two tokens here.
-    "::",
+    #[strum(serialize = "::")]
+    DoubleColon,
     // Strings and characters.
-    "\"a b\"",
-    "\"/*\"",
-    "\"a\\\\\"",
-    "'a'",
-    "'\\''",
-    "'a",
+    #[strum(serialize = "\"a b\"")]
+    String,
+    #[strum(serialize = "\"/*\"")]
+    CommentString,
+    #[strum(serialize = "\"a\\\\\"")]
+    EscapedString,
+    #[strum(serialize = "'a'")]
+    Char,
+    #[strum(serialize = "'\\''")]
+    EscapedChar,
+    #[strum(serialize = "'a")]
+    UnterminatedChar,
     // Comments and line continuations.
-    "/* multi\nline */",
-    "// line\n",
-    "// cont\\\ninued\n",
-    "\\\n",
-    "\\\\\n",
+    #[strum(serialize = "/* multi\nline */")]
+    BlockComment,
+    #[strum(serialize = "// line\n")]
+    LineComment,
+    #[strum(serialize = "// cont\\\ninued\n")]
+    ContinuedComment,
+    #[strum(serialize = "\\\n")]
+    Splice,
+    #[strum(serialize = "\\\\\n")]
+    DoubleSplice,
     // Whitespace.
-    " ",
-    "\n",
-    "\r",
-    "\r\n",
-    "\t",
+    #[strum(serialize = " ")]
+    Space,
+    #[strum(serialize = "\n")]
+    Newline,
+    #[strum(serialize = "\r")]
+    CarriageReturn,
+    #[strum(serialize = "\r\n")]
+    CarriageReturnNewline,
+    #[strum(serialize = "\t")]
+    Tab,
     // Node names with unit addresses.
-    "uart@fe001000",
-];
+    #[strum(serialize = "uart@fe001000")]
+    UnitAddress,
+}
+
+/// A generated cleaning case.
+struct CleanCase {
+    fragments: Vec<CleanFragment>,
+}
+
+impl<'a> Arbitrary<'a> for CleanCase {
+    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+        let count = u.int_in_range(1..=MAX_FRAGMENTS)?;
+        let fragments = (0..count)
+            .map(|_| CleanFragment::arbitrary(u))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self { fragments })
+    }
+}
+
+impl std::fmt::Display for CleanCase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for fragment in &self.fragments {
+            write!(f, "{fragment}")?;
+        }
+        Ok(())
+    }
+}
 
 /// Hand-picked inputs covering lexer edge cases.
 const EDGE_CASES: &[&str] = &[
@@ -115,36 +169,368 @@ const EDGE_CASES: &[&str] = &[
     "a /* x\n",
 ];
 
-/// Line-sized fragments for the generated macro corpus.
-const MACRO_FRAGMENTS: &[&str] = &[
-    "#define A 1\n",
-    "#define B A\n",
-    "#define C 2\n",
-    "#undef A\n",
-    "#undef B\n",
-    "\n",
-    "A\n",
-    "B\n",
-    "C\n",
-    "A B\n",
-    "A + B\n",
-    "A;A\n",
-    "x = A;\n",
-    "A/*c*/B\n",
-    "#define F(x) x\n",
-    "#define G(a, b) a b\n",
-    "#define V(...) __VA_ARGS__\n",
-    "#define W(a, ...) a __VA_ARGS__\n",
-    "F(1)\n",
-    "F(A)\n",
-    "F (1)\n",
-    "F(F(1))\n",
-    "F((1, 2))\n",
-    "G(1, 2)\n",
-    "V(1, 2)\n",
-    "V()\n",
-    "W(1, 2, 3)\n",
-];
+/// A macro name from a fixed set.
+#[derive(Arbitrary, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
+enum MacroName {
+    A,
+    B,
+    C,
+    D,
+}
+
+/// A macro parameter name from a fixed set.
+///
+/// Separate from [`MacroName`] so generated parameters never collide with macros.
+#[derive(Arbitrary, Clone, Copy, PartialEq, Eq, Hash, strum::Display)]
+enum ParamName {
+    X,
+    Y,
+    Z,
+}
+
+/// A fragment of the generated macro corpus.
+#[derive(Arbitrary)]
+enum MacroFragment {
+    Undef(MacroName),
+    Define {
+        name: MacroName,
+        /// `None` for an object-like definition, `Some` for a function-like
+        /// one. Inner `bool` represents whether the definition is variadic.
+        #[arbitrary(with = params)]
+        params: Option<(Vec<ParamName>, bool)>,
+        #[arbitrary(with = body_tokens)]
+        body: Vec<BodyToken>,
+    },
+    Use(Use),
+}
+
+/// Generates a bounded parameter list.
+fn params(u: &mut Unstructured<'_>) -> Result<Option<(Vec<ParamName>, bool)>> {
+    if !u.arbitrary()? {
+        return Ok(None);
+    }
+
+    let count = u.int_in_range(0..=MAX_PARAMS)?;
+    let params = (0..count)
+        .map(|_| ParamName::arbitrary(u))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some((params, u.arbitrary()?)))
+}
+
+/// Generates a bounded replacement list.
+fn body_tokens(u: &mut Unstructured<'_>) -> Result<Vec<BodyToken>> {
+    let count = u.int_in_range(0..=MAX_BODY_TOKENS)?;
+    (0..count).map(|_| BodyToken::arbitrary(u)).collect()
+}
+
+impl std::fmt::Display for MacroFragment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Undef(name) => writeln!(f, "#undef {name}"),
+            Self::Define { name, params, body } => {
+                // Remove a previous definition first, so a redefinition does not warn.
+                writeln!(f, "#undef {name}")?;
+                write!(f, "#define {name}")?;
+
+                let function_like = params.is_some();
+                let (params, is_variadic) = match params {
+                    Some((params, is_variadic)) => (dedup(params), *is_variadic),
+                    None => (Vec::new(), false),
+                };
+
+                if function_like {
+                    write!(f, "(")?;
+                    for (index, param) in params.iter().enumerate() {
+                        if index > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{param}")?;
+                    }
+                    if is_variadic {
+                        if !params.is_empty() {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "...")?;
+                    }
+                    write!(f, ")")?;
+                }
+
+                if !body.is_empty() {
+                    write!(
+                        f,
+                        " {}",
+                        Body {
+                            tokens: body,
+                            params: &params,
+                            is_variadic,
+                        }
+                    )?;
+                }
+                writeln!(f)
+            }
+            Self::Use(item) => writeln!(f, "{item}"),
+        }
+    }
+}
+
+/// A replacement list with its definition context.
+struct Body<'a> {
+    tokens: &'a [BodyToken],
+    params: &'a [ParamName],
+    is_variadic: bool,
+}
+
+impl std::fmt::Display for Body<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut first = true;
+        for token in self.tokens {
+            // `__VA_ARGS__` outside a variadic macro is an error in the oracle.
+            if matches!(token, BodyToken::VaArgs { .. }) && !self.is_variadic {
+                continue;
+            }
+            if !first {
+                f.write_str(" ")?;
+            }
+            match token {
+                // `#` requires a parameter. The oracle treats the invalid form as ordinary
+                // tokens, so do not generate it.
+                BodyToken::Stringify(param) if !self.params.contains(param) => {
+                    if self.is_variadic {
+                        f.write_str("#__VA_ARGS__")?;
+                    } else {
+                        write!(f, "{param}")?;
+                    }
+                }
+                _ => write!(f, "{token}")?,
+            }
+            first = false;
+        }
+        Ok(())
+    }
+}
+
+/// Returns `params` without duplicates, preserving order.
+fn dedup(params: &[ParamName]) -> Vec<ParamName> {
+    let mut seen = HashSet::new();
+    params
+        .iter()
+        .copied()
+        .filter(|param| seen.insert(*param))
+        .collect()
+}
+
+/// A token in a macro replacement list.
+#[derive(Arbitrary, strum::Display)]
+enum BodyToken {
+    #[strum(transparent)]
+    Value(Value),
+    #[strum(transparent)]
+    Param(ParamName),
+    /// `#param`.
+    #[strum(to_string = "#{0}")]
+    Stringify(ParamName),
+    /// `left ## right`.
+    #[strum(to_string = "{0}##{1}")]
+    Concat(PasteOperand, PasteOperand),
+    /// `__VA_ARGS__`, optionally with GNU comma elision.
+    #[strum(transparent)]
+    VaArgs(VaArgs),
+}
+
+#[derive(Arbitrary)]
+struct VaArgs {
+    gnu_comma: bool,
+}
+impl std::fmt::Display for VaArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.gnu_comma {
+            f.write_str(", ## ")?;
+        }
+        f.write_str("__VA_ARGS__")
+    }
+}
+
+/// An operand of `##`, restricted to tokens that paste into one pp-token.
+#[derive(Arbitrary, strum::Display)]
+enum PasteOperand {
+    #[strum(transparent)]
+    Param(ParamName),
+    #[strum(transparent)]
+    MacroName(MacroName),
+    #[strum(serialize = "0")]
+    Number,
+}
+
+/// A value usable as an argument or as a replacement token.
+#[derive(strum::Display)]
+enum Value {
+    #[strum(transparent)]
+    Invoke(Invoke),
+    #[strum(serialize = "1")]
+    Number1,
+    #[strum(serialize = "\"s\"")]
+    String,
+    #[strum(to_string = "{0} + {1}")]
+    Plus(Box<Value>, Box<Value>),
+}
+
+impl<'a> Arbitrary<'a> for Value {
+    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+        value(u, MAX_VALUE_DEPTH)
+    }
+}
+
+/// Generates a value with at most `depth` levels of nesting.
+fn value(u: &mut Unstructured<'_>, depth: u8) -> Result<Value> {
+    if depth == 0 {
+        return Ok(if u.arbitrary()? {
+            Value::Number1
+        } else {
+            Value::String
+        });
+    }
+
+    match u.int_in_range(0..=3)? {
+        0 => Ok(Value::Invoke(invoke(u, depth)?)),
+        1 => Ok(Value::Number1),
+        2 => Ok(Value::String),
+        _ => Ok(Value::Plus(
+            Box::new(value(u, depth - 1)?),
+            Box::new(value(u, depth - 1)?),
+        )),
+    }
+}
+
+/// A macro invocation.
+struct Invoke {
+    name: MacroName,
+    /// `None` renders the name alone.
+    args: Option<Args>,
+}
+
+impl std::fmt::Display for Invoke {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)?;
+        if let Some(args) = &self.args {
+            if args.space_before_lparen {
+                f.write_str(" ")?;
+            }
+            write!(f, "{args}")?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a> Arbitrary<'a> for Invoke {
+    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+        invoke(u, MAX_VALUE_DEPTH)
+    }
+}
+
+/// Generates an invocation with at most `depth` levels of nesting.
+fn invoke(u: &mut Unstructured<'_>, depth: u8) -> Result<Invoke> {
+    let name = MacroName::arbitrary(u)?;
+    let args = if depth > 0 && u.arbitrary()? {
+        Some(args(u, depth)?)
+    } else {
+        None
+    };
+    Ok(Invoke { name, args })
+}
+
+/// A parenthesized argument list.
+struct Args {
+    /// Adds an extra pair of parentheses around the joined arguments.
+    wrap_in_parentheses: bool,
+    /// Puts a space between the macro name and `(`.
+    space_before_lparen: bool,
+    values: Vec<Value>,
+}
+
+impl std::fmt::Display for Args {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(")?;
+        if self.wrap_in_parentheses {
+            f.write_str("(")?;
+        }
+        for (index, value) in self.values.iter().enumerate() {
+            if index > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{value}")?;
+        }
+        if self.wrap_in_parentheses {
+            f.write_str(")")?;
+        }
+        f.write_str(")")
+    }
+}
+
+impl<'a> Arbitrary<'a> for Args {
+    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+        args(u, MAX_VALUE_DEPTH)
+    }
+}
+
+/// Generates an argument list whose values nest at most `depth` levels.
+fn args(u: &mut Unstructured<'_>, depth: u8) -> Result<Args> {
+    let count = u.int_in_range(0..=MAX_ARGS)?;
+    let values = (0..count)
+        .map(|_| value(u, depth.saturating_sub(1)))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Args {
+        wrap_in_parentheses: u.arbitrary()?,
+        space_before_lparen: u.arbitrary()?,
+        values,
+    })
+}
+
+/// A top-level use of a macro or ordinary source text.
+#[derive(Arbitrary, strum::Display)]
+enum Use {
+    #[strum(transparent)]
+    Invoke(Invoke),
+    #[strum(to_string = "{0} {1}")]
+    Pair(MacroName, MacroName),
+    #[strum(to_string = "{name} = {value};")]
+    Assign { name: MacroName, value: Value },
+    #[strum(to_string = "{0}/*c*/{1}")]
+    Commented(MacroName, MacroName),
+    #[strum(serialize = "")]
+    Blank,
+}
+
+/// A generated macro case.
+struct MacroCase {
+    fragments: Vec<MacroFragment>,
+}
+
+impl std::fmt::Display for MacroCase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for fragment in &self.fragments {
+            write!(f, "{fragment}")?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a> Arbitrary<'a> for MacroCase {
+    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+        let count = u.int_in_range(1..=MAX_FRAGMENTS)?;
+        let mut fragments = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            // A fragment gets its own budget, so one recursive value cannot consume the rest.
+            let Ok(bytes) = u.arbitrary::<[u8; FRAGMENT_BYTES]>() else {
+                break;
+            };
+            let mut fragment_input = Unstructured::new(&bytes);
+            if let Ok(fragment) = MacroFragment::arbitrary(&mut fragment_input) {
+                fragments.push(fragment);
+            }
+        }
+        Ok(Self { fragments })
+    }
+}
 
 /// Hand-picked inputs covering macro edge cases.
 const MACRO_EDGE_CASES: &[&str] = &[
@@ -191,6 +577,7 @@ const MACRO_EDGE_CASES: &[&str] = &[
     "#define S(x) #x\nS()\n",
     "#define A 1\n#define S(x) #x\nS(A)\n",
     "#define HASH #\nHASH\n",
+    "#define S #x\nS\n",
     // Token pasting.
     "#define CAT(a, b) a ## b\nCAT(foo, bar)\n",
     "#define CAT(a, b) a ## b\nCAT(+, +)\n",
@@ -198,6 +585,7 @@ const MACRO_EDGE_CASES: &[&str] = &[
     "#define CAT(a, b) a ## b\nCAT(, x)\n",
     "#define CAT(a, b) a ## b\nCAT(x,)\n",
     "#define CAT(a, b) a ## b\nCAT(,)\n",
+    "#define A 0 ## 0\nA\n",
     // GNU comma elision.
     "#define F(a, ...) a, ## __VA_ARGS__\nF(1)\n",
     "#define F(a, ...) a, ## __VA_ARGS__\nF(1, 2)\n",
@@ -425,41 +813,52 @@ impl Xorshift64Star {
         // Multiplied by Marsaglia's M_32 constant for non-linear scrambling
         x.wrapping_mul(0x2545_F491_4F6C_DD1D)
     }
-
-    /// Generated the next random integer less than `n`.
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "value is below n, which is below usize"
-    )]
-    pub fn below(&mut self, n: usize) -> usize {
-        let value = self.next_u64() % n as u64;
-        usize::try_from(value).unwrap()
-    }
 }
 
-/// Deterministic input generator from a fragment list.
-struct Generator {
+/// Deterministic bytes fed to `Arbitrary` for each generated case.
+const GENERATED_BYTES: usize = 2048;
+
+/// Deterministic bytes reserved for one generated macro fragment.
+const FRAGMENT_BYTES: usize = 128;
+
+/// The maximum number of fragments in a generated case.
+const MAX_FRAGMENTS: u8 = 8;
+
+/// The maximum number of parameters in a generated definition.
+const MAX_PARAMS: u8 = 3;
+
+/// The maximum number of tokens in a generated replacement list.
+const MAX_BODY_TOKENS: u8 = 6;
+
+/// The maximum number of arguments in a generated invocation.
+const MAX_ARGS: u8 = 4;
+
+/// The maximum nesting depth of a generated value.
+const MAX_VALUE_DEPTH: u8 = 3;
+
+/// A deterministic source of `Arbitrary` cases.
+struct Corpus {
     prng: Xorshift64Star,
-    fragments: &'static [&'static str],
 }
 
-impl Generator {
-    fn new(fragments: &'static [&'static str]) -> Self {
+impl Corpus {
+    fn new() -> Self {
         Self {
             prng: Xorshift64Star::new(SEED),
-            fragments,
         }
     }
 
-    fn input(&mut self) -> String {
-        let count = 1 + self.prng.below(40);
-        let fragment_count = self.fragments.len();
-        let mut input = String::new();
-        for _ in 0..count {
-            let index = self.prng.below(fragment_count);
-            input.push_str(self.fragments[index]);
+    /// Generates one case from a fixed number of deterministic bytes.
+    fn next<T>(&mut self) -> Option<T>
+    where
+        T: for<'a> Arbitrary<'a>,
+    {
+        let mut bytes = Vec::with_capacity(GENERATED_BYTES);
+        while bytes.len() < GENERATED_BYTES {
+            bytes.extend_from_slice(&self.prng.next_u64().to_le_bytes());
         }
-        input
+
+        T::arbitrary(&mut Unstructured::new(&bytes)).ok()
     }
 }
 
@@ -475,9 +874,12 @@ fn iterations() -> usize {
 #[test]
 fn generated() {
     let cpps = Cpp::available();
-    let mut generator = Generator::new(FRAGMENTS);
+    let mut corpus = Corpus::new();
     for index in 0..iterations() {
-        check_consensus(&cpps, &generator.input(), index);
+        let Some(case) = corpus.next::<CleanCase>() else {
+            continue;
+        };
+        check_consensus(&cpps, &case.to_string(), index);
     }
 }
 
@@ -494,10 +896,29 @@ fn edge_cases() {
 #[test]
 fn generated_macros() {
     let cpps = Cpp::available();
-    let mut generator = Generator::new(MACRO_FRAGMENTS);
+    let mut corpus = Corpus::new();
     for index in 0..iterations() {
-        check_expanded_consensus(&cpps, &generator.input(), index);
+        let Some(case) = corpus.next::<MacroCase>() else {
+            continue;
+        };
+        check_expanded_consensus(&cpps, &case.to_string(), index);
     }
+}
+
+#[test]
+fn generated_cases_have_several_fragments() {
+    // Guards the generator against one fragment consuming the whole case budget.
+    let mut corpus = Corpus::new();
+    let mut total = 0;
+    for _ in 0..20 {
+        let case = corpus.next::<MacroCase>().expect("a generated case");
+        assert!(!case.fragments.is_empty(), "generated an empty case");
+        total += case.fragments.len();
+    }
+    assert!(
+        total >= 40,
+        "generated cases are too small: {total} fragments"
+    );
 }
 
 /// Checks every hand-picked macro edge case against the available preprocessors.
