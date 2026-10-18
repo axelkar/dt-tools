@@ -1,6 +1,6 @@
 use dt_tools_diagnostic::Severity;
 
-use super::Expander;
+use super::{Expander, condition::evaluate};
 use crate::{
     directive::{Directive, DirectiveKind},
     env::{MacroDef, MacroKind},
@@ -34,6 +34,15 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
 
     /// Handles a directive.
     pub(crate) fn handle(&mut self) {
+        if self.directive.kind.is_conditional() {
+            self.conditional();
+            return;
+        }
+
+        if !self.expander.is_active() {
+            return;
+        }
+
         match self.directive.kind {
             DirectiveKind::Define => self.define(),
             DirectiveKind::Undef => self.undef(),
@@ -44,7 +53,148 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
                 format!("directive `{}` is not supported yet", self.directive.name),
                 self.directive.text_range,
             ),
+            _ => unreachable!("conditional directives are handled above"),
         }
+    }
+
+    /// Handles a conditional directive.
+    fn conditional(&mut self) {
+        match self.directive.kind {
+            DirectiveKind::If | DirectiveKind::Ifdef | DirectiveKind::Ifndef => self.open(),
+            DirectiveKind::Elif | DirectiveKind::Elifdef | DirectiveKind::Elifndef => self.elif(),
+            DirectiveKind::Else => self.else_branch(),
+            DirectiveKind::Endif => self.endif(),
+            _ => unreachable!("not a conditional directive"),
+        }
+    }
+
+    /// Opens a conditional group.
+    fn open(&mut self) {
+        let condition = self.expander.is_active() && self.condition();
+        self.expander.conditionals.open(
+            self.directive.text_range,
+            self.directive.text_range.end,
+            condition,
+        );
+    }
+
+    /// Starts an `#elif` branch.
+    fn elif(&mut self) {
+        if self.expander.conditionals.is_empty() {
+            self.expander.report(
+                Severity::Error,
+                format!("`#{}` without `#if`", self.directive.name),
+                self.directive.text_range,
+            );
+            return;
+        }
+
+        if self.expander.conditionals.else_seen() {
+            self.expander.report(
+                Severity::Error,
+                format!("`#{}` after `#else`", self.directive.name),
+                self.directive.text_range,
+            );
+            return;
+        }
+
+        let condition = self.expander.conditionals.should_evaluate_elif() && self.condition();
+        self.expander.conditionals.elif(
+            self.directive.text_range.start,
+            self.directive.text_range.end,
+            condition,
+        );
+    }
+
+    /// Starts an `#else` branch.
+    fn else_branch(&mut self) {
+        if self.expander.conditionals.is_empty() {
+            self.expander.report(
+                Severity::Error,
+                "`#else` without `#if`".to_owned(),
+                self.directive.text_range,
+            );
+            return;
+        }
+
+        if self.expander.conditionals.else_seen() {
+            self.expander.report(
+                Severity::Error,
+                "`#else` after `#else`".to_owned(),
+                self.directive.text_range,
+            );
+            return;
+        }
+
+        self.expander.conditionals.else_branch(
+            self.directive.text_range.start,
+            self.directive.text_range.end,
+        );
+    }
+
+    /// Closes the current conditional group.
+    fn endif(&mut self) {
+        if !self
+            .expander
+            .conditionals
+            .close(self.directive.text_range.start)
+        {
+            self.expander.report(
+                Severity::Error,
+                "`#endif` without `#if`".to_owned(),
+                self.directive.text_range,
+            );
+        }
+    }
+
+    /// Evaluates a conditional's condition.
+    fn condition(&mut self) -> bool {
+        match self.directive.kind {
+            DirectiveKind::If | DirectiveKind::Elif => self.eval_condition(),
+            DirectiveKind::Ifdef | DirectiveKind::Elifdef => self.is_defined(),
+            DirectiveKind::Ifndef | DirectiveKind::Elifndef => !self.is_defined(),
+            _ => unreachable!("not a condition"),
+        }
+    }
+
+    /// Evaluates an `#if` expression.
+    fn eval_condition(&mut self) -> bool {
+        let tokens = self.expander.expand_condition(self.directive.argument);
+        let (value, diagnostics) = evaluate(
+            &tokens,
+            self.expander.cleaned_text,
+            self.directive.text_range,
+        );
+        for (message, range) in diagnostics {
+            self.expander.report(Severity::Error, message, range);
+        }
+        value != 0
+    }
+
+    /// Returns true if the `#ifdef` operand names a defined macro.
+    fn is_defined(&mut self) -> bool {
+        let Some(name) = self.next_arg() else {
+            self.expander.report(
+                Severity::Error,
+                "macro name missing".to_owned(),
+                self.directive.text_range,
+            );
+            return false;
+        };
+
+        if name.kind != PpTokenKind::Ident {
+            self.expander.report(
+                Severity::Error,
+                "macro name must be an identifier".to_owned(),
+                name.orig,
+            );
+            return false;
+        }
+
+        self.expander
+            .env
+            .get(name.text(self.expander.cleaned_text))
+            .is_some()
     }
 
     /// Handles a `#define` directive.

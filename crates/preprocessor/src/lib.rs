@@ -65,7 +65,13 @@ pub fn preprocess(
         })
         .collect();
 
-    let expansion = expand::expand(&cleaned.tokens, &cleaned.cleaned_text, root_id, config);
+    let expansion = expand::expand(
+        &cleaned.tokens,
+        &cleaned.cleaned_text,
+        cleaned.orig_len,
+        root_id,
+        config,
+    );
     diagnostics.extend(expansion.diagnostics);
 
     let (text, map) = emit::emit(&expansion.tokens, &cleaned.cleaned_text, root_id);
@@ -75,7 +81,7 @@ pub fn preprocess(
         map,
         sources: sources.into_files(),
         includes: Vec::new(),
-        skipped: Vec::new(),
+        skipped: expansion.skipped,
         macro_defs: expansion.macro_defs,
         diagnostics,
     }
@@ -84,7 +90,7 @@ pub fn preprocess(
 #[cfg(test)]
 mod tests {
     use camino::Utf8Path;
-    use dt_tools_diagnostic::Severity;
+    use dt_tools_diagnostic::{Severity, text_range::TextRange};
 
     use super::{PreprocessedRoot, PreprocessorConfig, preprocess};
 
@@ -445,6 +451,175 @@ mod tests {
                 Severity::Error,
                 "input: {input:?}"
             );
+        }
+    }
+
+    #[test]
+    fn skips_false_branches() {
+        assert_eq!(preprocess_str("#if 0\nfoo\n#endif\n").text, "");
+        assert_eq!(preprocess_str("#if 1\nfoo\n#endif\n").text, "foo");
+        assert_eq!(preprocess_str("#if 2\nfoo\n#endif\n").text, "foo");
+        assert_eq!(
+            preprocess_str("#if 0\nfoo\n#else\nbar\n#endif\n").text,
+            "bar"
+        );
+        assert_eq!(
+            preprocess_str("#if 1\nfoo\n#else\nbar\n#endif\n").text,
+            "foo"
+        );
+    }
+
+    #[test]
+    fn handles_elif_chains() {
+        assert_eq!(
+            preprocess_str("#if 0\na\n#elif 1\nb\n#else\nc\n#endif\n").text,
+            "b"
+        );
+        assert_eq!(
+            preprocess_str("#if 1\na\n#elif 1\nb\n#else\nc\n#endif\n").text,
+            "a"
+        );
+        assert_eq!(
+            preprocess_str("#if 0\na\n#elif 0\nb\n#else\nc\n#endif\n").text,
+            "c"
+        );
+        // A later #elif is not evaluated once a branch was taken.
+        let result = preprocess_str("#if 1\na\n#elif defined\nb\n#endif\n");
+        assert_eq!(result.text, "a");
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn checks_definedness() {
+        assert_eq!(
+            preprocess_str("#define A 1\n#ifdef A\nfoo\n#endif\n").text,
+            "foo"
+        );
+        assert_eq!(preprocess_str("#ifdef A\nfoo\n#endif\n").text, "");
+        assert_eq!(preprocess_str("#ifndef A\nfoo\n#endif\n").text, "foo");
+        assert_eq!(
+            preprocess_str("#define A\n#ifdef A\nfoo\n#endif\n").text,
+            "foo"
+        );
+        assert_eq!(
+            preprocess_str("#define A 1\n#undef A\n#ifdef A\nfoo\n#endif\n").text,
+            ""
+        );
+    }
+
+    #[test]
+    fn evaluates_defined_and_undefined_identifiers() {
+        assert_eq!(
+            preprocess_str("#define A 1\n#if defined(A)\nfoo\n#endif\n").text,
+            "foo"
+        );
+        assert_eq!(preprocess_str("#if defined A\nfoo\n#endif\n").text, "");
+        assert_eq!(preprocess_str("#if !defined(A)\nfoo\n#endif\n").text, "foo");
+        assert_eq!(preprocess_str("#if UNDEF\nfoo\n#endif\n").text, "");
+        assert_eq!(preprocess_str("#if !UNDEF\nfoo\n#endif\n").text, "foo");
+        // The operand of `defined` is not expanded.
+        assert_eq!(
+            preprocess_str("#define A B\n#if defined(A)\nfoo\n#endif\n").text,
+            "foo"
+        );
+    }
+
+    #[test]
+    fn evaluates_minimal_conditions() {
+        assert_eq!(preprocess_str("#if !0\nfoo\n#endif\n").text, "foo");
+        assert_eq!(preprocess_str("#if !1\nfoo\n#endif\n").text, "");
+        assert_eq!(preprocess_str("#if (1)\nfoo\n#endif\n").text, "foo");
+        assert_eq!(preprocess_str("#if (0)\nfoo\n#endif\n").text, "");
+        assert_eq!(
+            preprocess_str("#define A 1\n#if A\nfoo\n#endif\n").text,
+            "foo"
+        );
+    }
+
+    #[test]
+    fn handles_elifdef_and_elifndef() {
+        assert_eq!(
+            preprocess_str("#define A 1\n#if 0\na\n#elifdef A\nb\n#endif\n").text,
+            "b"
+        );
+        assert_eq!(
+            preprocess_str("#if 0\na\n#elifndef A\nb\n#endif\n").text,
+            "b"
+        );
+        assert_eq!(
+            preprocess_str("#define A 1\n#if 0\na\n#elifndef A\nb\n#endif\n").text,
+            ""
+        );
+    }
+
+    #[test]
+    fn skips_directives_in_inactive_branches() {
+        let result = preprocess_str("#if 0\n#define A 1\n#error boom\nA\n#endif\n");
+        assert_eq!(result.text, "");
+        assert!(result.diagnostics.is_empty());
+
+        // A malformed condition inside a skipped branch is not evaluated.
+        let result = preprocess_str("#if 0\n#if defined\nx\n#endif\n#endif\n");
+        assert_eq!(result.text, "");
+        assert!(result.diagnostics.is_empty());
+
+        assert_eq!(preprocess_str("#if 0\n#define A 1\n#endif\nA\n").text, "A");
+    }
+
+    #[test]
+    fn nests_conditionals() {
+        assert_eq!(
+            preprocess_str("#if 1\n#if 0\na\n#else\nb\n#endif\n#endif\n").text,
+            "b"
+        );
+        assert_eq!(
+            preprocess_str("#if 1\n#if 1\nx\n#endif\n#endif\n").text,
+            "x"
+        );
+        assert_eq!(
+            preprocess_str("#if 0\n#if 1\na\n#endif\nb\n#endif\n").text,
+            ""
+        );
+        assert_eq!(
+            preprocess_str("#if 0\na\n#else\n#if 1\nb\n#endif\n#endif\n").text,
+            "b"
+        );
+    }
+
+    #[test]
+    fn records_skipped_branch_ranges() {
+        let result = preprocess_str("#if 0\nfoo\n#endif\n");
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].text_range, TextRange::new(5, 10));
+
+        let result = preprocess_str("#if 0\nfoo\n#else\nbar\n#endif\n");
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].text_range, TextRange::new(5, 10));
+
+        let result = preprocess_str("#if 1\nfoo\n#else\nbar\n#endif\n");
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].text_range, TextRange::new(15, 20));
+
+        // A nested group inside an inactive branch adds no range of its own.
+        let result = preprocess_str("#if 0\n#if 1\na\n#endif\nb\n#endif\n");
+        assert_eq!(result.skipped.len(), 1);
+    }
+
+    #[test]
+    fn reports_unbalanced_conditionals() {
+        for input in [
+            "#endif\n",
+            "#if 1\n",
+            "#else\n",
+            "#elif 1\n",
+            "#if\n#endif\n",
+            "#if 1\n#else\n#else\n#endif\n",
+            "#if 1\n#elif 1\n#else\n#elif 1\n#endif\n",
+            "#ifdef\n#endif\n",
+            "#ifndef\n#endif\n",
+        ] {
+            let result = preprocess_str(input);
+            assert!(!result.diagnostics.is_empty(), "input: {input:?}");
         }
     }
 }

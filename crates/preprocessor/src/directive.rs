@@ -11,8 +11,33 @@ pub(crate) enum DirectiveKind {
     Undef,
     Error,
     Warning,
+    If,
+    Ifdef,
+    Ifndef,
+    Elif,
+    Elifdef,
+    Elifndef,
+    Else,
+    Endif,
     /// A known C directive that the preprocessor does not implement yet.
     Unsupported,
+}
+
+impl DirectiveKind {
+    /// Returns true if the directive belongs to a conditional group.
+    pub(crate) fn is_conditional(self) -> bool {
+        matches!(
+            self,
+            Self::If
+                | Self::Ifdef
+                | Self::Ifndef
+                | Self::Elif
+                | Self::Elifdef
+                | Self::Elifndef
+                | Self::Else
+                | Self::Endif
+        )
+    }
 }
 
 /// One directive line.
@@ -51,8 +76,15 @@ pub(crate) fn parse<'a>(tokens: &'a [PpToken], cleaned_text: &'a str) -> Option<
         "undef" => DirectiveKind::Undef,
         "error" => DirectiveKind::Error,
         "warning" => DirectiveKind::Warning,
-        "include" | "include_next" | "import" | "embed" | "if" | "ifdef" | "ifndef" | "elif"
-        | "elifdef" | "elifndef" | "else" | "endif" | "pragma" | "line" => {
+        "if" => DirectiveKind::If,
+        "ifdef" => DirectiveKind::Ifdef,
+        "ifndef" => DirectiveKind::Ifndef,
+        "elif" => DirectiveKind::Elif,
+        "elifdef" => DirectiveKind::Elifdef,
+        "elifndef" => DirectiveKind::Elifndef,
+        "else" => DirectiveKind::Else,
+        "endif" => DirectiveKind::Endif,
+        "include" | "include_next" | "import" | "embed" | "pragma" | "line" => {
             DirectiveKind::Unsupported
         }
         _ => return None,
@@ -95,6 +127,14 @@ mod tests {
         assert_eq!(kind("  #undef A\n"), Some(DirectiveKind::Undef));
         assert_eq!(kind("#error boom\n"), Some(DirectiveKind::Error));
         assert_eq!(kind("#warning careful\n"), Some(DirectiveKind::Warning));
+        assert_eq!(kind("#if 1\n"), Some(DirectiveKind::If));
+        assert_eq!(kind("#ifdef A\n"), Some(DirectiveKind::Ifdef));
+        assert_eq!(kind("#ifndef A\n"), Some(DirectiveKind::Ifndef));
+        assert_eq!(kind("#elif 1\n"), Some(DirectiveKind::Elif));
+        assert_eq!(kind("#elifdef A\n"), Some(DirectiveKind::Elifdef));
+        assert_eq!(kind("#elifndef A\n"), Some(DirectiveKind::Elifndef));
+        assert_eq!(kind("#else\n"), Some(DirectiveKind::Else));
+        assert_eq!(kind("#endif\n"), Some(DirectiveKind::Endif));
         assert_eq!(kind("#include <a.h>\n"), Some(DirectiveKind::Unsupported));
     }
 

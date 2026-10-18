@@ -1,18 +1,21 @@
-//! Directive handling and macro expansion.
+//! Directive handling, conditionals, and macro expansion.
 
+mod condition;
+mod conditional;
 mod directive;
 mod rescan;
 mod substitution;
 
 use std::borrow::Cow;
 
-use dt_tools_diagnostic::{Diagnostic, Severity, text_range::TextRange};
+use dt_tools_diagnostic::{Diagnostic, Severity, Span, text_range::TextRange};
 pub(crate) use rescan::MacroToken;
 
 use crate::{
     config::PreprocessorConfig,
     env::{MacroEnv, MacroKind},
     expand::{
+        conditional::Conditionals,
         rescan::{TokenStream, extend_hide},
         substitution::substitute_object_like,
     },
@@ -22,17 +25,19 @@ use crate::{
     token::PpToken,
 };
 
-/// The token stream after directives are handled and macros are expanded.
+/// The token stream after preprocessing.
 pub(crate) struct Expansion {
     pub(crate) tokens: Vec<MacroToken>,
     pub(crate) macro_defs: Vec<MacroDefSite>,
     pub(crate) diagnostics: Vec<Diagnostic<SourceId>>,
+    pub(crate) skipped: Vec<Span<SourceId>>,
 }
 
-/// Handles directives and expands macros of a file in source order.
+/// Handles directives, conditionals, and macros of a file in source order.
 pub(crate) fn expand(
     tokens: &[PpToken],
     cleaned: &str,
+    orig_len: usize,
     file: SourceId,
     config: &PreprocessorConfig,
 ) -> Expansion {
@@ -46,6 +51,7 @@ pub(crate) fn expand(
         diagnostics: Vec::new(),
         expanded_bytes: 0,
         byte_cap_reported: false,
+        conditionals: Conditionals::default(),
     };
 
     let mut stream = TokenStream::new(tokens);
@@ -68,13 +74,31 @@ pub(crate) fn expand(
             break;
         };
 
-        expander.expand_token(&token, &mut stream);
+        if expander.is_active() {
+            expander.expand_token(&token, &mut stream);
+        }
     }
+
+    for opening in expander.conditionals.finish(orig_len) {
+        expander.report(
+            Severity::Error,
+            "unterminated conditional directive".to_owned(),
+            opening,
+        );
+    }
+
+    let skipped = expander
+        .conditionals
+        .skipped()
+        .iter()
+        .map(|range| range.within_file(file))
+        .collect();
 
     Expansion {
         tokens: expander.tokens,
         macro_defs: expander.macro_defs,
         diagnostics: expander.diagnostics,
+        skipped,
     }
 }
 
@@ -88,6 +112,7 @@ struct Expander<'a> {
     diagnostics: Vec<Diagnostic<SourceId>>,
     expanded_bytes: usize,
     byte_cap_reported: bool,
+    conditionals: Conditionals,
 }
 
 /// The arguments of a function-like macro invocation.
@@ -106,6 +131,11 @@ fn is_punct_token(token: Option<&PpToken>, text: &str, cleaned: &str) -> bool {
 }
 
 impl Expander<'_> {
+    /// Returns true when the current conditional group is active.
+    fn is_active(&self) -> bool {
+        self.conditionals.is_active()
+    }
+
     /// Returns true if `token` is the punctuator `text`.
     fn is_punct(&self, token: Option<&PpToken>, text: &str) -> bool {
         is_punct_token(token, text, self.cleaned_text)

@@ -599,6 +599,59 @@ const MACRO_EDGE_CASES: &[&str] = &[
     "#define F(x) x\nF(1\n",
 ];
 
+/// Hand-picked inputs covering conditional directives.
+const CONDITIONAL_EDGE_CASES: &[&str] = &[
+    // Active and inactive branches.
+    "#if 0\nfoo\n#endif\n",
+    "#if 1\nfoo\n#endif\n",
+    "#if 2\nfoo\n#endif\n",
+    "#if 0\nfoo\n#else\nbar\n#endif\n",
+    "#if 1\nfoo\n#else\nbar\n#endif\n",
+    "#if 0\nfoo\n#elif 1\nbar\n#endif\n",
+    "#if 1\nfoo\n#elif 1\nbar\n#endif\n",
+    "#if 0\nfoo\n#elif 0\nbar\n#else\nbaz\n#endif\n",
+    // Definedness.
+    "#define A 1\n#if A\nfoo\n#endif\n",
+    "#define A 0\n#if A\nfoo\n#endif\n",
+    "#define A\n#ifdef A\nfoo\n#endif\n",
+    "#ifndef A\nfoo\n#endif\n",
+    "#define A 1\n#undef A\n#ifdef A\nfoo\n#endif\n",
+    "#if defined(A)\nfoo\n#endif\n",
+    "#if defined A\nfoo\n#endif\n",
+    "#if !defined(A)\nfoo\n#endif\n",
+    "#if UNDEF\nfoo\n#endif\n",
+    "#if !UNDEF\nfoo\n#endif\n",
+    "#define A B\n#if defined(A)\nfoo\n#endif\n",
+    "#define A 1\n#if 0\na\n#elifdef A\nb\n#endif\n",
+    "#if 0\na\n#elifndef A\nb\n#endif\n",
+    // Directives in inactive branches.
+    "#if 0\n#define A 1\n#endif\nA\n",
+    "#if 0\n#error boom\n#endif\n",
+    "#if 0\n#warning careful\n#endif\n",
+    // Nesting and whitespace.
+    "#if 0\n#if 1\na\n#endif\nb\n#endif\n",
+    "#if 1\n#if 0\na\n#else\nb\n#endif\n#endif\n",
+    "#if 0\na\n#else\n#if 1\nb\n#endif\n#endif\n",
+    "# if 0\na\n# endif\n",
+    "#if 0\na\n#endif\nb\n",
+    "#if 1\na\n#endif\nb\n",
+    // Minimal expressions.
+    "#if !0\nfoo\n#endif\n",
+    "#if !1\nfoo\n#endif\n",
+    "#if (1)\nfoo\n#endif\n",
+    "#if (0)\nfoo\n#endif\n",
+    // Malformed and unbalanced.
+    "#endif\n",
+    "#if 1\n",
+    "#else\n",
+    "#elif 1\n",
+    "#if\n#endif\n",
+    "#ifdef\n#endif\n",
+    "#ifndef\n#endif\n",
+    "#if 1\n#else\n#else\n#endif\n",
+    "#if 1\n#elif 1\n#else\n#elif 1\n#endif\n",
+];
+
 /// A preprocessor to compare against.
 struct Cpp {
     program: String,
@@ -927,6 +980,15 @@ fn generated_cases_have_several_fragments() {
 fn macro_edge_cases() {
     let cpps = Cpp::available();
     for (index, input) in MACRO_EDGE_CASES.iter().enumerate() {
+        check_expanded_consensus(&cpps, input, index);
+    }
+}
+
+/// Checks every hand-picked conditional edge case against the available preprocessors.
+#[test]
+fn conditional_edge_cases() {
+    let cpps = Cpp::available();
+    for (index, input) in CONDITIONAL_EDGE_CASES.iter().enumerate() {
         check_expanded_consensus(&cpps, input, index);
     }
 }
