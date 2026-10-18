@@ -2,40 +2,98 @@ use std::sync::Arc;
 
 use rustc_hash::FxHashSet;
 
-use crate::PpToken;
+use dt_tools_diagnostic::{Span, text_range::TextRange};
+
+use crate::{
+    PpToken,
+    files::SourceId,
+    lexer::PpTokenKind,
+    origin::{Argument, MacroExpansion, Origin},
+};
 
 /// A set of macro names that must not expand again.
 pub(crate) type HideSet = Arc<FxHashSet<String>>;
 
+/// A token's spelling.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TokenSpelling {
+    /// A range in the cleaned buffer.
+    Cleaned(TextRange),
+    /// A synthesized spelling.
+    Synthetic(Arc<str>),
+}
+
 /// A token flowing through the expander.
 #[derive(Clone)]
 pub(crate) struct MacroToken {
-    /// The preprocessing token.
-    pub(crate) token: PpToken,
-    /// A synthetic spelling for tokens produced by `#` or `##`.
-    pub(crate) text: Option<Arc<str>>,
+    /// The token kind.
+    pub(crate) kind: PpTokenKind,
+    /// The token's spelling.
+    pub(crate) spelling: TokenSpelling,
+    /// Whether whitespace or a comment separates this token from the previous one.
+    pub(crate) has_space_before: bool,
+    /// Whether this is the first token on its logical line.
+    pub(crate) line_start: bool,
+    /// Where the token's spelling came from.
+    pub(crate) origin: Origin,
     /// The set of macro names that must not expand again.
     pub(crate) hide: Option<HideSet>,
     /// The number of macro expansions that produced this token.
     pub(crate) depth: usize,
+    /// The macro expansion that produced this token.
+    pub(crate) expansion: Option<Arc<MacroExpansion>>,
+    /// The macro arguments this token came from.
+    pub(crate) arguments: Vec<Arc<Argument>>,
 }
 
 impl MacroToken {
     /// Returns a token from the source text.
     pub(crate) fn source(token: PpToken) -> Self {
         Self {
-            token,
-            text: None,
+            kind: token.kind,
+            spelling: TokenSpelling::Cleaned(token.cleaned),
+            has_space_before: token.has_space_before,
+            line_start: token.line_start,
+            origin: Origin::File {
+                file: token.file,
+                range: token.orig,
+            },
             hide: None,
             depth: 0,
+            expansion: None,
+            arguments: Vec::new(),
         }
     }
 
     /// Returns the token's spelling.
     pub(crate) fn text<'a>(&'a self, cleaned: &'a str) -> &'a str {
-        self.text
-            .as_deref()
-            .unwrap_or_else(|| self.token.text(cleaned))
+        match &self.spelling {
+            TokenSpelling::Cleaned(range) => &cleaned[range.byte_range()],
+            TokenSpelling::Synthetic(text) => text,
+        }
+    }
+
+    /// Returns the token's range in the cleaned buffer.
+    pub(crate) fn cleaned_range(&self) -> Option<TextRange> {
+        match self.spelling {
+            TokenSpelling::Cleaned(range) => Some(range),
+            TokenSpelling::Synthetic(_) => None,
+        }
+    }
+
+    /// Returns the token's primary source span.
+    pub(crate) fn primary_span(&self) -> Span<SourceId> {
+        match &self.origin {
+            Origin::File { file, range } => Span {
+                file: *file,
+                text_range: *range,
+            },
+            Origin::Concat { left, .. } => *left,
+            Origin::Stringify { argument, .. } => *argument,
+            Origin::Generated => {
+                unreachable!("generated origins are only used in the provenance map")
+            }
+        }
     }
 
     /// Returns whether `name` is hidden on this token.

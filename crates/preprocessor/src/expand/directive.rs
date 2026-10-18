@@ -236,9 +236,15 @@ where
             );
         }
 
-        self.expander
-            .env
-            .define(name.clone(), MacroDef { kind, replacement });
+        let definition = name_token.orig.within_file(name_token.file);
+        self.expander.env.define(
+            name.clone(),
+            MacroDef {
+                kind,
+                replacement,
+                definition,
+            },
+        );
         self.expander.macro_defs.push(MacroDefSite {
             name,
             span: self.span(),
@@ -503,7 +509,7 @@ where
         };
         let text = first.text(&self.files.cleaned);
 
-        if first.token.kind == PpTokenKind::String {
+        if first.kind == PpTokenKind::String {
             let Some(name) = text
                 .strip_prefix('"')
                 .and_then(|text| text.strip_suffix('"'))
@@ -511,49 +517,50 @@ where
                 self.expander.report(
                     Severity::Error,
                     "unterminated header name".to_owned(),
-                    first.token.orig.within_file(first.token.file),
+                    first.primary_span(),
                 );
                 return None;
             };
             let name = name.to_owned();
-            self.warn_extra(
-                tokens
-                    .get(1)
-                    .map(|token| token.token.orig.within_file(token.token.file)),
-            );
+            self.warn_extra(tokens.get(1).map(MacroToken::primary_span));
 
             return Some(HeaderName { name, quoted: true });
         }
 
-        let is_left_angle = first.token.kind == PpTokenKind::Punct && text == "<";
+        let is_left_angle = first.kind == PpTokenKind::Punct && text == "<";
         if is_left_angle {
             let Some(rangle) = tokens.iter().position(|token| {
-                token.token.kind == PpTokenKind::Punct && token.text(&self.files.cleaned) == ">"
+                token.kind == PpTokenKind::Punct && token.text(&self.files.cleaned) == ">"
             }) else {
                 self.expander.report(
                     Severity::Error,
                     "unterminated header name".to_owned(),
-                    first.token.orig.within_file(first.token.file),
+                    first.primary_span(),
                 );
                 return None;
             };
             let name = match source {
-                HeaderTokens::Raw => self.files.cleaned
-                    [first.token.cleaned.end..tokens[rangle].token.cleaned.start]
-                    .to_owned(),
+                HeaderTokens::Raw => {
+                    let start = first
+                        .cleaned_range()
+                        .expect("raw header tokens are from source")
+                        .end;
+                    let end = tokens[rangle]
+                        .cleaned_range()
+                        .expect("raw header tokens are from source")
+                        .start;
+
+                    self.files.cleaned[start..end].to_owned()
+                }
                 HeaderTokens::Expanded => {
                     let mut name = render_tokens(&tokens[1..rangle], &self.files.cleaned);
-                    if tokens[rangle].token.has_space_before {
+                    if tokens[rangle].has_space_before {
                         name.push(' ');
                     }
                     name
                 }
             };
-            self.warn_extra(
-                tokens
-                    .get(rangle + 1)
-                    .map(|token| token.token.orig.within_file(token.token.file)),
-            );
+            self.warn_extra(tokens.get(rangle + 1).map(MacroToken::primary_span));
 
             return Some(HeaderName {
                 name,
@@ -564,7 +571,7 @@ where
         self.expander.report(
             Severity::Error,
             HEADER_NAME_EXPECTED.to_owned(),
-            first.token.orig.within_file(first.token.file),
+            first.primary_span(),
         );
         None
     }
@@ -590,7 +597,7 @@ fn render_tokens(tokens: &[MacroToken], cleaned: &str) -> String {
     let mut out = String::new();
 
     for token in tokens {
-        if token.token.has_space_before {
+        if token.has_space_before {
             out.push(' ');
         }
         out.push_str(token.text(cleaned));

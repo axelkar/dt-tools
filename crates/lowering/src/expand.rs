@@ -71,7 +71,14 @@ pub fn resolve_range(
             .iter()
             .map(|span| resolve_span(db, expanded, *span))
             .collect(),
-        span_labels: Vec::new(),
+        span_labels: resolved
+            .span_labels
+            .iter()
+            .map(|label| SpanLabel {
+                span: resolve_span(db, expanded, label.span),
+                msg: label.msg.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -143,24 +150,21 @@ fn parse_diagnostics(
             break;
         }
 
+        let mut span = resolve_range(db, expanded, error.primary_text_range);
+        span.span_labels
+            .extend(error.span_labels.iter().filter_map(|(range, msg)| {
+                let span = resolve_range(db, expanded, *range)
+                    .primary_spans
+                    .first()
+                    .copied()?;
+                Some(SpanLabel {
+                    span,
+                    msg: msg.clone(),
+                })
+            }));
+
         let mut diagnostic = Diagnostic {
-            span: MultiSpan {
-                primary_spans: resolve_range(db, expanded, error.primary_text_range).primary_spans,
-                span_labels: error
-                    .span_labels
-                    .iter()
-                    .filter_map(|(range, msg)| {
-                        let span = resolve_range(db, expanded, *range)
-                            .primary_spans
-                            .first()
-                            .copied()?;
-                        Some(SpanLabel {
-                            span,
-                            msg: msg.clone(),
-                        })
-                    })
-                    .collect(),
-            },
+            span,
             msg: error.message.clone(),
             severity: Severity::Error,
         };
@@ -244,6 +248,25 @@ mod tests {
         assert!(!diagnostics.is_empty());
         assert_eq!(diagnostics[0].severity, Severity::Error);
         assert_eq!(diagnostics[0].span.primary_spans[0].file, main);
+    }
+
+    #[test]
+    fn labels_macro_invocations() {
+        let db = BaseDatabase::default();
+        IncludeDirs::new(&db, Vec::new());
+        let main = virtual_file(&db, "/main.dts", "#define BAD 1 +\n/ { x = <BAD>; };\n");
+
+        let diagnostics = expanded_syntax_diagnostics(&db, main);
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .span
+                    .span_labels
+                    .iter()
+                    .any(|label| label.msg.contains("in this expansion of `BAD`"))
+            }),
+            "{diagnostics:#?}"
+        );
     }
 
     #[test]

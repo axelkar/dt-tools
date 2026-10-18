@@ -1264,4 +1264,145 @@ mod tests {
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].severity, Severity::Error);
     }
+
+    #[test]
+    fn labels_macro_expansions() {
+        let source = "#define A 1\nA\n";
+        let result = preprocess_str(source);
+        assert_eq!(result.text, "1");
+
+        let invocation = source.rfind('A').expect("invocation");
+        let span = result.resolve(TextRange::new(0, 1));
+
+        assert!(span.span_labels.iter().any(|label| {
+            label.msg.contains("in this expansion of `A`")
+                && label.span.text_range == TextRange::new(invocation, invocation + 1)
+        }));
+        let name = source.find('A').expect("macro name");
+        assert!(span.span_labels.iter().any(|label| {
+            label.msg.contains("`A` defined here")
+                && label.span.text_range == TextRange::new(name, name + 1)
+        }));
+    }
+
+    #[test]
+    fn labels_macro_arguments() {
+        let result = preprocess_str("#define F(x) x\nF(abc)\n");
+        assert_eq!(result.text, "abc");
+
+        let span = result.resolve(TextRange::new(0, 3));
+        assert!(
+            span.span_labels
+                .iter()
+                .any(|label| label.msg == "argument `x` of `F`")
+        );
+    }
+
+    #[test]
+    fn labels_pasted_tokens() {
+        let source = "#define CAT(a, b) a ## b\nCAT(foo, bar)\n";
+        let result = preprocess_str(source);
+        assert_eq!(result.text, "foobar");
+
+        let foo = source.find("foo").expect("left operand");
+        let bar = source.find("bar").expect("right operand");
+        let operator = source.find("##").expect("paste operator");
+        let span = result.resolve(TextRange::new(0, 6));
+
+        assert!(
+            span.primary_spans
+                .iter()
+                .any(|span| span.text_range == TextRange::new(foo, foo + 3))
+        );
+        assert!(
+            span.primary_spans
+                .iter()
+                .any(|span| span.text_range == TextRange::new(bar, bar + 3))
+        );
+        assert!(span.span_labels.iter().any(|label| {
+            label.msg.contains("pasted here with `##`")
+                && label.span.text_range == TextRange::new(operator, operator + 2)
+        }));
+        let argument_labels: Vec<_> = span
+            .span_labels
+            .iter()
+            .filter(|label| label.msg.starts_with("argument "))
+            .collect();
+        assert_eq!(argument_labels.len(), 2);
+        assert!(argument_labels.iter().any(|label| {
+            label.msg == "argument `a` of `CAT`"
+                && label.span.text_range == TextRange::new(foo, foo + 3)
+        }));
+        assert!(argument_labels.iter().any(|label| {
+            label.msg == "argument `b` of `CAT`"
+                && label.span.text_range == TextRange::new(bar, bar + 3)
+        }));
+    }
+
+    #[test]
+    fn labels_stringified_tokens() {
+        let source = "#define S(x) #x\nS(abc)\n";
+        let result = preprocess_str(source);
+        assert_eq!(result.text, "\"abc\"");
+
+        let argument = source.find("abc").expect("argument");
+        let operator = source.find("#x").expect("stringify operator");
+        let span = result.resolve(TextRange::new(0, 5));
+
+        assert!(
+            span.primary_spans
+                .iter()
+                .any(|span| span.text_range == TextRange::new(argument, argument + 3))
+        );
+        assert!(span.span_labels.iter().any(|label| {
+            label.msg.contains("stringified here")
+                && label.span.text_range == TextRange::new(operator, operator + 1)
+        }));
+        assert!(
+            span.span_labels
+                .iter()
+                .any(|label| label.msg == "argument `x` of `S`")
+        );
+    }
+
+    #[test]
+    fn labels_nested_expansions() {
+        let result = preprocess_str("#define A B\n#define B 1\nA\n");
+        assert_eq!(result.text, "1");
+
+        let span = result.resolve(TextRange::new(0, 1));
+        assert!(
+            span.span_labels
+                .iter()
+                .any(|label| label.msg.contains("in this expansion of `A`"))
+        );
+        assert!(
+            span.span_labels
+                .iter()
+                .any(|label| label.msg.contains("in this expansion of `B`"))
+        );
+    }
+
+    #[test]
+    fn labels_prescanned_arguments() {
+        let result = preprocess_str("#define A 1\n#define F(x) x\nF(A)\n");
+        assert_eq!(result.text, "1");
+
+        let span = result.resolve(TextRange::new(0, 1));
+        assert!(
+            span.span_labels
+                .iter()
+                .any(|label| label.msg.contains("in this expansion of `A`"))
+        );
+        assert!(
+            span.span_labels
+                .iter()
+                .any(|label| label.msg.contains("in this expansion of `F`"))
+        );
+        assert!(
+            span.span_labels
+                .iter()
+                .any(|label| label.msg == "argument `x` of `F`")
+        );
+    }
 }

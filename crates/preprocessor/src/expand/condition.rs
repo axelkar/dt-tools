@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use dt_tools_diagnostic::{Severity, Span};
 
-use super::{Expander, MacroToken, is_punct_token};
-use crate::{files::SourceId, lexer::PpTokenKind, token::PpToken};
+use super::{Expander, MacroToken, TokenSpelling, is_punct_token};
+use crate::{files::SourceId, lexer::PpTokenKind, origin::Origin, token::PpToken};
 
 /// A binary operator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,17 +119,18 @@ impl Expander<'_> {
             if token.kind == PpTokenKind::Ident && token.text(cleaned) == "defined" {
                 let (value, consumed) = self.eval_defined(tokens, index, cleaned);
                 replaced.push(MacroToken {
-                    token: PpToken {
-                        file: token.file,
-                        kind: PpTokenKind::Number,
-                        cleaned: token.cleaned,
-                        orig: token.orig,
-                        has_space_before: token.has_space_before,
-                        line_start: token.line_start,
-                    },
-                    text: Some(Arc::from(if value { "1" } else { "0" })),
+                    kind: PpTokenKind::Number,
+                    spelling: TokenSpelling::Synthetic(Arc::from(if value { "1" } else { "0" })),
+                    has_space_before: token.has_space_before,
+                    line_start: token.line_start,
                     hide: None,
                     depth: 0,
+                    origin: Origin::File {
+                        file: token.file,
+                        range: token.orig,
+                    },
+                    expansion: None,
+                    arguments: Vec::new(),
                 });
                 index += consumed;
                 continue;
@@ -209,7 +210,7 @@ impl Parser<'_> {
         if let Some(token) = self.tokens.get(self.index) {
             self.error(
                 "unexpected token in condition".to_owned(),
-                token.token.orig.within_file(token.token.file),
+                token.primary_span(),
             );
         }
 
@@ -267,7 +268,7 @@ impl Parser<'_> {
             return 0;
         };
 
-        let op = if token.token.kind == PpTokenKind::Punct {
+        let op = if token.kind == PpTokenKind::Punct {
             PrefixOp::at(token.text(self.cleaned))
         } else {
             None
@@ -299,14 +300,14 @@ impl Parser<'_> {
         self.index += 1;
         let text = token.text(self.cleaned);
 
-        match token.token.kind {
+        match token.kind {
             PpTokenKind::Number => {
                 if let Some(value) = parse_integer(text) {
                     if live { value } else { 0 }
                 } else {
                     self.error(
                         format!("invalid integer literal `{text}`"),
-                        token.token.orig.within_file(token.token.file),
+                        token.primary_span(),
                     );
                     0
                 }
@@ -317,7 +318,7 @@ impl Parser<'_> {
                 } else {
                     self.error(
                         format!("invalid character constant `{text}`"),
-                        token.token.orig.within_file(token.token.file),
+                        token.primary_span(),
                     );
                     0
                 }
@@ -332,14 +333,14 @@ impl Parser<'_> {
             PpTokenKind::Punct => {
                 self.error(
                     format!("unsupported operator `{text}` in condition"),
-                    token.token.orig.within_file(token.token.file),
+                    token.primary_span(),
                 );
                 0
             }
             _ => {
                 self.error(
                     "unsupported token in condition".to_owned(),
-                    token.token.orig.within_file(token.token.file),
+                    token.primary_span(),
                 );
                 0
             }
@@ -388,11 +389,11 @@ impl Parser<'_> {
     /// Returns the next infix operator and its span.
     fn peek_infix(&self) -> Option<(InfixOp, Span<SourceId>)> {
         let token = self.tokens.get(self.index)?;
-        if token.token.kind != PpTokenKind::Punct {
+        if token.kind != PpTokenKind::Punct {
             return None;
         }
         let op = InfixOp::at(token.text(self.cleaned))?;
-        Some((op, token.token.orig.within_file(token.token.file)))
+        Some((op, token.primary_span()))
     }
 
     /// Consumes the punctuator `text`.
@@ -401,13 +402,10 @@ impl Parser<'_> {
             self.error(format!("expected `{text}`"), self.origin);
             return;
         };
-        if token.token.kind == PpTokenKind::Punct && token.text(self.cleaned) == text {
+        if token.kind == PpTokenKind::Punct && token.text(self.cleaned) == text {
             self.index += 1;
         } else {
-            self.error(
-                format!("expected `{text}`"),
-                token.token.orig.within_file(token.token.file),
-            );
+            self.error(format!("expected `{text}`"), token.primary_span());
         }
     }
 

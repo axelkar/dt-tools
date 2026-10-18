@@ -1,8 +1,9 @@
 //! Macro environment.
 
+use dt_tools_diagnostic::Span;
 use rustc_hash::FxHashMap;
 
-use crate::token::PpToken;
+use crate::{files::SourceId, token::PpToken};
 
 /// The kind of a macro.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +28,8 @@ pub(crate) struct MacroDef {
     pub(crate) kind: MacroKind,
     /// Replacement tokens.
     pub(crate) replacement: Vec<PpToken>,
+    /// Span of the macro name in the `#define` directive.
+    pub(crate) definition: Span<SourceId>,
 }
 
 /// Macros during one preprocessing run.

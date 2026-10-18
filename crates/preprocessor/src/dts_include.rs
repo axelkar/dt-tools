@@ -66,7 +66,7 @@ fn copy_plain(out: &mut Splice, text: &str, map: &ProvenanceMap, range: TextRang
             continue;
         };
         let offset = intersection.start - segment.range.start;
-        let origin = match segment.origin {
+        let origin = match &segment.origin {
             Origin::File {
                 file,
                 range: origin,
@@ -75,15 +75,20 @@ fn copy_plain(out: &mut Splice, text: &str, map: &ProvenanceMap, range: TextRang
                 let end = (start + intersection.length()).min(origin.end);
 
                 Origin::File {
-                    file,
+                    file: *file,
                     range: TextRange::new(start, end),
                 }
             }
+            Origin::Concat { .. } | Origin::Stringify { .. } => segment.origin.clone(),
             Origin::Generated => Origin::Generated,
         };
         let start = out_start + (intersection.start - range.start);
-        out.map
-            .push(TextRange::new(start, start + intersection.length()), origin);
+        out.map.push(
+            TextRange::new(start, start + intersection.length()),
+            origin,
+            segment.expansion.clone(),
+            segment.arguments.clone(),
+        );
     }
 }
 
@@ -104,8 +109,10 @@ fn append_nested(out: &mut Splice, mut nested: Splice) {
     out.text.push_str(&nested.text);
     for segment in nested.map.segments() {
         out.map.push(
-            TextRange::new(segment.range.start + base, segment.range.end + base),
-            segment.origin,
+            segment.range.offset(base),
+            segment.origin.clone(),
+            segment.expansion.clone(),
+            segment.arguments.clone(),
         );
     }
 
@@ -118,8 +125,12 @@ fn append_nested(out: &mut Splice, mut nested: Splice) {
 fn push_generated(out: &mut Splice, text: &str) {
     let start = out.text.len();
     out.text.push_str(text);
-    out.map
-        .push(TextRange::new(start, out.text.len()), Origin::Generated);
+    out.map.push(
+        TextRange::new(start, out.text.len()),
+        Origin::Generated,
+        None,
+        Vec::new(),
+    );
 }
 
 /// Returns the name and end offset of an `/include/` directive's string.
@@ -233,6 +244,8 @@ fn splice_text<R>(
                 file: id,
                 range: TextRange::new(0, contents.len()),
             },
+            None,
+            Vec::new(),
         );
         let mut nested = Splice {
             text: String::new(),

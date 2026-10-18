@@ -23,26 +23,31 @@ pub(crate) fn emit(tokens: &[MacroToken], cleaned: &str) -> (String, ProvenanceM
     let mut map = ProvenanceMap::new();
     let mut run: Vec<&MacroToken> = Vec::new();
 
-    let mut push = |text: &str, origin| {
+    let mut push = |text: &str, origin, expansion, argument| {
         let start = out.len();
         out.push_str(text);
-        map.push(TextRange::new(start, out.len()), origin);
+        map.push(
+            TextRange::new(start, out.len()),
+            origin,
+            expansion,
+            argument,
+        );
     };
 
     for (index, token) in tokens.iter().enumerate() {
         // Emit separator before token
         let is_first = index == 0;
         if !is_first {
-            let separator = if token.token.line_start {
+            let separator = if token.line_start {
                 Some("\n")
-            } else if token.token.has_space_before || !can_follow(&run, token, cleaned) {
+            } else if token.has_space_before || !can_follow(&run, token, cleaned) {
                 Some(" ")
             } else {
                 None
             };
 
             if let Some(separator) = separator {
-                push(separator, Origin::Generated);
+                push(separator, Origin::Generated, None, Vec::new());
                 run.clear();
             }
         }
@@ -50,10 +55,9 @@ pub(crate) fn emit(tokens: &[MacroToken], cleaned: &str) -> (String, ProvenanceM
         // Emit token
         push(
             token.text(cleaned),
-            Origin::File {
-                file: token.token.file,
-                range: token.token.orig,
-            },
+            token.origin.clone(),
+            token.expansion.clone(),
+            token.arguments.clone(),
         );
 
         if run.len() == MAX_RUN {
@@ -85,7 +89,7 @@ fn can_follow(run: &[&MacroToken], next: &MacroToken, cleaned: &str) -> bool {
         let Ok(kind) = result else {
             return false;
         };
-        if kind != token.token.kind || lexer.slice() != token.text(cleaned) {
+        if kind != token.kind || lexer.slice() != token.text(cleaned) {
             return false;
         }
     }

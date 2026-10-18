@@ -6,11 +6,11 @@ mod directive;
 mod rescan;
 mod substitution;
 
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 use camino::Utf8Path;
 use dt_tools_diagnostic::{Diagnostic, Severity, Span};
-pub(crate) use rescan::MacroToken;
+pub(crate) use rescan::{MacroToken, TokenSpelling};
 
 use crate::{
     config::PreprocessorConfig,
@@ -22,6 +22,7 @@ use crate::{
     },
     files::{LoadedFiles, SourceId},
     lexer::PpTokenKind,
+    origin::MacroExpansion,
     output::{IncludeEdge, MacroDefSite},
     token::PpToken,
 };
@@ -160,7 +161,7 @@ struct Arguments {
     /// Commas between consecutive arguments, in source order.
     ///
     /// `commas[i]` separates `lists[i]` and `lists[i + 1]`.
-    commas: Vec<PpToken>,
+    commas: Vec<MacroToken>,
 }
 
 /// Returns true if `token` is the punctuator `text`.
@@ -176,14 +177,21 @@ impl Expander<'_> {
     /// Reference: [WG14 N3220 (C23 draft) § 6.10.5 Macro replacement](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#subsection.6.10.5).
     fn expand_token(&mut self, token: &MacroToken, stream: &mut TokenStream<'_>, cleaned: &str) {
         if self.expanded_bytes <= self.config.max_expanded_bytes
-            && token.token.kind == PpTokenKind::Ident
+            && token.kind == PpTokenKind::Ident
             && let name = token.text(cleaned)
             && !token.is_hidden(name)
             && let Some(definition) = self.env.get(name).cloned()
         {
             match &definition.kind {
                 MacroKind::Object => {
-                    self.expand_object_like(token, name, &definition.replacement, stream, cleaned);
+                    self.expand_object_like(
+                        token,
+                        name,
+                        definition.definition,
+                        &definition.replacement,
+                        stream,
+                        cleaned,
+                    );
                     return;
                 }
                 MacroKind::Function {
@@ -194,7 +202,7 @@ impl Expander<'_> {
 
                     // Only a macro invocation when followed by left parenthesis: WG14 N3220 § 6.10.5 Macro replacement, para 10
                     if !next.is_some_and(|next| {
-                        next.token.kind == PpTokenKind::Punct && next.text(cleaned) == "("
+                        next.kind == PpTokenKind::Punct && next.text(cleaned) == "("
                     }) {
                         self.push(token.clone(), cleaned);
                         return;
@@ -203,6 +211,7 @@ impl Expander<'_> {
                     self.expand_function_like(
                         token,
                         name,
+                        definition.definition,
                         &definition.replacement,
                         params,
                         variadic_param.as_deref(),
@@ -228,7 +237,7 @@ impl Expander<'_> {
         self.report(
             Severity::Error,
             "macro expansion depth exceeded".to_owned(),
-            token.token.orig.within_file(token.token.file),
+            token.primary_span(),
         );
         self.push(token.clone(), cleaned);
         true
@@ -241,6 +250,7 @@ impl Expander<'_> {
         &mut self,
         instance_token: &MacroToken,
         name: &str,
+        definition: Span<SourceId>,
         replacement: &[PpToken],
         stream: &mut TokenStream<'_>,
         cleaned: &str,
@@ -249,16 +259,23 @@ impl Expander<'_> {
             return;
         }
 
+        let expansion = Arc::new(MacroExpansion {
+            name: Arc::from(name),
+            invocation: instance_token.primary_span(),
+            definition,
+            parent: instance_token.expansion.clone(),
+        });
         let hide = extend_hide(instance_token.hide.as_ref(), name);
         let depth = instance_token.depth + 1;
-        let (mut out, errors) = substitute_object_like(cleaned, hide, depth, replacement);
+        let (mut out, errors) =
+            substitute_object_like(cleaned, hide, depth, replacement, expansion);
         for (message, span) in errors {
             self.report(Severity::Error, message, span);
         }
 
         if let Some(first) = out.first_mut() {
-            first.token.has_space_before = instance_token.token.has_space_before;
-            first.token.line_start = instance_token.token.line_start;
+            first.has_space_before = instance_token.has_space_before;
+            first.line_start = instance_token.line_start;
         }
 
         stream.push_replacement(out);
@@ -272,6 +289,7 @@ impl Expander<'_> {
         &mut self,
         instance_token: &MacroToken,
         name: &str,
+        definition: Span<SourceId>,
         replacement: &[PpToken],
         params: &[String],
         variadic_param: Option<&str>,
@@ -287,10 +305,16 @@ impl Expander<'_> {
             return;
         };
 
-        let Some(args) = self.collect_arguments(stream, lparen.token, cleaned) else {
+        let Some(args) = self.collect_arguments(stream, lparen.primary_span(), cleaned) else {
             return;
         };
 
+        let expansion = Arc::new(MacroExpansion {
+            name: Arc::from(name),
+            invocation: instance_token.primary_span(),
+            definition,
+            parent: instance_token.expansion.clone(),
+        });
         self.substitute_function_like(
             instance_token,
             name,
@@ -300,6 +324,7 @@ impl Expander<'_> {
             args,
             stream,
             cleaned,
+            expansion,
         );
     }
 
@@ -309,7 +334,7 @@ impl Expander<'_> {
     fn collect_arguments(
         &mut self,
         stream: &mut TokenStream<'_>,
-        lparen: PpToken,
+        lparen: Span<SourceId>,
         cleaned: &str,
     ) -> Option<Arguments> {
         let mut lists = vec![Vec::new()];
@@ -321,13 +346,13 @@ impl Expander<'_> {
                 self.report(
                     Severity::Error,
                     "unterminated macro invocation".to_owned(),
-                    lparen.orig.within_file(lparen.file),
+                    lparen,
                 );
                 return None;
             };
 
             // Comma and inner parentheses handling: WG14 N3220 § 6.10.5 Macro replacement, para 11
-            if token.token.kind == PpTokenKind::Punct {
+            if token.kind == PpTokenKind::Punct {
                 let text = token.text(cleaned);
                 if text == "(" {
                     depth += 1;
@@ -338,7 +363,7 @@ impl Expander<'_> {
                         break;
                     }
                 } else if depth == 1 && text == "," {
-                    commas.push(token.token);
+                    commas.push(token);
                     lists.push(Vec::new());
                     continue;
                 }
@@ -365,13 +390,13 @@ impl Expander<'_> {
 
     /// Pushes a token to the output.
     fn push(&mut self, token: MacroToken, cleaned: &str) {
-        self.expanded_bytes += token.token.text(cleaned).len();
+        self.expanded_bytes += token.text(cleaned).len();
         if self.expanded_bytes > self.config.max_expanded_bytes && !self.byte_cap_reported {
             self.byte_cap_reported = true;
             self.report(
                 Severity::Error,
                 "expanded text exceeds the byte limit".to_owned(),
-                token.token.orig.within_file(token.token.file),
+                token.primary_span(),
             );
         }
         self.tokens.push(token);

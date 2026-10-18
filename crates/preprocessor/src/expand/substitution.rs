@@ -2,14 +2,15 @@
 
 use std::sync::Arc;
 
-use dt_tools_diagnostic::{Severity, Span};
+use dt_tools_diagnostic::{Severity, Span, text_range::TextRange};
 use logos::Logos;
 
-use super::{Arguments, Expander, MacroToken, is_punct_token};
+use super::{Arguments, Expander, MacroToken, TokenSpelling, is_punct_token};
 use crate::{
     expand::rescan::{HideSet, TokenStream, extend_hide, union_hide},
     files::SourceId,
     lexer::PpTokenKind,
+    origin::{Argument, MacroExpansion, Origin},
     token::PpToken,
 };
 
@@ -110,6 +111,7 @@ struct SubstitutionBuilder<'a> {
     cleaned: &'a str,
     hide: HideSet,
     depth: usize,
+    expansion: Arc<MacroExpansion>,
     /// Substituted replacement tokens.
     out: Vec<Substituted>,
     errors: Vec<(String, Span<SourceId>)>,
@@ -123,12 +125,14 @@ impl<'a> SubstitutionBuilder<'a> {
         hide: HideSet,
         depth: usize,
         substitution_info: SubstitutionInfo<'a>,
+        expansion: Arc<MacroExpansion>,
     ) -> Self {
         Self {
             substitution_info,
             cleaned,
             hide,
             depth,
+            expansion,
             out: Vec::new(),
             errors: Vec::new(),
             pending_paste: None,
@@ -146,12 +150,11 @@ impl<'a> SubstitutionBuilder<'a> {
 
     /// Pushes a source token with the macro's hide set and depth.
     fn plain(&mut self, token: PpToken) {
-        self.token(MacroToken {
-            token,
-            text: None,
-            hide: Some(Arc::clone(&self.hide)),
-            depth: self.depth,
-        });
+        let mut token = MacroToken::source(token);
+        token.hide = Some(Arc::clone(&self.hide));
+        token.depth = self.depth;
+        token.expansion = Some(Arc::clone(&self.expansion));
+        self.token(token);
     }
 
     /// Pushes a placemarker, applying a pending `##`.
@@ -171,19 +174,40 @@ impl<'a> SubstitutionBuilder<'a> {
     }
 
     /// Substitutes an argument, applying a pending `##` to its first token.
-    fn argument(&mut self, argument: &[MacroToken], parameter: PpToken) {
+    fn argument(
+        &mut self,
+        argument: &[MacroToken],
+        parameter: PpToken,
+        raw_span: Option<Span<SourceId>>,
+    ) {
         if argument.is_empty() {
             return;
         }
 
+        let span = raw_span.unwrap_or_else(|| parameter.orig.within_file(parameter.file));
+
         for (index, token) in argument.iter().enumerate() {
             let mut token = token.clone();
             if index == 0 {
-                token.token.has_space_before = parameter.has_space_before;
-                token.token.line_start = parameter.line_start;
+                token.has_space_before = parameter.has_space_before;
+                token.line_start = parameter.line_start;
             }
             token.hide = Some(union_hide(token.hide.as_ref(), &self.hide));
             token.depth = self.depth;
+
+            token.expansion = Some(match token.expansion.take() {
+                None => Arc::clone(&self.expansion),
+                Some(existing) if chain_contains(&existing, &self.expansion) => existing,
+                Some(existing) => attach_parent(&existing, Arc::clone(&self.expansion)),
+            });
+            let argument = Arc::new(Argument {
+                parameter: Arc::from(parameter.text(self.cleaned)),
+                macro_name: Arc::clone(&self.expansion.name),
+                span,
+            });
+            if !token.arguments.contains(&argument) {
+                token.arguments.push(argument);
+            }
 
             if index == 0 {
                 self.token(token);
@@ -194,11 +218,16 @@ impl<'a> SubstitutionBuilder<'a> {
     }
 
     /// Substitutes an operand of `##`, which may be empty.
-    fn paste_operand(&mut self, argument: &[MacroToken], parameter: PpToken) {
+    fn paste_operand(
+        &mut self,
+        argument: &[MacroToken],
+        parameter: PpToken,
+        raw_span: Option<Span<SourceId>>,
+    ) {
         if argument.is_empty() {
             self.placemarker();
         } else {
-            self.argument(argument, parameter);
+            self.argument(argument, parameter, raw_span);
         }
     }
 
@@ -241,7 +270,7 @@ impl<'a> SubstitutionBuilder<'a> {
                     continue;
                 }
                 self.plain(token);
-                self.argument(info.raw_varargs, operand);
+                self.argument(info.raw_varargs, operand, argument_span(info.raw_varargs));
                 index += 3;
                 continue;
             }
@@ -258,16 +287,18 @@ impl<'a> SubstitutionBuilder<'a> {
             }
 
             if let Some(param) = info.parameter(text) {
+                let raw_span = argument_span(&info.raw_arguments[param]);
                 if info.adjacent_to_paste(index, self.cleaned) {
-                    self.paste_operand(&info.raw_arguments[param], token);
+                    self.paste_operand(&info.raw_arguments[param], token, raw_span);
                 } else {
-                    self.argument(&info.expanded_arguments[param], token);
+                    self.argument(&info.expanded_arguments[param], token, raw_span);
                 }
             } else if Some(text) == info.variadic_param {
+                let raw_span = argument_span(info.raw_varargs);
                 if info.adjacent_to_paste(index, self.cleaned) {
-                    self.paste_operand(info.raw_varargs, token);
+                    self.paste_operand(info.raw_varargs, token, raw_span);
                 } else {
-                    self.argument(info.expanded_varargs, token);
+                    self.argument(info.expanded_varargs, token, raw_span);
                 }
             } else {
                 self.plain(token);
@@ -297,7 +328,7 @@ impl<'a> SubstitutionBuilder<'a> {
         let mut spelling = String::from("\"");
         let mut first = true;
         for token in argument {
-            if !first && token.token.has_space_before {
+            if !first && token.has_space_before {
                 spelling.push(' ');
             }
             for ch in token.text(self.cleaned).chars() {
@@ -310,19 +341,30 @@ impl<'a> SubstitutionBuilder<'a> {
         }
         spelling.push('"');
 
+        let operator = Span {
+            file: hash.file,
+            text_range: hash.orig,
+        };
+        let argument_span = argument_span(argument).unwrap_or(operator);
+
         Ok((
             MacroToken {
-                token: PpToken {
-                    file: hash.file,
-                    kind: PpTokenKind::String,
-                    cleaned: hash.cleaned,
-                    orig: hash.orig,
-                    has_space_before: hash.has_space_before,
-                    line_start: hash.line_start,
-                },
-                text: Some(Arc::from(spelling)),
+                kind: PpTokenKind::String,
+                spelling: TokenSpelling::Synthetic(Arc::from(spelling)),
+                has_space_before: hash.has_space_before,
+                line_start: hash.line_start,
                 hide: Some(Arc::clone(&self.hide)),
                 depth: self.depth,
+                origin: Origin::Stringify {
+                    operator,
+                    argument: argument_span,
+                },
+                expansion: Some(Arc::clone(&self.expansion)),
+                arguments: vec![Arc::new(Argument {
+                    parameter: Arc::from(operand_text),
+                    macro_name: Arc::clone(&self.expansion.name),
+                    span: argument_span,
+                })],
             },
             2,
         ))
@@ -342,7 +384,13 @@ impl<'a> SubstitutionBuilder<'a> {
             Some(Substituted::Token(token)) => Some(token),
         };
 
-        match paste_pair(left.as_ref(), right.as_ref(), self.cleaned) {
+        match paste_pair(
+            left.as_ref(),
+            right.as_ref(),
+            self.cleaned,
+            &self.expansion,
+            origin,
+        ) {
             Paste::Token(token) => self.out.push(Substituted::Token(token)),
             Paste::Placemarker => self.out.push(Substituted::Placemarker),
             Paste::Invalid => {
@@ -398,6 +446,7 @@ impl Expander<'_> {
         args: Arguments,
         stream: &mut TokenStream<'_>,
         cleaned: &str,
+        expansion: Arc<MacroExpansion>,
     ) {
         let Arguments {
             lists: mut raw_arguments,
@@ -414,7 +463,7 @@ impl Expander<'_> {
                 self.report(
                     Severity::Error,
                     format!("macro `{name}` requires at least {fixed} arguments"),
-                    invocation.token.orig.within_file(invocation.token.file),
+                    invocation.primary_span(),
                 );
                 return;
             }
@@ -425,7 +474,7 @@ impl Expander<'_> {
                     "macro `{name}` requires {fixed} arguments, but {} were given",
                     raw_arguments.len()
                 ),
-                invocation.token.orig.within_file(invocation.token.file),
+                invocation.primary_span(),
             );
             return;
         }
@@ -474,7 +523,8 @@ impl Expander<'_> {
 
         let hide = extend_hide(invocation.hide.as_ref(), name);
         let depth = invocation.depth + 1;
-        let mut builder = SubstitutionBuilder::new(cleaned, hide, depth, substitution_info);
+        let mut builder =
+            SubstitutionBuilder::new(cleaned, hide, depth, substitution_info, expansion);
         builder.substitute();
 
         let (mut out, errors) = builder.finish();
@@ -483,8 +533,8 @@ impl Expander<'_> {
         }
 
         if let Some(first) = out.first_mut() {
-            first.token.has_space_before = invocation.token.has_space_before;
-            first.token.line_start = invocation.token.line_start;
+            first.has_space_before = invocation.has_space_before;
+            first.line_start = invocation.line_start;
         }
 
         stream.push_replacement(out);
@@ -497,6 +547,7 @@ pub(super) fn substitute_object_like(
     hide: HideSet,
     depth: usize,
     replacement: &[PpToken],
+    expansion: Arc<MacroExpansion>,
 ) -> (Vec<MacroToken>, Vec<(String, Span<SourceId>)>) {
     let substitution_info = SubstitutionInfo {
         replacement,
@@ -508,7 +559,7 @@ pub(super) fn substitute_object_like(
         is_function_like: false,
         variadic_param: None,
     };
-    let mut builder = SubstitutionBuilder::new(cleaned, hide, depth, substitution_info);
+    let mut builder = SubstitutionBuilder::new(cleaned, hide, depth, substitution_info, expansion);
     builder.substitute();
     builder.finish()
 }
@@ -524,7 +575,13 @@ enum Paste {
 }
 
 /// Pastes two paste operands into one token.
-fn paste_pair(left: Option<&MacroToken>, right: Option<&MacroToken>, cleaned: &str) -> Paste {
+fn paste_pair(
+    left: Option<&MacroToken>,
+    right: Option<&MacroToken>,
+    cleaned: &str,
+    expansion: &Arc<MacroExpansion>,
+    operator: Span<SourceId>,
+) -> Paste {
     match (left, right) {
         (None, None) => Paste::Placemarker,
         (Some(token), None) | (None, Some(token)) => Paste::Token(token.clone()),
@@ -551,35 +608,92 @@ fn paste_pair(left: Option<&MacroToken>, right: Option<&MacroToken>, cleaned: &s
             };
 
             Paste::Token(MacroToken {
-                token: PpToken {
-                    file: left.token.file,
-                    kind,
-                    // TODO: track both operands' origins once Origin is a multi-span
-                    cleaned: left.token.cleaned,
-                    orig: left.token.orig,
-                    has_space_before: left.token.has_space_before,
-                    line_start: left.token.line_start,
-                },
-                text: Some(Arc::from(text)),
+                kind,
+                spelling: TokenSpelling::Synthetic(Arc::from(text)),
+                has_space_before: left.has_space_before,
+                line_start: left.line_start,
                 hide,
                 depth: left.depth.max(right.depth),
+                origin: Origin::Concat {
+                    left: token_span(left),
+                    right: token_span(right),
+                    operator,
+                },
+                expansion: Some(Arc::clone(expansion)),
+                arguments: {
+                    let mut arguments = left.arguments.clone();
+                    for argument in &right.arguments {
+                        if !arguments.contains(argument) {
+                            arguments.push(Arc::clone(argument));
+                        }
+                    }
+                    arguments
+                },
             })
         }
     }
 }
 
+/// Returns `expansion` with `parent` attached at the end of its chain.
+fn attach_parent(
+    expansion: &Arc<MacroExpansion>,
+    parent: Arc<MacroExpansion>,
+) -> Arc<MacroExpansion> {
+    let parent = match &expansion.parent {
+        Some(existing) => Some(attach_parent(existing, parent)),
+        None => Some(parent),
+    };
+
+    Arc::new(MacroExpansion {
+        name: Arc::clone(&expansion.name),
+        invocation: expansion.invocation,
+        definition: expansion.definition,
+        parent,
+    })
+}
+
+/// Returns true if `needle` is in `expansion`'s chain.
+fn chain_contains(expansion: &MacroExpansion, needle: &MacroExpansion) -> bool {
+    (expansion.name == needle.name && expansion.invocation == needle.invocation)
+        || expansion
+            .parent
+            .as_deref()
+            .is_some_and(|parent| chain_contains(parent, needle))
+}
+
+/// Returns the source span of `token`.
+fn token_span(token: &MacroToken) -> Span<SourceId> {
+    token.primary_span()
+}
+
+/// Returns the source span of a macro argument.
+fn argument_span(argument: &[MacroToken]) -> Option<Span<SourceId>> {
+    let first = token_span(argument.first()?);
+    let last = token_span(argument.last()?);
+    let range = if first.file == last.file {
+        TextRange::new(first.text_range.start, last.text_range.end)
+    } else {
+        first.text_range
+    };
+
+    Some(Span {
+        file: first.file,
+        text_range: range,
+    })
+}
+
 /// Joins variadic argument lists with their original commas.
-fn join_varargs(lists: &[Vec<MacroToken>], commas: &[PpToken], fixed: usize) -> Vec<MacroToken> {
+fn join_varargs(lists: &[Vec<MacroToken>], commas: &[MacroToken], fixed: usize) -> Vec<MacroToken> {
     let mut out = Vec::new();
 
     for (offset, argument) in lists.iter().enumerate() {
         if offset > 0 {
-            out.push(MacroToken {
-                token: commas[fixed + offset - 1],
-                text: None,
-                hide: None,
-                depth: 0,
-            });
+            let mut comma = commas[fixed + offset - 1].clone();
+            comma.hide = None;
+            comma.depth = 0;
+            comma.expansion = None;
+            comma.arguments = Vec::new();
+            out.push(comma);
         }
         out.extend(argument.iter().cloned());
     }
