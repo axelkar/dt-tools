@@ -8,7 +8,7 @@ use super::{Expander, MacroToken};
 use crate::{lexer::PpTokenKind, token::PpToken};
 
 /// A binary operator.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InfixOp {
     Add,
     Sub,

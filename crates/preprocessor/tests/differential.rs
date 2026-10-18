@@ -202,6 +202,7 @@ enum MacroFragment {
         body: Vec<BodyToken>,
     },
     Use(Use),
+    Conditional(Conditional),
 }
 
 /// Generates a bounded parameter list.
@@ -221,6 +222,274 @@ fn params(u: &mut Unstructured<'_>) -> Result<Option<(Vec<ParamName>, bool)>> {
 fn body_tokens(u: &mut Unstructured<'_>) -> Result<Vec<BodyToken>> {
     let count = u.int_in_range(0..=MAX_BODY_TOKENS)?;
     (0..count).map(|_| BodyToken::arbitrary(u)).collect()
+}
+
+/// A balanced conditional group.
+#[derive(Arbitrary)]
+struct Conditional {
+    opening: Opening,
+    #[arbitrary(with = conditional_body)]
+    body: Vec<MacroFragment>,
+    #[arbitrary(with = elif_branches)]
+    alternatives: Vec<ElifBranch>,
+    #[arbitrary(with = optional_body)]
+    otherwise: Option<Vec<MacroFragment>>,
+}
+
+/// The directive that opens a conditional group.
+#[derive(Arbitrary)]
+enum Opening {
+    If(Expr),
+    Ifdef(MacroName),
+    Ifndef(MacroName),
+}
+
+/// An alternative conditional branch.
+#[derive(Arbitrary)]
+struct ElifBranch {
+    condition: ElifCondition,
+    #[arbitrary(with = conditional_body)]
+    body: Vec<MacroFragment>,
+}
+
+/// The directive that starts an alternative branch.
+#[derive(Arbitrary)]
+enum ElifCondition {
+    Elif(Expr),
+    Elifdef(MacroName),
+    Elifndef(MacroName),
+}
+
+/// The maximum number of items in one generated branch.
+const MAX_BRANCH_ITEMS: u8 = 4;
+
+/// Generates a bounded conditional body.
+fn conditional_body(u: &mut Unstructured<'_>) -> Result<Vec<MacroFragment>> {
+    let count = u.int_in_range(0..=MAX_BRANCH_ITEMS)?;
+    (0..count).map(|_| MacroFragment::arbitrary(u)).collect()
+}
+
+/// Generates bounded alternative branches.
+fn elif_branches(u: &mut Unstructured<'_>) -> Result<Vec<ElifBranch>> {
+    let count = u.int_in_range(0..=MAX_BRANCH_ITEMS)?;
+    (0..count).map(|_| ElifBranch::arbitrary(u)).collect()
+}
+
+/// Generates an optional conditional body.
+fn optional_body(u: &mut Unstructured<'_>) -> Result<Option<Vec<MacroFragment>>> {
+    if !u.arbitrary()? {
+        return Ok(None);
+    }
+    conditional_body(u).map(Some)
+}
+
+/// A generated condition.
+enum Expr {
+    Number(u8),
+    Hex(u8),
+    BinaryLiteral(u8),
+    Octal(u8),
+    Char(CharLiteral),
+    Ident(MacroName),
+    Defined {
+        name: MacroName,
+        parens: bool,
+        negate: bool,
+    },
+    Unary {
+        op: UnaryOp,
+        operand: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    Ternary {
+        condition: Box<Expr>,
+        then: Box<Expr>,
+        otherwise: Box<Expr>,
+    },
+}
+
+/// A character constant from a fixed set.
+#[derive(Arbitrary, Clone, Copy, strum::Display)]
+enum CharLiteral {
+    #[strum(serialize = "'a'")]
+    A,
+    #[strum(serialize = "'\\n'")]
+    Newline,
+    #[strum(serialize = "'\\xFF'")]
+    HighBit,
+}
+
+/// A prefix operator.
+#[derive(Arbitrary, Clone, Copy, strum::Display)]
+enum UnaryOp {
+    #[strum(serialize = "!")]
+    Not,
+    #[strum(serialize = "~")]
+    Complement,
+    #[strum(serialize = "-")]
+    Minus,
+    #[strum(serialize = "+")]
+    Plus,
+}
+
+/// An infix operator. Shifts are left out because their overflow behavior differs.
+#[derive(Arbitrary, Clone, Copy, strum::Display)]
+enum BinaryOp {
+    #[strum(serialize = "*")]
+    Mul,
+    #[strum(serialize = "/")]
+    Div,
+    #[strum(serialize = "%")]
+    Mod,
+    #[strum(serialize = "+")]
+    Add,
+    #[strum(serialize = "-")]
+    Sub,
+    #[strum(serialize = "<")]
+    Lt,
+    #[strum(serialize = "<=")]
+    Le,
+    #[strum(serialize = ">")]
+    Gt,
+    #[strum(serialize = ">=")]
+    Ge,
+    #[strum(serialize = "==")]
+    Eq,
+    #[strum(serialize = "!=")]
+    Ne,
+    #[strum(serialize = "&")]
+    BitAnd,
+    #[strum(serialize = "^")]
+    BitXor,
+    #[strum(serialize = "|")]
+    BitOr,
+    #[strum(serialize = "&&")]
+    And,
+    #[strum(serialize = "||")]
+    Or,
+}
+
+/// The maximum nesting depth of a generated condition.
+const MAX_EXPR_DEPTH: u8 = 3;
+
+impl<'a> Arbitrary<'a> for Expr {
+    fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+        expr(u, MAX_EXPR_DEPTH)
+    }
+}
+
+/// Generates a condition with at most `depth` levels of nesting.
+fn expr(u: &mut Unstructured<'_>, depth: u8) -> Result<Expr> {
+    if depth == 0 {
+        return match u.int_in_range(0..=5)? {
+            0 => Ok(Expr::Number(u.arbitrary()?)),
+            1 => Ok(Expr::Hex(u.arbitrary()?)),
+            2 => Ok(Expr::BinaryLiteral(u.arbitrary()?)),
+            3 => Ok(Expr::Octal(u.arbitrary()?)),
+            4 => Ok(Expr::Char(u.arbitrary()?)),
+            _ => Ok(Expr::Ident(u.arbitrary()?)),
+        };
+    }
+
+    match u.int_in_range(0..=9)? {
+        0 => Ok(Expr::Defined {
+            name: u.arbitrary()?,
+            parens: u.arbitrary()?,
+            negate: u.arbitrary()?,
+        }),
+        1 => Ok(Expr::Unary {
+            op: u.arbitrary()?,
+            operand: Box::new(expr(u, depth - 1)?),
+        }),
+        2 => Ok(Expr::Ternary {
+            condition: Box::new(expr(u, depth - 1)?),
+            then: Box::new(expr(u, depth - 1)?),
+            otherwise: Box::new(expr(u, depth - 1)?),
+        }),
+        _ => Ok(Expr::Binary {
+            op: u.arbitrary()?,
+            lhs: Box::new(expr(u, depth - 1)?),
+            rhs: Box::new(expr(u, depth - 1)?),
+        }),
+    }
+}
+
+impl std::fmt::Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Number(value) => write!(f, "{value}"),
+            Self::Hex(value) => write!(f, "0x{value:x}"),
+            Self::BinaryLiteral(value) => write!(f, "0b{value:b}"),
+            Self::Octal(value) => write!(f, "0{value:o}"),
+            Self::Char(literal) => write!(f, "{literal}"),
+            Self::Ident(name) => write!(f, "{name}"),
+            Self::Defined {
+                name,
+                parens,
+                negate,
+            } => {
+                let negation = if *negate { "!" } else { "" };
+                if *parens {
+                    write!(f, "{negation}defined({name})")
+                } else {
+                    write!(f, "{negation}defined {name}")
+                }
+            }
+            Self::Unary { op, operand } => write!(f, "({op}{operand})"),
+            Self::Binary { op, lhs, rhs } => write!(f, "({lhs} {op} {rhs})"),
+            Self::Ternary {
+                condition,
+                then,
+                otherwise,
+            } => write!(f, "({condition} ? {then} : {otherwise})"),
+        }
+    }
+}
+
+impl std::fmt::Display for Conditional {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.opening)?;
+        for item in &self.body {
+            write!(f, "{item}")?;
+        }
+        for alternative in &self.alternatives {
+            write!(f, "{}", alternative.condition)?;
+            for item in &alternative.body {
+                write!(f, "{item}")?;
+            }
+        }
+        if let Some(body) = &self.otherwise {
+            f.write_str("#else\n")?;
+            for item in body {
+                write!(f, "{item}")?;
+            }
+        }
+        f.write_str("#endif\n")
+    }
+}
+
+impl std::fmt::Display for Opening {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::If(expr) => writeln!(f, "#if {expr}"),
+            Self::Ifdef(name) => writeln!(f, "#ifdef {name}"),
+            Self::Ifndef(name) => writeln!(f, "#ifndef {name}"),
+        }
+    }
+}
+
+impl std::fmt::Display for ElifCondition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Elif(expr) => writeln!(f, "#elif {expr}"),
+            Self::Elifdef(name) => writeln!(f, "#elifdef {name}"),
+            Self::Elifndef(name) => writeln!(f, "#elifndef {name}"),
+        }
+    }
 }
 
 impl std::fmt::Display for MacroFragment {
@@ -269,6 +538,7 @@ impl std::fmt::Display for MacroFragment {
                 writeln!(f)
             }
             Self::Use(item) => writeln!(f, "{item}"),
+            Self::Conditional(conditional) => write!(f, "{conditional}"),
         }
     }
 }
@@ -660,12 +930,40 @@ const CONDITIONAL_EDGE_CASES: &[&str] = &[
     "#if 1 || (1 / 0)\nfoo\n#endif\n",
     "#if 0 ? (1 / 0) : 1\nfoo\n#endif\n",
     "#if 1 ? 1 : (1 / 0)\nfoo\n#endif\n",
-    // Literals.
+    // Precedence and associativity.
+    "#if (1 << 2 < 5) == 1\nfoo\n#endif\n",
+    "#if 1 < 2 == 1\nfoo\n#endif\n",
+    "#if 6 & 3 == 2\nfoo\n#endif\n",
+    "#if 2 ^ 1 & 1\nfoo\n#endif\n",
+    "#if 1 | 2 ^ 3\nfoo\n#endif\n",
+    "#if 1 | 0 && 0\nfoo\n#endif\n",
+    "#if 1 || 0 && 0\nfoo\n#endif\n",
+    "#if ~1 * 2 == -4\nfoo\n#endif\n",
+    "#if (1 ? 2 : 3 + 4) == 2\nfoo\n#endif\n",
+    "#if 8 / 4 / 2 == 1\nfoo\n#endif\n",
+    "#if 16 >> 1 >> 1 == 4\nfoo\n#endif\n",
+    "#if 2 < 3 < 4\nfoo\n#endif\n",
+    "#if 2 == 2 == 1\nfoo\n#endif\n",
+    // Literals and escapes.
     "#if 'a' == 97\nfoo\n#endif\n",
     "#if '\\n' == 10\nfoo\n#endif\n",
     "#if '\\x41' == 65\nfoo\n#endif\n",
     "#if '\\101' == 65\nfoo\n#endif\n",
     "#if '\\xFF' == -1\nfoo\n#endif\n",
+    "#if 0x1 == 1\nfoo\n#endif\n",
+    "#if 0x01 == 1\nfoo\n#endif\n",
+    "#if 0x010 == 16\nfoo\n#endif\n",
+    "#if 0x001 == 1\nfoo\n#endif\n",
+    "#if 01 == 1\nfoo\n#endif\n",
+    "#if 0001 == 1\nfoo\n#endif\n",
+    "#if 00010 == 8\nfoo\n#endif\n",
+    "#if 00001 == 1\nfoo\n#endif\n",
+    "#if 0x41 == 65 && '\\x41' == 65\nfoo\n#endif\n",
+    "#if 0xFF != '\\xFF'\nfoo\n#endif\n",
+    "#if '\\x0' == 0 && '\\x00' == 0 && '\\x000' == 0\nfoo\n#endif\n",
+    "#if '\\0' == 0 && '\\00' == 0 && '\\000' == 0\nfoo\n#endif\n",
+    "#if '\\1' == 1 && '\\10' == 8\nfoo\n#endif\n",
+    "#if 0x7F == '\\x7F'\nfoo\n#endif\n",
     "#if 0x10 == 16 && 0b101 == 5 && 010 == 8\nfoo\n#endif\n",
     "#if 1U + 1L + 1UL + 1LL == 4\nfoo\n#endif\n",
     "#if 1 / 0\nfoo\n#endif\n",
@@ -1007,6 +1305,17 @@ fn generated_cases_have_several_fragments() {
         total >= 40,
         "generated cases are too small: {total} fragments"
     );
+}
+
+#[test]
+fn generated_cases_include_conditionals() {
+    let mut corpus = Corpus::new();
+    let mut found = false;
+    for _ in 0..20 {
+        let case = corpus.next::<MacroCase>().expect("a generated case");
+        found |= case.to_string().contains("#if");
+    }
+    assert!(found, "the generated corpus never produced a conditional");
 }
 
 /// Checks every hand-picked macro edge case against the available preprocessors.

@@ -614,6 +614,20 @@ mod tests {
     }
 
     #[test]
+    fn evaluates_macros_in_conditions() {
+        let result = preprocess_str("#define FOO BAR\n#define BAR 42\n#if FOO\nfoo\n#endif\n");
+        assert_eq!(result.text, "foo");
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn stops_recursive_expansion_in_conditions() {
+        let result = preprocess_str("#define A A\n#if A\nfoo\n#endif\n");
+        assert_eq!(result.text, "");
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
     fn reports_division_by_zero() {
         for input in ["#if 1 / 0\nfoo\n#endif\n", "#if 1 % 0\nfoo\n#endif\n"] {
             let result = preprocess_str(input);
