@@ -254,6 +254,18 @@ mod tests {
     }
 
     #[test]
+    fn does_not_prescan_arguments_used_only_by_hash_or_paste() {
+        // The wrong arity of `B(2)` must not be diagnosed in either case.
+        let result = preprocess_str("#define A(a, b) #b\n#define B(a, b) a b\nA(1, B(2))\n");
+        assert_eq!(result.text, "\"B(2)\"");
+        assert!(result.diagnostics.is_empty());
+
+        let result = preprocess_str("#define A(a, b) a ## b\n#define B(a, b) a b\nA(1, B(2))\n");
+        assert_eq!(result.text, "1B(2)");
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
     fn does_not_prescan_operands_of_hash_and_paste() {
         assert_eq!(
             preprocess_str("#define A 1\n#define S(x) #x\nS(A)\n").text,

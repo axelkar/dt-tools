@@ -354,8 +354,6 @@ impl std::fmt::Display for VaArgs {
 #[derive(Arbitrary, strum::Display)]
 enum PasteOperand {
     #[strum(transparent)]
-    Param(ParamName),
-    #[strum(transparent)]
     MacroName(MacroName),
     #[strum(serialize = "0")]
     Number,
@@ -577,6 +575,9 @@ const MACRO_EDGE_CASES: &[&str] = &[
     "#define S(x) #x\nS()\n",
     "#define A 1\n#define S(x) #x\nS(A)\n",
     "#define HASH #\nHASH\n",
+    // Arguments used only by `#` or `##` are not prescanned.
+    "#define A(a, b) #b\n#define B(a, b) a b\nA(1, B(2))\n",
+    "#define A(a, b) a ## b\n#define B(a, b) a b\nA(1, B(2))\n",
     "#define S #x\nS\n",
     // Token pasting.
     "#define CAT(a, b) a ## b\nCAT(foo, bar)\n",

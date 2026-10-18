@@ -54,12 +54,53 @@ impl SubstitutionInfo<'_> {
 
     /// Returns true if the replacement token at `index` is an operand of `##`.
     fn adjacent_to_paste(&self, index: usize, cleaned: &str) -> bool {
-        let previous = index
-            .checked_sub(1)
-            .and_then(|index| self.replacement.get(index));
-        let next = self.replacement.get(index + 1);
-        is_punct_token(previous, "##", cleaned) || is_punct_token(next, "##", cleaned)
+        adjacent_to_paste(self.replacement, index, cleaned)
     }
+}
+
+/// Returns true if the replacement token at `index` is an operand of `##`.
+fn adjacent_to_paste(replacement: &[PpToken], index: usize, cleaned: &str) -> bool {
+    let previous = index
+        .checked_sub(1)
+        .and_then(|index| replacement.get(index));
+    let next = replacement.get(index + 1);
+    is_punct_token(previous, "##", cleaned) || is_punct_token(next, "##", cleaned)
+}
+
+/// Returns which arguments need macro expansion.
+///
+/// An argument is expanded only when its parameter is used outside `#` and `##`.
+fn arguments_to_expand(
+    replacement: &[PpToken],
+    params: &[String],
+    fixed: usize,
+    is_variadic: bool,
+    cleaned: &str,
+) -> (Vec<bool>, bool) {
+    let mut params_to_expand = vec![false; fixed];
+    let mut varargs_to_expand = false;
+
+    for (index, token) in replacement.iter().enumerate() {
+        let text = token.text(cleaned);
+        let param = params.iter().position(|param| param == text);
+        let is_varargs = is_variadic && text == "__VA_ARGS__";
+        if param.is_none() && !is_varargs {
+            continue;
+        }
+
+        let stringified = index > 0 && is_punct_token(Some(&replacement[index - 1]), "#", cleaned);
+        if stringified || adjacent_to_paste(replacement, index, cleaned) {
+            continue;
+        }
+
+        if let Some(param) = param {
+            params_to_expand[param] = true;
+        } else {
+            varargs_to_expand = true;
+        }
+    }
+
+    (params_to_expand, varargs_to_expand)
 }
 
 /// Builds a function-like macro's substituted replacement list.
@@ -389,10 +430,23 @@ impl Expander<'_> {
             return;
         }
 
+        let (params_to_expand, varargs_to_expand) =
+            arguments_to_expand(replacement, params, fixed, is_variadic, self.cleaned_text);
         let expanded_arguments: Vec<Vec<MacroToken>> = raw_arguments
             .iter()
-            .cloned()
-            .map(|argument| self.prescan(argument))
+            .enumerate()
+            .map(|(index, argument)| {
+                let expand = if index < fixed {
+                    params_to_expand[index]
+                } else {
+                    varargs_to_expand
+                };
+                if expand {
+                    self.prescan(argument.clone())
+                } else {
+                    argument.clone()
+                }
+            })
             .collect();
 
         // `#` and `##` operands are not prescanned, so they use the raw argument tokens.
