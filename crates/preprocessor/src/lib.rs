@@ -172,11 +172,105 @@ mod tests {
     }
 
     #[test]
-    fn reports_function_like_macros() {
-        // Function-like definitions are not implemented yet.
+    fn accepts_function_like_definitions() {
+        // Definitions are accepted and recorded.
         let result = preprocess_str("#define F(x) x\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.macro_defs.len(), 1);
+        assert_eq!(result.macro_defs[0].name, "F");
+    }
+
+    #[test]
+    fn accepts_variadic_definitions() {
+        let result = preprocess_str("#define F(a, ...) a __VA_ARGS__\n");
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.macro_defs.len(), 1);
+    }
+
+    #[test]
+    fn reports_bad_macro_parameter_lists() {
+        // Malformed lists are errors, and no macro is defined.
+        for input in [
+            "#define F(1) x\n",
+            "#define F(a b) x\n",
+            "#define F(a,) x\n",
+            "#define F(a, a) x\n",
+            "#define F(a x\n",
+        ] {
+            let result = preprocess_str(input);
+            assert_eq!(result.diagnostics.len(), 1, "input: {input:?}");
+            assert_eq!(
+                result.diagnostics[0].severity,
+                Severity::Error,
+                "input: {input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn distinguishes_object_and_function_like_definitions() {
+        // A space before `(` makes the definition object-like.
+        assert_eq!(preprocess_str("#define F (x) x\nF\n").text, "(x) x");
+        // A function-like name without `(` is not expanded.
+        assert_eq!(preprocess_str("#define F(x) x\nF\n").text, "F");
+    }
+
+    #[test]
+    fn warns_on_different_function_like_redefinitions() {
+        let result = preprocess_str("#define F(x) x\n#define F(y) y\n");
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].severity, Severity::Warn);
+    }
+
+    #[test]
+    fn accepts_identical_function_like_redefinitions() {
+        let result = preprocess_str("#define F(x) x\n#define F(x) x\n");
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn expands_function_like_macros() {
+        assert_eq!(preprocess_str("#define F(x) x\nF(1)\n").text, "1");
+        assert_eq!(preprocess_str("#define F(a, b) a b\nF(1, 2)\n").text, "1 2");
+        assert_eq!(preprocess_str("#define F() 1\nF()\n").text, "1");
+        assert_eq!(preprocess_str("#define F(x) x\nF (1)\n").text, "1");
+    }
+
+    #[test]
+    fn prescans_arguments() {
+        // The inner F must expand before the outer F's hide set applies. Without
+        // prescan, the result would be `F(1)` instead of `1`.
+        assert_eq!(preprocess_str("#define F(x) x\nF(F(1))\n").text, "1");
+    }
+
+    #[test]
+    fn rescans_with_following_tokens() {
+        // F expands to G, and the following `(` makes it a function-like invocation.
+        assert_eq!(
+            preprocess_str("#define F G\n#define G(x) x\nF(1)\n").text,
+            "1"
+        );
+    }
+
+    #[test]
+    fn handles_empty_and_nested_arguments() {
+        assert_eq!(preprocess_str("#define F(x) [x]\nF()\n").text, "[]");
+        assert_eq!(
+            preprocess_str("#define F(x) [x]\nF((1, 2))\n").text,
+            "[(1, 2)]"
+        );
+    }
+
+    #[test]
+    fn reports_wrong_argument_counts() {
+        let result = preprocess_str("#define F(a, b) a b\nF(1)\n");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn stops_function_like_recursion() {
+        assert_eq!(preprocess_str("#define F(x) F(x)\nF(1)\n").text, "F(1)");
     }
 
     #[test]

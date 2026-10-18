@@ -131,6 +131,14 @@ const MACRO_FRAGMENTS: &[&str] = &[
     "A;A\n",
     "x = A;\n",
     "A/*c*/B\n",
+    "#define F(x) x\n",
+    "#define G(a, b) a b\n",
+    "F(1)\n",
+    "F(A)\n",
+    "F (1)\n",
+    "F(F(1))\n",
+    "F((1, 2))\n",
+    "G(1, 2)\n",
 ];
 
 /// Hand-picked inputs covering macro edge cases.
@@ -152,9 +160,23 @@ const MACRO_EDGE_CASES: &[&str] = &[
     "#define A 12\\\n3\nA\n",
     "#define A &gpio1\nx = A;\n",
     "  #define A 1\n  A\n",
+    // Function-like macros.
+    "#define F(x) x\nF(1)\n",
+    "#define F(a, b) a b\nF(1, 2)\n",
+    "#define F() 1\nF()\n",
+    "#define F(x) x\nF (1)\n",
+    "#define F(x) x\nF(F(1))\n",
+    "#define F(x) [x]\nF()\n",
+    "#define F(x) [x]\nF((1, 2))\n",
+    "#define F(x) F(x)\nF(1)\n",
+    "#define F G\n#define G(x) x\nF(1)\n",
+    "#define P(x) &x\nP(gpio1)\n",
+    // Malformed directives and invocations.
     "#define\n",
     "#undef\n",
     "#define 1 A\n",
+    "#define F(a, b) a b\nF(1)\n",
+    "#define F(x) x\nF(1\n",
 ];
 
 /// A preprocessor to compare against.

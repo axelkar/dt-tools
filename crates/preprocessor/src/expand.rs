@@ -1,26 +1,30 @@
-//! Directive handling and object-like macro expansion.
+//! Directive handling and macro expansion.
+
+mod directive;
+mod rescan;
 
 use std::borrow::Cow;
 
 use dt_tools_diagnostic::{Diagnostic, Severity, text_range::TextRange};
-use rustc_hash::FxHashSet;
 
-use crate::config::PreprocessorConfig;
-use crate::directive::{self, Directive, DirectiveKind};
-use crate::env::{MacroDef, MacroEnv};
-use crate::files::SourceId;
-use crate::lexer::PpTokenKind;
-use crate::output::MacroDefSite;
-use crate::token::PpToken;
+use crate::{
+    config::PreprocessorConfig,
+    env::{MacroEnv, MacroKind},
+    expand::rescan::{HideSet, MacroToken, TokenStream, extend_hide, union_hide},
+    files::SourceId,
+    lexer::PpTokenKind,
+    output::MacroDefSite,
+    token::PpToken,
+};
 
-/// The token stream after directives are handled and object-like macros are expanded.
+/// The token stream after directives are handled and macros are expanded.
 pub(crate) struct Expansion {
     pub(crate) tokens: Vec<PpToken>,
     pub(crate) macro_defs: Vec<MacroDefSite>,
     pub(crate) diagnostics: Vec<Diagnostic<SourceId>>,
 }
 
-/// Handles directives and expands object-like macros of a file in source order.
+/// Handles directives and expands macros of a file in source order.
 pub(crate) fn expand(
     tokens: &[PpToken],
     cleaned: &str,
@@ -39,19 +43,35 @@ pub(crate) fn expand(
         byte_cap_reported: false,
     };
 
-    let mut index = 0;
-    while index < tokens.len() {
-        if let Some(directive) = directive::parse(&tokens[index..], cleaned) {
-            expander.directive(directive);
-            index += directive.len_tokens;
-        } else {
-            expander.expand_token(tokens[index], &mut FxHashSet::default(), 0);
-            index += 1;
+    let mut stream = TokenStream::new(tokens);
+
+    loop {
+        if stream.is_rescan_empty()
+            && let Some(directive) = crate::directive::parse(stream.remaining_source(), cleaned)
+        {
+            stream.skip_source(directive.len_tokens);
+            directive::DirectiveHandler {
+                expander: &mut expander,
+                directive,
+                argument_pos: 0,
+            }
+            .handle();
+            continue;
         }
+
+        let Some(token) = stream.next() else {
+            break;
+        };
+
+        expander.expand_token(&token, &mut stream);
     }
 
     Expansion {
-        tokens: expander.tokens,
+        tokens: expander
+            .tokens
+            .into_iter()
+            .map(|token| token.token)
+            .collect(),
         macro_defs: expander.macro_defs,
         diagnostics: expander.diagnostics,
     }
@@ -62,7 +82,7 @@ struct Expander<'a> {
     cleaned_text: &'a str,
     file: SourceId,
     config: &'a PreprocessorConfig,
-    tokens: Vec<PpToken>,
+    tokens: Vec<MacroToken>,
     macro_defs: Vec<MacroDefSite>,
     diagnostics: Vec<Diagnostic<SourceId>>,
     expanded_bytes: usize,
@@ -70,165 +90,284 @@ struct Expander<'a> {
 }
 
 impl Expander<'_> {
-    /// Handles a directive.
-    fn directive(&mut self, directive: Directive<'_>) {
-        match directive.kind {
-            DirectiveKind::Define => self.define(directive),
-            DirectiveKind::Undef => self.undef(directive),
-            DirectiveKind::Error => self.message(directive, Severity::Error),
-            DirectiveKind::Warning => self.message(directive, Severity::Warn),
-            DirectiveKind::Unsupported => self.report(
-                Severity::Warn,
-                format!("directive `{}` is not supported yet", directive.name),
-                directive.text_range,
-            ),
-        }
+    /// Returns true if `token` is the punctuator `text`.
+    fn is_punct(&self, token: Option<&PpToken>, text: &str) -> bool {
+        token.is_some_and(|token| {
+            token.kind == PpTokenKind::Punct && token.text(self.cleaned_text) == text
+        })
     }
 
-    /// Handles a `#define` directive.
-    fn define(&mut self, directive: Directive<'_>) {
-        let Some(name_token) = self.macro_name_token(directive) else {
-            return;
-        };
+    /// Expands one token, pushing its replacement for rescan.
+    ///
+    /// Expansion = pre-expansion (prescan) + argument substitution + rescan.
+    ///
+    /// Reference: [WG14 N3220 (C23 draft) § 6.10.5 Macro replacement](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#subsection.6.10.5).
+    fn expand_token(&mut self, token: &MacroToken, stream: &mut TokenStream<'_>) {
+        let cleaned = self.cleaned_text;
 
-        if let Some(lparen) = directive.argument.get(1)
-            && !lparen.has_space_before
-            && lparen.kind == PpTokenKind::Punct
-            && lparen.text(self.cleaned_text) == "("
-        {
-            self.report(
-                Severity::Warn,
-                "function-like macros are not supported yet".to_owned(),
-                lparen.orig,
-            );
-            return;
-        }
-
-        let name = name_token.text(self.cleaned_text).to_owned();
-        let replacement = directive.argument[1..].to_vec();
-
-        let previous = self
-            .env
-            .get(&name)
-            .map(|definition| definition.replacement.clone());
-        if let Some(previous) = previous
-            && !same_replacement(&previous, &replacement, self.cleaned_text)
-        {
-            self.report(
-                Severity::Warn,
-                format!("macro `{name}` redefined"),
-                name_token.orig,
-            );
-        }
-
-        self.env.define(name.clone(), MacroDef { replacement });
-        self.macro_defs.push(MacroDefSite {
-            name,
-            span: directive.text_range.within_file(self.file),
-        });
-    }
-
-    /// Handles an `#undef` directive.
-    fn undef(&mut self, directive: Directive<'_>) {
-        let Some(name_token) = self.macro_name_token(directive) else {
-            return;
-        };
-        if let Some(extra) = directive.argument.get(1) {
-            self.report(
-                Severity::Warn,
-                "extra tokens at end of #undef directive".to_owned(),
-                extra.orig,
-            );
-        }
-        self.env.undef(name_token.text(self.cleaned_text));
-    }
-
-    /// Gets a macro name token from a [`Directive`].
-    fn macro_name_token<'a>(&mut self, directive: Directive<'a>) -> Option<&'a PpToken> {
-        let Some(name_token) = directive.argument.first() else {
-            self.report(
-                Severity::Error,
-                "macro name missing".to_owned(),
-                directive.text_range,
-            );
-            return None;
-        };
-        if name_token.kind != PpTokenKind::Ident {
-            self.report(
-                Severity::Error,
-                "macro name must be an identifier".to_owned(),
-                name_token.orig,
-            );
-            return None;
-        }
-        Some(name_token)
-    }
-
-    /// Handles a message directive.
-    fn message(&mut self, directive: Directive<'_>, severity: Severity) {
-        let message = match (directive.argument.first(), directive.argument.last()) {
-            (Some(first), Some(last)) => self.cleaned_text[first.cleaned.start..last.cleaned.end]
-                .trim()
-                .to_owned(),
-            _ => match severity {
-                Severity::Error => "error directive".to_owned(),
-                Severity::Warn => "warning directive".to_owned(),
-            },
-        };
-        self.report(severity, message, directive.text_range);
-    }
-
-    /// Expands a token and performs partial rescan on its replacement.
-    fn expand_token(&mut self, token: PpToken, active: &mut FxHashSet<String>, depth: usize) {
         if self.expanded_bytes <= self.config.max_expanded_bytes
-            && token.kind == PpTokenKind::Ident
-            && let name = token.text(self.cleaned_text)
-            && !active.contains(name)
-            && let Some(replacement) = self
-                .env
-                .get(name)
-                .map(|definition| definition.replacement.clone())
+            && token.token.kind == PpTokenKind::Ident
+            && let name = token.token.text(cleaned)
+            && !token.is_hidden(name)
+            && let Some(definition) = self.env.get(name).cloned()
         {
-            if depth >= self.config.max_expansion_depth {
+            match &definition.kind {
+                MacroKind::Object => {
+                    self.expand_object_like(token, name, &definition.replacement, stream);
+                    return;
+                }
+                MacroKind::Function { params, variadic } => {
+                    let next = stream.peek();
+
+                    // Only a macro invocation when followed by left parenthesis: WG14 N3220 § 6.10.5 Macro replacement, para 10
+                    if !next.is_some_and(|next| self.is_punct(Some(&next), "(")) {
+                        self.push(token.clone());
+                        return;
+                    }
+
+                    self.expand_function_like(
+                        token,
+                        name,
+                        &definition.replacement,
+                        params,
+                        *variadic,
+                        stream,
+                    );
+                    return;
+                }
+            }
+        }
+
+        self.push(token.clone());
+    }
+
+    /// Returns true if the expansion depth cap was reached.
+    ///
+    /// Reports a diagnostic and emits `token` when it was.
+    fn at_depth_limit(&mut self, token: &MacroToken) -> bool {
+        if token.depth < self.config.max_expansion_depth {
+            return false;
+        }
+
+        self.report(
+            Severity::Error,
+            "macro expansion depth exceeded".to_owned(),
+            token.token.orig,
+        );
+        self.push(token.clone());
+        true
+    }
+
+    /// Expands an object-like macro invocation.
+    ///
+    /// Reference: <https://en.cppreference.com/c/preprocessor/replace#Object-like_macros>
+    fn expand_object_like(
+        &mut self,
+        instance_token: &MacroToken,
+        name: &str,
+        replacement: &[PpToken],
+        stream: &mut TokenStream<'_>,
+    ) {
+        if self.at_depth_limit(instance_token) {
+            return;
+        }
+
+        let hide = extend_hide(instance_token.hide.as_ref(), name);
+        let depth = instance_token.depth + 1;
+        let mut out = Vec::with_capacity(replacement.len());
+
+        for (index, &replacement) in replacement.iter().enumerate() {
+            let mut replacement = replacement;
+            if index == 0 {
+                replacement.has_space_before = instance_token.token.has_space_before;
+                replacement.line_start = instance_token.token.line_start;
+            }
+            out.push(MacroToken {
+                token: replacement,
+                hide: Some(hide.clone()),
+                depth,
+            });
+        }
+
+        stream.push_replacement(out);
+    }
+
+    /// Expands a function-like macro invocation.
+    ///
+    /// Reference: <https://en.cppreference.com/c/preprocessor/replace#Function-like_macros>
+    fn expand_function_like(
+        &mut self,
+        instance_token: &MacroToken,
+        name: &str,
+        replacement: &[PpToken],
+        params: &[String],
+        variadic: bool,
+        stream: &mut TokenStream<'_>,
+    ) {
+        if self.at_depth_limit(instance_token) {
+            return;
+        }
+
+        // Consume the opening parenthesis.
+        let Some(lparen) = stream.next() else {
+            return;
+        };
+
+        let Some(args) = self.collect_arguments(stream, lparen.token) else {
+            return;
+        };
+
+        if variadic {
+            self.report(
+                Severity::Error,
+                "variadic macro expansion is not supported yet".to_owned(),
+                instance_token.token.orig,
+            );
+            self.push(instance_token.clone());
+            return;
+        }
+
+        self.substitute_function_like(instance_token, name, replacement, params, args, stream);
+    }
+
+    /// Collects a function-like macro invocation's arguments.
+    ///
+    /// Reference: [WG14 N3220 (C23 draft) § 6.10.5 Macro replacement](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#subsection.6.10.5).
+    fn collect_arguments(
+        &mut self,
+        stream: &mut TokenStream<'_>,
+        lparen: PpToken,
+    ) -> Option<Vec<Vec<MacroToken>>> {
+        let mut args = vec![Vec::new()];
+        let mut depth = 1;
+
+        loop {
+            let Some(token) = stream.next() else {
                 self.report(
                     Severity::Error,
-                    "macro expansion depth exceeded".to_owned(),
-                    token.orig,
+                    "unterminated macro invocation".to_owned(),
+                    lparen.orig,
                 );
-                self.push(token);
-                return;
-            }
+                return None;
+            };
 
-            active.insert(name.to_owned());
-
-            let mut first = true;
-            for mut replacement_token in replacement {
-                if first {
-                    replacement_token.has_space_before = token.has_space_before;
-                    replacement_token.line_start = token.line_start;
-                    first = false;
+            // Comma and inner parentheses handling: WG14 N3220 § 6.10.5 Macro replacement, para 11
+            if token.token.kind == PpTokenKind::Punct {
+                let text = token.token.text(self.cleaned_text);
+                if text == "(" {
+                    depth += 1;
+                } else if text == ")" {
+                    depth -= 1;
+                    if depth == 0 {
+                        // Closing parenthesis
+                        break;
+                    }
+                } else if depth == 1 && text == "," {
+                    args.push(Vec::new());
+                    continue;
                 }
-
-                // TODO: full rescan, this is only partial, per-token
-                self.expand_token(replacement_token, active, depth + 1);
             }
 
-            active.remove(name);
+            // TODO: Vararg handling: WG14 N3220 § 6.10.5 Macro replacement, para 12
+
+            args.last_mut().expect("args is never empty").push(token);
+        }
+
+        Some(args)
+    }
+
+    /// Substitutes a function-like macro invocation's arguments.
+    ///
+    /// Reference: [WG14 N3220 (C23 draft) § 6.10.5.1 Argument substitution](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#subsubsection.6.10.5.1).
+    fn substitute_function_like(
+        &mut self,
+        invocation: &MacroToken,
+        name: &str,
+        replacement: &[PpToken],
+        params: &[String],
+        mut args: Vec<Vec<MacroToken>>,
+        stream: &mut TokenStream<'_>,
+    ) {
+        let fixed = params.len();
+
+        if fixed == 0 && args.len() == 1 && args[0].is_empty() {
+            args.clear();
+        }
+
+        if args.len() != fixed {
+            self.report(
+                Severity::Error,
+                format!(
+                    "macro `{name}` requires {fixed} arguments, but {} were given",
+                    args.len()
+                ),
+                invocation.token.orig,
+            );
             return;
         }
 
-        self.push(token);
+        let expanded_args: Vec<Vec<MacroToken>> = args
+            .into_iter()
+            .map(|argument| self.prescan(argument))
+            .collect();
+
+        let hide = extend_hide(invocation.hide.as_ref(), name);
+        let depth = invocation.depth + 1;
+        let mut out = Vec::new();
+        let mut first_output = true;
+
+        for &token in replacement {
+            let text = token.text(self.cleaned_text);
+            if let Some(index) = params.iter().position(|param| param == text) {
+                push_argument(
+                    &mut out,
+                    &expanded_args[index],
+                    token,
+                    &hide,
+                    depth,
+                    &mut first_output,
+                    invocation,
+                );
+            } else {
+                let mut token = MacroToken {
+                    token,
+                    hide: Some(hide.clone()),
+                    depth,
+                };
+                if first_output {
+                    token.token.has_space_before = invocation.token.has_space_before;
+                    token.token.line_start = invocation.token.line_start;
+                    first_output = false;
+                }
+                out.push(token);
+            }
+        }
+
+        stream.push_replacement(out);
+    }
+
+    /// Expands an argument before substitution.
+    fn prescan(&mut self, argument: Vec<MacroToken>) -> Vec<MacroToken> {
+        let saved = std::mem::take(&mut self.tokens);
+        let mut stream = TokenStream::new(&[]);
+        stream.push_replacement(argument);
+
+        while let Some(token) = stream.next() {
+            self.expand_token(&token, &mut stream);
+        }
+
+        std::mem::replace(&mut self.tokens, saved)
     }
 
     /// Pushes a token to the output.
-    fn push(&mut self, token: PpToken) {
-        self.expanded_bytes += token.text(self.cleaned_text).len();
+    fn push(&mut self, token: MacroToken) {
+        self.expanded_bytes += token.token.text(self.cleaned_text).len();
         if self.expanded_bytes > self.config.max_expanded_bytes && !self.byte_cap_reported {
             self.byte_cap_reported = true;
             self.report(
                 Severity::Error,
                 "expanded text exceeds the byte limit".to_owned(),
-                token.orig,
+                token.token.orig,
             );
         }
         self.tokens.push(token);
@@ -244,12 +383,29 @@ impl Expander<'_> {
     }
 }
 
-/// Returns true if two replacement lists are identical.
-fn same_replacement(left: &[PpToken], right: &[PpToken], cleaned: &str) -> bool {
-    left.len() == right.len()
-        && left.iter().zip(right).all(|(left, right)| {
-            left.kind == right.kind
-                && left.has_space_before == right.has_space_before
-                && left.text(cleaned) == right.text(cleaned)
-        })
+/// Appends a substituted argument to the expansion.
+fn push_argument(
+    out: &mut Vec<MacroToken>,
+    argument: &[MacroToken],
+    parameter: PpToken,
+    hide: &HideSet,
+    depth: usize,
+    first_output: &mut bool,
+    invocation: &MacroToken,
+) {
+    for (index, token) in argument.iter().enumerate() {
+        let mut token = token.clone();
+        if index == 0 {
+            token.token.has_space_before = parameter.has_space_before;
+            token.token.line_start = parameter.line_start;
+        }
+        token.hide = Some(union_hide(token.hide.as_ref(), hide));
+        token.depth = depth;
+        if *first_output {
+            token.token.has_space_before = invocation.token.has_space_before;
+            token.token.line_start = invocation.token.line_start;
+            *first_output = false;
+        }
+        out.push(token);
+    }
 }
