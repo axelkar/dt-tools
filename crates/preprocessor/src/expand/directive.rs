@@ -147,7 +147,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
         }
     }
 
-    /// Evaluates a conditional's condition.
+    /// Evaluates a condition.
     fn condition(&mut self) -> bool {
         match self.directive.kind {
             DirectiveKind::If | DirectiveKind::Elif => self.eval_condition(),
@@ -157,7 +157,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
         }
     }
 
-    /// Evaluates an `#if` expression.
+    /// Evaluates a condition.
     fn eval_condition(&mut self) -> bool {
         let tokens = self.expander.expand_condition(self.directive.argument);
         let (value, diagnostics) = evaluate(

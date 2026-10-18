@@ -125,6 +125,18 @@ mod tests {
         })
     }
 
+    /// Returns the value of a condition and asserts that it has no diagnostics.
+    fn condition(source: &str) -> bool {
+        let input = format!("#if {source}\nfoo\n#endif\n");
+        let result = preprocess_str(&input);
+        assert!(
+            result.diagnostics.is_empty(),
+            "{source}: {:?}",
+            result.diagnostics
+        );
+        !result.text.is_empty()
+    }
+
     #[test]
     fn expands_object_like_macros() {
         // Nested and spaced replacement lists are expanded in place.
@@ -534,6 +546,88 @@ mod tests {
             preprocess_str("#define A 1\n#if A\nfoo\n#endif\n").text,
             "foo"
         );
+    }
+
+    #[test]
+    fn evaluates_arithmetic_and_precedence() {
+        assert!(condition("1 + 1"));
+        assert!(condition("7 / 2 == 3"));
+        assert!(condition("7 % 2 == 1"));
+        assert!(condition("1 + 2 * 3 == 7"));
+        assert!(condition("(1 + 2) * 3 == 9"));
+        assert!(condition("10 - 3 - 2 == 5"));
+        assert!(condition("1 << 2 + 1 == 8"));
+    }
+
+    #[test]
+    fn evaluates_bitwise_operators() {
+        assert!(condition("(6 & 3) == 2"));
+        assert!(condition("(6 | 3) == 7"));
+        assert!(condition("(6 ^ 3) == 5"));
+        assert!(condition("~0 == -1"));
+        assert!(condition("(1 << 4) == 16"));
+        assert!(condition("(16 >> 4) == 1"));
+    }
+
+    #[test]
+    fn evaluates_comparisons_and_logic() {
+        assert!(condition("1 < 2 && 2 <= 2"));
+        assert!(condition("3 > 2 && 3 >= 3"));
+        assert!(condition("1 == 1 && 1 != 2"));
+        assert!(condition("0 || 1"));
+        assert!(condition("!0"));
+    }
+
+    #[test]
+    fn evaluates_ternary() {
+        assert!(condition("(1 ? 2 : 3) == 2"));
+        assert!(condition("(0 ? 2 : 3) == 3"));
+        // `?:` is right-associative.
+        assert!(condition("(1 ? 0 : 1 ? 2 : 3) == 0"));
+    }
+
+    #[test]
+    fn short_circuits_dead_operands() {
+        assert!(!condition("0 && (1 / 0)"));
+        assert!(condition("1 || (1 / 0)"));
+        assert!(condition("0 ? (1 / 0) : 1"));
+        assert!(condition("1 ? 1 : (1 / 0)"));
+    }
+
+    #[test]
+    fn evaluates_character_constants() {
+        assert!(condition("'a' == 97"));
+        assert!(condition("'\\n' == 10"));
+        assert!(condition("'\\0' == 0"));
+        assert!(condition("'\\\\' == 92"));
+        assert!(condition("'\\x41' == 65"));
+        assert!(condition("'\\101' == 65"));
+        assert!(condition("'\\xFF' == -1"));
+    }
+
+    #[test]
+    fn evaluates_integer_bases_and_suffixes() {
+        assert!(condition("0x10 == 16"));
+        assert!(condition("0b101 == 5"));
+        assert!(condition("010 == 8"));
+        assert!(condition("1U + 1L + 1UL + 1LL == 4"));
+    }
+
+    #[test]
+    fn reports_division_by_zero() {
+        for input in ["#if 1 / 0\nfoo\n#endif\n", "#if 1 % 0\nfoo\n#endif\n"] {
+            let result = preprocess_str(input);
+            assert!(!result.diagnostics.is_empty(), "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn reports_invalid_integer_suffixes() {
+        for condition in ["1lll", "1lul", "12abc"] {
+            let input = format!("#if {condition}\nfoo\n#endif\n");
+            let result = preprocess_str(&input);
+            assert!(!result.diagnostics.is_empty(), "{condition}");
+        }
     }
 
     #[test]
