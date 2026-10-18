@@ -1,4 +1,7 @@
-use dt_tools_lowering::{db::BaseDb, includes::document_deps};
+use dt_tools_lowering::{
+    db::BaseDb,
+    expand::{expand_root, source_file},
+};
 use dt_tools_parser::{
     ast::{self, AstNode},
     cst::NodeKind,
@@ -34,17 +37,17 @@ pub async fn goto_definition(
 
     let offset = position_to_offset(params.position, rope)?;
 
-    let Ok(document_deps) = document_deps(db, file) else {
-        return None;
-    };
+    let expanded = expand_root(db, file).as_ref()?;
 
-    if let Some((_, file)) = document_deps
-        .included_files(db)
-        .iter()
-        .find(|(text_range, _)| text_range.byte_range().contains(&offset))
-    {
+    let edge = expanded.includes.iter().find(|edge| {
+        source_file(db, expanded, edge.span.file) == file
+            && edge.span.text_range.byte_range().contains(&offset)
+    });
+    if let Some(edge) = edge {
+        let target = source_file(db, expanded, edge.file);
+
         return Some(GotoDefinitionResponse::Scalar(Location::new(
-            crate::lsp_utils::file_uri(db, *file),
+            crate::lsp_utils::file_uri(db, target),
             Range {
                 start: Position::new(0, 0),
                 end: Position::new(0, 0),

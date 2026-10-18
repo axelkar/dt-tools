@@ -526,6 +526,7 @@ dependencies = [
  "dt-tools-diagnostic",
  "dt-tools-lint",
  "dt-tools-parser",
+ "dt-tools-preprocessor",
  "expect-test",
  "num-traits",
  "parking_lot",

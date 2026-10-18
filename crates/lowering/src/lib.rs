@@ -1,18 +1,20 @@
 use std::borrow::Cow;
 
-use dt_tools_analyzer::new::outline::AnalyzedToplevel;
 use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
 
-use crate::diag::{Diag, SourceMap};
+use crate::{
+    diag::Diag,
+    expand::{expand_root, expanded_syntax_diagnostics, preprocessor_diagnostics},
+};
 
+mod check_mir_post;
 pub mod codespan_reporting;
 pub mod db;
 pub mod diag;
+pub mod expand;
 mod expr_eval;
-pub mod file;
-// TODO: remove includes / document_deps in favor of new lowering stuff
-mod check_mir_post;
 mod extra_num_traits;
+pub mod file;
 pub mod includes;
 pub mod lowering;
 pub mod macros;
@@ -50,43 +52,13 @@ pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
     Some(Parse::new(db, parse))
 }
 
-#[salsa::tracked]
-pub struct Outline<'db> {
-    #[tracked]
-    #[returns(ref)]
-    pub toplevels: Vec<AnalyzedToplevel>,
-
-    #[tracked]
-    #[returns(ref)]
-    pub diagnostics: Vec<Diagnostic<file::File>>,
-}
-
-// TODO: remove outline in favor of new lowering stuff
-/// Computes an outline composed of [`dt_tools_analyzer::new::outline::AnalyzedToplevel`]s.
-///
-/// Returns `None` if the file doesn't exist.
-#[salsa::tracked]
-pub fn outline(db: &dyn db::BaseDb, file: file::File) -> Option<Outline<'_>> {
-    let parse = parse_file(db, file)?;
-    let file_ast = parse.parse(db).source_file();
-
-    let mut diagnostics = Vec::new();
-    let diag = parking_lot::Mutex::new(&mut diagnostics);
-
-    let toplevels =
-        dt_tools_analyzer::new::outline::analyze_file(&file_ast, file.contents(db), file, &diag);
-
-    tag_diagnostics(&mut diagnostics, concat!(module_path!(), "::outline"));
-
-    Some(Outline::new(db, toplevels, diagnostics))
-}
-
-fn tag_diagnostics<F>(diagnostics: &mut Vec<Diagnostic<F>>, tag: &str) {
+pub(crate) fn tag_diagnostics<F>(diagnostics: &mut [Diagnostic<F>], tag: &str) {
     for diagnostic in diagnostics {
         tag_diagnostic(diagnostic, tag);
     }
 }
-fn tag_diagnostic<F>(diagnostic: &mut Diagnostic<F>, tag: &str) {
+
+pub(crate) fn tag_diagnostic<F>(diagnostic: &mut Diagnostic<F>, tag: &str) {
     use std::fmt::Write;
 
     write!(diagnostic.msg.to_mut(), " [{tag}]").ok();
@@ -162,6 +134,11 @@ pub fn compute_diagnostics(
         );
     }
 
+    if let Some(expanded) = expand_root(db, root_file).as_ref() {
+        diagnostics.extend(preprocessor_diagnostics(db, expanded));
+        diagnostics.extend(expanded_syntax_diagnostics(db, root_file));
+    }
+
     let mut processed_files = if let Some(result) = lowering::lower_root_file(db, root_file) {
         diagnostics.extend_from_slice(result.diagnostics(db));
 
@@ -178,9 +155,6 @@ pub fn compute_diagnostics(
     for file in &processed_files {
         if let Some(parse) = parse_file(db, *file) {
             let parse = parse.parse(db);
-
-            let map = SourceMap::File(*file);
-            emit_parse_errors(parse, &mut Diag::new(&mut diagnostics, &map));
 
             for mut lint in
                 dt_tools_lint::default_lint(&parse.source_file(), file.contents(db), *file)
@@ -213,28 +187,5 @@ mod tests {
 
         assert_eq!(&parse.lex_errors, &[]);
         assert_eq!(&parse.errors, &[]);
-    }
-
-    #[test]
-    fn test_outline() {
-        let db = crate::db::BaseDatabase::default();
-        let file_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("test_data/including.dts");
-        let file = db.get_files().get_file(&db, &file_path);
-
-        let outline = outline(&db, file).expect("Should be a readable file");
-
-        assert_eq!(outline.diagnostics(&db), &[]);
-        let toplevels = outline.toplevels(&db);
-        assert!(
-            matches!(
-                toplevels.as_slice(),
-                &[
-                    AnalyzedToplevel::Include(_),
-                    AnalyzedToplevel::PreprocessorConditional { .. },
-                    AnalyzedToplevel::Include(_)
-                ]
-            ),
-            "toplevels are not as expected: {toplevels:#?}"
-        );
     }
 }

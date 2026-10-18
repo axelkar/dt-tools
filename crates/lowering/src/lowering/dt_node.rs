@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
+use dt_tools_diagnostic::{Diagnostic, Severity, SpanLabel};
 use dt_tools_parser::{
     ast::{
         self, AstNode, AstToken, HasDtPhandle, HasLabels, HasMacroInvocation, HasName,

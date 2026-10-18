@@ -15,6 +15,7 @@ use dt_tools_lowering::{
     db::{BaseDatabase, BaseDb},
     diag::{Diag, SourceMap},
     emit_parse_errors,
+    expand::{expand_root, expanded_syntax_diagnostics, preprocessor_diagnostics},
     includes::IncludeDirs,
     lowering::lower_root_file,
     parse_file,
@@ -68,6 +69,8 @@ enum Command {
     Lint {},
     /// Lower a DTS file to MIR and show diagnostics
     Mir { file: Utf8PathBuf },
+    /// Preprocess a DTS file and show the expanded text and diagnostics
+    Expand { file: Utf8PathBuf },
     /// Check many DTS files for errors with a single Salsa database for reuse
     CheckMany {
         /// One or more DTS files to check
@@ -134,6 +137,7 @@ fn main() -> Result<()> {
         Command::Parse { file } => cmd_parse(&file)?,
         Command::Lint {} => todo!(),
         Command::Mir { file } => cmd_mir(&file, &workspace)?,
+        Command::Expand { file } => cmd_expand(&file, &workspace)?,
         Command::CheckMany {
             files,
             do_print_diagnostics,
@@ -167,6 +171,34 @@ fn cmd_parse(file: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+fn cmd_expand(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
+    let abs_path = file
+        .canonicalize_utf8()
+        .wrap_err_with(|| format!("File {file} doesn't exist"))?;
+    let db = BaseDatabase::default();
+
+    let include_dirs: Vec<Utf8PathBuf> = workspace.config.include_dirs.clone();
+    IncludeDirs::new(&db, include_dirs);
+
+    let root_file = db.get_files().get_file(&db, &abs_path);
+    let expanded = expand_root(&db, root_file)
+        .as_ref()
+        .ok_or_eyre("File does not exist or is not readable")?;
+
+    eprintln!("{} {}", "Preprocessed".green().bold(), file);
+    println!("{}\n{}", "Preprocessing output:".cyan(), expanded.text);
+
+    let mut diagnostics = preprocessor_diagnostics(&db, expanded);
+    diagnostics.extend(expanded_syntax_diagnostics(&db, root_file));
+
+    println!("{}", "\nDiagnostics:".red());
+    if print_diagnostics(diagnostics, &db)? {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
 fn cmd_mir(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
     let abs_path = file
         .canonicalize_utf8()
@@ -185,7 +217,7 @@ fn cmd_mir(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
     eprintln!("{} diagnostics and MIR", "  Computed".green().bold());
     print!("{}{}", "MIR:\n".cyan(), result.mir(&db).display(&db));
 
-    println!("{}", "Diagnostics".red());
+    println!("{}", "\nDiagnostics:".red());
     if print_diagnostics(diagnostics.clone(), &db)? {
         std::process::exit(1);
     }
