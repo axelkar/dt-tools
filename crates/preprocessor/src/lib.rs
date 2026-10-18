@@ -225,6 +225,46 @@ mod tests {
     }
 
     #[test]
+    fn expands_named_variadic_macros() {
+        // GNU allows naming the variadic parameter instead of writing `__VA_ARGS__`.
+        assert_eq!(
+            preprocess_str("#define F(x, y...) x y\nF(1, 2, 3)\n").text,
+            "1 2, 3"
+        );
+        assert_eq!(preprocess_str("#define V(y...) y\nV(1, 2)\n").text, "1, 2");
+        assert_eq!(
+            preprocess_str("#define S(x, y...) #y\nS(1, 2, 3)\n").text,
+            "\"2, 3\""
+        );
+        assert_eq!(
+            preprocess_str("#define C(x, y...) x, ## y\nC(1)\n").text,
+            "1"
+        );
+        assert_eq!(
+            preprocess_str("#define C(x, y...) x, ## y\nC(1, 2)\n").text,
+            "1, 2"
+        );
+        // A space between the name and `...` is allowed.
+        assert_eq!(
+            preprocess_str("#define F(x, y ...) y\nF(1, 2, 3)\n").text,
+            "2, 3"
+        );
+        // `__VA_ARGS__` is only the variadic operand when the parameter is unnamed.
+        assert_eq!(
+            preprocess_str("#define H(x, y...) x __VA_ARGS__\nH(1, 2)\n").text,
+            "1 __VA_ARGS__"
+        );
+    }
+
+    #[test]
+    fn reports_bad_named_variadic_parameters() {
+        for input in ["#define F(y, y...) y\n", "#define F(a..., b) a\n"] {
+            let result = preprocess_str(input);
+            assert!(!result.diagnostics.is_empty(), "input: {input:?}");
+        }
+    }
+
+    #[test]
     fn prescans_variadic_arguments() {
         assert_eq!(
             preprocess_str("#define A 1\n#define F(...) __VA_ARGS__\nF(A, 2)\n").text,

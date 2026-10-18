@@ -38,8 +38,8 @@ struct SubstitutionInfo<'a> {
     expanded_varargs: &'a [MacroToken],
     /// Whether the macro is function-like.
     is_function_like: bool,
-    /// Whether the macro takes `...`.
-    is_variadic: bool,
+    /// The variadic parameter's name, or `None` if the macro is not variadic.
+    variadic_param: Option<&'a str>,
 }
 
 impl SubstitutionInfo<'_> {
@@ -75,7 +75,7 @@ fn arguments_to_expand(
     replacement: &[PpToken],
     params: &[String],
     fixed: usize,
-    is_variadic: bool,
+    variadic_param: Option<&str>,
     cleaned: &str,
 ) -> (Vec<bool>, bool) {
     let mut params_to_expand = vec![false; fixed];
@@ -84,7 +84,7 @@ fn arguments_to_expand(
     for (index, token) in replacement.iter().enumerate() {
         let text = token.text(cleaned);
         let param = params.iter().position(|param| param == text);
-        let is_varargs = is_variadic && text == "__VA_ARGS__";
+        let is_varargs = variadic_param == Some(text);
         if param.is_none() && !is_varargs {
             continue;
         }
@@ -227,11 +227,11 @@ impl<'a> SubstitutionBuilder<'a> {
             // GNU comma elision: `, ## __VA_ARGS__`.
             if token.kind == PpTokenKind::Punct
                 && text == ","
-                && info.is_variadic
+                && info.variadic_param.is_some()
                 && is_punct_token(info.replacement.get(index + 1), "##", self.cleaned)
                 && info.replacement.get(index + 2).is_some_and(|operand| {
                     operand.kind == PpTokenKind::Ident
-                        && operand.text(self.cleaned) == "__VA_ARGS__"
+                        && Some(operand.text(self.cleaned)) == info.variadic_param
                 })
             {
                 let operand = info.replacement[index + 2];
@@ -263,7 +263,7 @@ impl<'a> SubstitutionBuilder<'a> {
                 } else {
                     self.argument(&info.expanded_arguments[param], token);
                 }
-            } else if info.is_variadic && text == "__VA_ARGS__" {
+            } else if Some(text) == info.variadic_param {
                 if info.adjacent_to_paste(index, self.cleaned) {
                     self.paste_operand(info.raw_varargs, token);
                 } else {
@@ -288,7 +288,7 @@ impl<'a> SubstitutionBuilder<'a> {
 
         let argument = if let Some(param) = substitution.parameter(operand_text) {
             &substitution.raw_arguments[param]
-        } else if substitution.is_variadic && operand_text == "__VA_ARGS__" {
+        } else if Some(operand_text) == substitution.variadic_param {
             substitution.raw_varargs
         } else {
             return Err("`#` must be followed by a macro parameter".to_owned());
@@ -394,7 +394,7 @@ impl Expander<'_> {
         name: &str,
         replacement: &[PpToken],
         params: &[String],
-        is_variadic: bool,
+        variadic_param: Option<&str>,
         args: Arguments,
         stream: &mut TokenStream<'_>,
         cleaned: &str,
@@ -409,7 +409,7 @@ impl Expander<'_> {
             raw_arguments.clear();
         }
 
-        if is_variadic {
+        if variadic_param.is_some() {
             if raw_arguments.len() < fixed {
                 self.report(
                     Severity::Error,
@@ -431,7 +431,7 @@ impl Expander<'_> {
         }
 
         let (params_to_expand, varargs_to_expand) =
-            arguments_to_expand(replacement, params, fixed, is_variadic, cleaned);
+            arguments_to_expand(replacement, params, fixed, variadic_param, cleaned);
         let expanded_arguments: Vec<Vec<MacroToken>> = raw_arguments
             .iter()
             .enumerate()
@@ -450,12 +450,12 @@ impl Expander<'_> {
             .collect();
 
         // `#` and `##` operands are not prescanned, so they use the raw argument tokens.
-        let raw_varargs = if is_variadic {
+        let raw_varargs = if variadic_param.is_some() {
             join_varargs(&raw_arguments[fixed..], &commas, fixed)
         } else {
             Vec::new()
         };
-        let expanded_varargs = if is_variadic {
+        let expanded_varargs = if variadic_param.is_some() {
             join_varargs(&expanded_arguments[fixed..], &commas, fixed)
         } else {
             Vec::new()
@@ -469,7 +469,7 @@ impl Expander<'_> {
             raw_varargs: &raw_varargs,
             expanded_varargs: &expanded_varargs,
             is_function_like: true,
-            is_variadic,
+            variadic_param,
         };
 
         let hide = extend_hide(invocation.hide.as_ref(), name);
@@ -506,7 +506,7 @@ pub(super) fn substitute_object_like(
         raw_varargs: &[],
         expanded_varargs: &[],
         is_function_like: false,
-        is_variadic: false,
+        variadic_param: None,
     };
     let mut builder = SubstitutionBuilder::new(cleaned, hide, depth, substitution_info);
     builder.substitute();

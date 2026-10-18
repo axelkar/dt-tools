@@ -13,8 +13,10 @@ pub(crate) enum MacroKind {
     Function {
         /// Parameter names in order.
         params: Vec<String>,
-        /// Whether the macro takes `...`.
-        is_variadic: bool,
+        /// The variadic parameter's name, or `None` when the macro is not variadic.
+        ///
+        /// `__VA_ARGS__` for `...`, or the name in GNU `name...`.
+        variadic_param: Option<String>,
     },
 }
 

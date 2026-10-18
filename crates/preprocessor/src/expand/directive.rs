@@ -262,13 +262,13 @@ where
         }
 
         let mut params = Vec::new();
-        let mut is_variadic = false;
+        let mut variadic_param = None;
 
         if is_punct_token(self.peek_arg(), ")", &self.files.cleaned) {
             self.argument_pos += 1;
             return Some(MacroKind::Function {
                 params,
-                is_variadic,
+                variadic_param,
             });
         }
 
@@ -276,7 +276,7 @@ where
             let token = self.next_arg_or_err("unterminated macro parameter list")?;
 
             if is_punct_token(Some(token), "...", &self.files.cleaned) {
-                is_variadic = true;
+                variadic_param = Some("__VA_ARGS__".to_owned());
             } else if token.kind == PpTokenKind::Ident {
                 let name = token.text(&self.files.cleaned);
                 if params.iter().any(|param| param == name) {
@@ -302,10 +302,39 @@ where
             if is_punct_token(Some(separator), ")", &self.files.cleaned) {
                 return Some(MacroKind::Function {
                     params,
-                    is_variadic,
+                    variadic_param,
+                });
+            } else if is_punct_token(Some(separator), "...", &self.files.cleaned)
+                && variadic_param.is_none()
+            {
+                // GNU named variadic: the identifier before `...` is the variadic parameter.
+                let name = params.pop()?;
+                if params.contains(&name) {
+                    self.expander.report(
+                        Severity::Error,
+                        format!("duplicate macro parameter `{name}`"),
+                        separator.orig.within_file(separator.file),
+                    );
+                    return None;
+                }
+                variadic_param = Some(name);
+
+                let rparen = self.next_arg_or_err("expected `)` after `...`")?;
+                if !is_punct_token(Some(rparen), ")", &self.files.cleaned) {
+                    self.expander.report(
+                        Severity::Error,
+                        "expected `)` after `...`".to_owned(),
+                        rparen.orig.within_file(rparen.file),
+                    );
+                    return None;
+                }
+
+                return Some(MacroKind::Function {
+                    params,
+                    variadic_param,
                 });
             } else if is_punct_token(Some(separator), ",", &self.files.cleaned) {
-                if is_variadic {
+                if variadic_param.is_some() {
                     self.expander.report(
                         Severity::Error,
                         "`...` must be the last parameter".to_owned(),

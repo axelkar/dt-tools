@@ -188,7 +188,7 @@ impl Expander<'_> {
                 }
                 MacroKind::Function {
                     params,
-                    is_variadic,
+                    variadic_param,
                 } => {
                     let next = stream.peek();
 
@@ -205,7 +205,7 @@ impl Expander<'_> {
                         name,
                         &definition.replacement,
                         params,
-                        *is_variadic,
+                        variadic_param.as_deref(),
                         stream,
                         cleaned,
                     );
@@ -274,7 +274,7 @@ impl Expander<'_> {
         name: &str,
         replacement: &[PpToken],
         params: &[String],
-        is_variadic: bool,
+        variadic_param: Option<&str>,
         stream: &mut TokenStream<'_>,
         cleaned: &str,
     ) {
@@ -296,7 +296,7 @@ impl Expander<'_> {
             name,
             replacement,
             params,
-            is_variadic,
+            variadic_param,
             args,
             stream,
             cleaned,

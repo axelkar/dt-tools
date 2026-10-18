@@ -861,12 +861,21 @@ const MACRO_EDGE_CASES: &[&str] = &[
     "#define F(a, ...) a, ## __VA_ARGS__\nF(1)\n",
     "#define F(a, ...) a, ## __VA_ARGS__\nF(1, 2)\n",
     "#define F(a, ...) a, ## __VA_ARGS__\nF(1,)\n",
+    // GNU named variadic parameters.
+    "#define F(a, b...) a b\nF(1, 2, 3)\n",
+    "#define V(b...) b\nV(1, 2)\n",
+    "#define S(a, b...) #b\nS(1, 2, 3)\n",
+    "#define C(a, b...) a, ## b\nC(1)\nC(1, 2)\n",
+    "#define F(a, b ...) b\nF(1, 2, 3)\n",
+    "#define H(a, b...) a __VA_ARGS__\nH(1, 2)\n",
     // Malformed directives and invocations.
     "#define\n",
     "#undef\n",
     "#define 1 A\n",
     "#define F(a, b) a b\nF(1)\n",
     "#define F(x) x\nF(1\n",
+    "#define F(y, y...) y\nF(1)\n",
+    "#define F(a..., b) a\nF(1, 2)\n",
 ];
 
 /// Hand-picked inputs covering conditional directives.
