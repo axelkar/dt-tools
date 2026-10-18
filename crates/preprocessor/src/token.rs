@@ -25,7 +25,10 @@ pub struct PpToken {
 }
 
 impl PpToken {
-    /// Returns the token's spelling in `cleaned`.
+    /// Returns the token's text in `cleaned`.
+    ///
+    /// Compared to the token's text in the original file, this has
+    /// for example line continuations removed.
     #[must_use]
     pub fn text<'a>(&self, cleaned: &'a str) -> &'a str {
         &cleaned[self.cleaned.byte_range()]

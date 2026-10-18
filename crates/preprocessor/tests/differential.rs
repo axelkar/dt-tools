@@ -5,7 +5,8 @@ use std::{
     process::{Command, Stdio},
 };
 
-use dt_tools_preprocessor::{PpTokenKind, lex};
+use camino::Utf8Path;
+use dt_tools_preprocessor::{PpTokenKind, PreprocessorConfig, lex, preprocess};
 use logos::Logos;
 
 /// Fixed seed, so the generated corpus is identical on every run.
@@ -114,6 +115,48 @@ const EDGE_CASES: &[&str] = &[
     "a /* x\n",
 ];
 
+/// Line-sized fragments for the generated macro corpus.
+const MACRO_FRAGMENTS: &[&str] = &[
+    "#define A 1\n",
+    "#define B A\n",
+    "#define C 2\n",
+    "#undef A\n",
+    "#undef B\n",
+    "\n",
+    "A\n",
+    "B\n",
+    "C\n",
+    "A B\n",
+    "A + B\n",
+    "A;A\n",
+    "x = A;\n",
+    "A/*c*/B\n",
+];
+
+/// Hand-picked inputs covering macro edge cases.
+const MACRO_EDGE_CASES: &[&str] = &[
+    "#define A 1\nA\n",
+    "#define A B\n#define B 2\nA\n",
+    "#define A A\nA\n",
+    "#define A B\n#define B A\nA\n",
+    "#define A\nA x\n",
+    "#define A 1\n#undef A\nA\n",
+    "#define A foo bar\nA\n",
+    "#define A 1\nA A\n",
+    "#define A 1 A\nA\n",
+    "#define PLUS +\nPLUS PLUS\n",
+    "#define SLASH /\nSLASH*\n",
+    "#define D .\nD D D\n",
+    "#define cells 4\n/ { #size-cells = <1>; };\n",
+    "#define A 1 // c\nA\n",
+    "#define A 12\\\n3\nA\n",
+    "#define A &gpio1\nx = A;\n",
+    "  #define A 1\n  A\n",
+    "#define\n",
+    "#undef\n",
+    "#define 1 A\n",
+];
+
 /// A preprocessor to compare against.
 struct Cpp {
     program: String,
@@ -190,13 +233,24 @@ fn raw_tokens(text: &str) -> Vec<(PpTokenKind, String)> {
     tokens
 }
 
-/// Asserts that our cleaned text matches the preprocessors when they agree.
-fn check_consensus(cpps: &[Cpp], input: &str, index: usize) {
-    if cpps.is_empty() {
-        return;
-    }
+/// The preprocessors' verdict on one input.
+enum Consensus {
+    /// Every preprocessor rejected the input.
+    Rejected,
+    /// Every preprocessor produced the same tokens.
+    Tokens {
+        expected: Vec<(PpTokenKind, String)>,
+        output: String,
+    },
+    /// The preprocessors disagree, so there is no oracle.
+    Disagreement,
+}
 
-    let cleaned = lex(input);
+/// Collects the preprocessors' consensus for `input`.
+fn consensus(cpps: &[Cpp], input: &str, index: usize, label: &str) -> Consensus {
+    if cpps.is_empty() {
+        return Consensus::Disagreement;
+    }
 
     // Clang appends a NUL when the input ends with a line continuation. The C standard calls
     // that undefined behavior, so ignore it.
@@ -208,35 +262,86 @@ fn check_consensus(cpps: &[Cpp], input: &str, index: usize) {
 
     if outputs.len() != cpps.len() {
         if outputs.is_empty() {
-            // If every preprocessor rejected the input, we must reject it too.
-            assert!(
-                !cleaned.errors.is_empty(),
-                "every preprocessor rejected the input but we did not\n--- input ---\n{input}",
-            );
-        } else {
-            // A mix is a disagreement, so there is no oracle.
-            eprintln!("skipping input {index}: preprocessors disagree");
+            return Consensus::Rejected;
         }
-        return;
+        // A mix is a disagreement, so there is no oracle.
+        eprintln!("skipping {label} input {index}: preprocessors disagree");
+        return Consensus::Disagreement;
     }
 
-    let expected = raw_tokens(&outputs[0]);
+    let output = outputs[0].clone();
+    let expected = raw_tokens(&output);
     if outputs
         .iter()
         .skip(1)
         .any(|output| raw_tokens(output) != expected)
     {
-        eprintln!("skipping input {index}: preprocessors disagree");
-        return;
+        eprintln!("skipping {label} input {index}: preprocessors disagree");
+        return Consensus::Disagreement;
     }
 
-    assert_eq!(
-        raw_tokens(&cleaned.cleaned_text),
-        expected,
-        "token sequence mismatch at index {index}\n--- input ---\n{input}\n--- cleaned ---\n{}\n--- cpp output ---\n{}",
-        cleaned.cleaned_text,
-        outputs[0]
-    );
+    Consensus::Tokens { expected, output }
+}
+
+/// Asserts that our cleaned text matches the preprocessors when they agree.
+fn check_consensus(cpps: &[Cpp], input: &str, index: usize) {
+    let cleaned = lex(input);
+
+    match consensus(cpps, input, index, "cleaned") {
+        Consensus::Rejected => {
+            // If every preprocessor rejected the input, we must reject it too.
+            assert!(
+                !cleaned.errors.is_empty(),
+                "every preprocessor rejected the input but we did not\n--- input ---\n{input}",
+            );
+        }
+        Consensus::Tokens { expected, output } => {
+            assert_eq!(
+                raw_tokens(&cleaned.cleaned_text),
+                expected,
+                "token sequence mismatch at index {index}\n--- input ---\n{input}\n--- cleaned ---\n{}\n--- cpp output ---\n{output}",
+                cleaned.cleaned_text,
+            );
+        }
+        Consensus::Disagreement => {}
+    }
+}
+
+/// Returns our preprocessing result for `input`.
+fn preprocess_input(input: &str) -> dt_tools_preprocessor::PreprocessedRoot {
+    preprocess(
+        Utf8Path::new("test.dts"),
+        &PreprocessorConfig::default(),
+        |_| Some(input.to_owned()),
+    )
+}
+
+/// Asserts that our expanded text matches the preprocessors when they agree.
+fn check_expanded_consensus(cpps: &[Cpp], input: &str, index: usize) {
+    let result = preprocess_input(input);
+
+    match consensus(cpps, input, index, "expanded") {
+        Consensus::Rejected => {
+            assert!(
+                !result.diagnostics.is_empty(),
+                "every preprocessor rejected the input but we did not\n--- input ---\n{input}",
+            );
+        }
+        Consensus::Tokens { expected, output } => {
+            assert!(
+                result.diagnostics.is_empty(),
+                "unexpected diagnostics at index {index}, other preprocessors succeeded and agreed\n--- input ---\n{input}\n--- diagnostics ---\n{:?}\n--- cpp output ---\n{output}",
+                result.diagnostics
+            );
+            assert_eq!(
+                raw_tokens(&result.text),
+                expected,
+                "expanded token sequence mismatch at index {index}\n--- input ---\n{input}\n--- ours ---\n{}\n--- cpp output ---\n{output}",
+                result.text,
+            );
+        }
+        Consensus::Disagreement => {}
+    }
 }
 
 /// A deterministic xorshift64* PRNG.
@@ -279,25 +384,47 @@ impl Xorshift64Star {
     }
 }
 
-/// Deterministic input generator from [`FRAGMENTS`].
+/// Deterministic input generator from a fragment list.
 struct Generator {
     prng: Xorshift64Star,
+    fragments: &'static [&'static str],
 }
 
 impl Generator {
-    fn new() -> Self {
+    fn new(fragments: &'static [&'static str]) -> Self {
         Self {
             prng: Xorshift64Star::new(SEED),
+            fragments,
         }
     }
 
     fn input(&mut self) -> String {
         let count = 1 + self.prng.below(40);
+        let fragment_count = self.fragments.len();
         let mut input = String::new();
         for _ in 0..count {
-            input.push_str(FRAGMENTS[self.prng.below(FRAGMENTS.len())]);
+            let index = self.prng.below(fragment_count);
+            input.push_str(self.fragments[index]);
         }
         input
+    }
+}
+
+/// Returns the number of generated inputs to run.
+fn iterations() -> usize {
+    std::env::var("PREPROCESSOR_DIFFERENTIAL_ITERS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(DEFAULT_ITERATIONS)
+}
+
+/// Checks a deterministic generated corpus against the available preprocessors.
+#[test]
+fn generated() {
+    let cpps = Cpp::available();
+    let mut generator = Generator::new(FRAGMENTS);
+    for index in 0..iterations() {
+        check_consensus(&cpps, &generator.input(), index);
     }
 }
 
@@ -310,40 +437,21 @@ fn edge_cases() {
     }
 }
 
-/// Checks a deterministic generated corpus against the available preprocessors.
+/// Checks a deterministic generated macro corpus against the available preprocessors.
 #[test]
-fn generated() {
-    let iterations = std::env::var("PREPROCESSOR_DIFFERENTIAL_ITERS")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(DEFAULT_ITERATIONS);
-
+fn generated_macros() {
     let cpps = Cpp::available();
-    let mut generator = Generator::new();
-    for index in 0..iterations {
-        check_consensus(&cpps, &generator.input(), index);
+    let mut generator = Generator::new(MACRO_FRAGMENTS);
+    for index in 0..iterations() {
+        check_expanded_consensus(&cpps, &generator.input(), index);
     }
 }
 
-/// Checks that we and cpp agree on which inputs are rejected.
+/// Checks every hand-picked macro edge case against the available preprocessors.
 #[test]
-fn errors_on_both_sides() {
-    // cpp in assembler mode tolerates unterminated strings but rejects unterminated comments.
-    let cases = [("x = \"abc\n", false), ("a /* unterminated", true)];
-
-    for cpp in Cpp::available() {
-        for (input, rejected) in cases {
-            assert_eq!(
-                cpp.run(input).is_err(),
-                rejected,
-                "{} verdict on:\n{input}",
-                cpp.program
-            );
-            assert_eq!(
-                !lex(input).errors.is_empty(),
-                rejected,
-                "our verdict on:\n{input}"
-            );
-        }
+fn macro_edge_cases() {
+    let cpps = Cpp::available();
+    for (index, input) in MACRO_EDGE_CASES.iter().enumerate() {
+        check_expanded_consensus(&cpps, input, index);
     }
 }
