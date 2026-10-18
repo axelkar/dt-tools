@@ -3,6 +3,7 @@ use std::fmt::Write;
 use dt_tools_diagnostic::Span;
 use dt_tools_lowering::{
     db::BaseDb,
+    expand::{expand_root, source_file},
     file::File,
     lowering::lower_root_file,
     mir::{MirDefinition, MirDefinitionValue},
@@ -59,14 +60,16 @@ pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
 
     let cst_tree_section = cst_tree_section(db, file, offset);
     let mir_definition_section = mir_definition_section(db, root_file, file, offset);
-    let env_section = env_section(db, root_file, file, offset);
+    let macro_section = macro_section(db, root_file, file, offset);
+    let label_section = label_section(db, root_file, file, offset);
     let include_section = include_section(db, root_file, file, offset);
     let phandle_section = phandle_section(db, root_file, file, offset);
 
     let section_strs = [
         cst_tree_section.as_ref(),
         mir_definition_section.as_ref(),
-        env_section.as_ref(),
+        macro_section.as_ref(),
+        label_section.as_ref(),
         include_section.as_ref(),
         phandle_section.as_ref(),
     ]
@@ -77,7 +80,8 @@ pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
 
     let text_range = [
         mir_definition_section.as_ref(),
-        env_section.as_ref(),
+        macro_section.as_ref(),
+        label_section.as_ref(),
         include_section.as_ref(),
         cst_tree_section.as_ref(),
     ]
@@ -232,8 +236,25 @@ fn fmt_span(db: &dyn BaseDb, span: &Span<File>, is_here: bool, s: &mut String) {
     }
 }
 
-/// Shows env definitions
-fn env_section(
+/// Shows macro definitions from the preprocessor.
+fn macro_section(
+    db: &dyn BaseDb,
+    root_file: File,
+    file: File,
+    offset: usize,
+) -> Option<(String, TextRange)> {
+    let expanded = expand_root(db, root_file).as_ref()?;
+
+    let def = expanded.macro_defs.iter().find(|def| {
+        source_file(db, expanded, def.span.file) == file
+            && def.span.text_range.byte_range().contains(&offset)
+    })?;
+
+    Some((format!("Macro `{}`", def.name), def.span.text_range))
+}
+
+/// Shows label definitions.
+fn label_section(
     db: &dyn BaseDb,
     root_file: File,
     file: File,
@@ -244,52 +265,35 @@ fn env_section(
     let mut env = result.env_after(db).to_mut();
     env.flatten_ancestors(db);
 
-    let macro_ = env
-        .own_macro_map
-        .iter()
-        .filter_map(|(key, opt)| Some((key, opt.as_ref()?)))
-        .find(|(_, (_, span))| span.file == file && span.text_range.byte_range().contains(&offset))
-        .map(|(name, (_def, span))| (format!("Macro `{name}`"), span.text_range));
-
-    let label = env
+    let (name, (_, span)) = env
         .own_label_map
         .iter()
         .filter_map(|(key, opt)| Some((key, opt.as_ref()?)))
-        .find(|(_, (_, span))| span.file == file && span.text_range.byte_range().contains(&offset))
-        .map(|(name, (_path, span))| (format!("Label `{name}`"), span.text_range));
+        .find(|(_, (_, span))| {
+            span.file == file && span.text_range.byte_range().contains(&offset)
+        })?;
 
-    let text_range = macro_
-        .as_ref()
-        .map(|tup| tup.1)
-        .or_else(|| label.as_ref().map(|tup| tup.1))?;
-
-    Some((
-        [macro_, label]
-            .into_iter()
-            .flatten()
-            .map(|tup| tup.0)
-            .collect_vec()
-            .join("\n---\n"),
-        text_range,
-    ))
+    Some((format!("Label `{name}`"), span.text_range))
 }
 
+/// Shows resolved includes from the preprocessor.
 fn include_section(
     db: &dyn BaseDb,
     root_file: File,
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
-    let result = lower_root_file(db, root_file)?;
+    let expanded = expand_root(db, root_file).as_ref()?;
 
-    let include = result
-        .includes(db)
-        .iter()
-        .find(|(_, span)| span.file == file && span.text_range.byte_range().contains(&offset))?;
+    let edge = expanded.includes.iter().find(|edge| {
+        source_file(db, expanded, edge.span.file) == file
+            && edge.span.text_range.byte_range().contains(&offset)
+    })?;
+    let target = source_file(db, expanded, edge.file);
 
     Some((
-        format!("Resolved include: `{}`", include.0.path(db)),
-        include.1.text_range,
+        format!("Resolved include: `{}`", target.path(db)),
+        edge.span.text_range,
     ))
 }
 
@@ -302,4 +306,37 @@ fn phandle_section(
     // TODO
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use camino::Utf8PathBuf;
+    use dt_tools_lowering::{
+        db::{BaseDatabase, BaseDb},
+        includes::IncludeDirs,
+    };
+
+    use super::{include_section, macro_section};
+
+    #[test]
+    fn shows_preprocessor_macros_and_includes() {
+        let db = BaseDatabase::default();
+        IncludeDirs::new(&db, Vec::new());
+        let contents = "#define FOO 1\n#include \"a.dtsi\"\n/ { x = <FOO>; };\n";
+        let root =
+            db.get_files()
+                .add_virtual(&db, Utf8PathBuf::from("/main.dts"), contents.to_owned());
+        db.get_files()
+            .add_virtual(&db, Utf8PathBuf::from("/a.dtsi"), String::new());
+
+        let macro_offset = contents.find("FOO").expect("macro name");
+        let (macro_info, _) =
+            macro_section(&db, root, root, macro_offset).expect("macro definition");
+        assert_eq!(macro_info, "Macro `FOO`");
+
+        let include_offset = contents.find("#include").expect("include directive");
+        let (include_info, _) =
+            include_section(&db, root, root, include_offset).expect("include directive");
+        assert_eq!(include_info, "Resolved include: `/a.dtsi`");
+    }
 }
