@@ -170,7 +170,7 @@ impl<'t, 'input> Source<'t, 'input> {
     }
 
     pub(super) fn skip_trivia(&mut self) {
-        let _span = tracy_client::span!("parser::Source::skip_trivia");
+        profiling::scope!("parser::Source::skip_trivia");
 
         while self
             .tokens
@@ -199,7 +199,7 @@ impl<'t, 'input> Source<'t, 'input> {
     /// Returns None at end of input.
     #[inline]
     pub(super) fn peek_kind_immediate(&mut self) -> Option<TokenKind> {
-        let _span = tracy_client::span!("parser::Source::peek_kind_immediate");
+        profiling::scope!("parser::Source::peek_kind_immediate");
 
         self.steps += 1;
 

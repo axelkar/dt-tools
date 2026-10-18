@@ -54,7 +54,7 @@ macro_rules! debug {
 ///
 /// e.g. `FOO(bar, 1234)`
 pub(super) fn macro_invocation(p: &mut Parser) {
-    let _span = tracy_client::span!("grammar::macro_invocation");
+    profiling::scope!("grammar::macro_invocation");
 
     let m = p.start();
     assert!(p.eat(TokenKind::Ident));
@@ -165,7 +165,7 @@ impl TokenMatcher for Reference {
 ///
 /// `AT_END`: whether a successful end of cells is determined by a `>` or end of input
 pub(super) fn cells<const AT_END: bool>(p: &mut Parser) -> Result<(), ()> {
-    let _span = tracy_client::span!("grammar::cells");
+    profiling::scope!("grammar::cells");
 
     loop {
         if eat_cell::<AT_END>(p) {
@@ -237,7 +237,7 @@ fn eat_cell<const AT_END: bool>(p: &mut Parser) -> bool {
 ///
 /// [spec]: https://devicetree-specification.readthedocs.io/en/latest/chapter6-source-language.html#node-and-property-definitions
 fn dt_expr(p: &mut Parser) {
-    let _span = tracy_client::span!("grammar::dt_expr");
+    profiling::scope!("grammar::dt_expr");
 
     let m = p.start();
 
@@ -302,7 +302,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
         TokenKind::Ampersand,
     ];
 
-    let _span = tracy_client::span!("grammar::propvalues");
+    profiling::scope!("grammar::propvalues");
 
     while !p.at_end() {
         p.add_expected(Expected::Value);
@@ -357,7 +357,7 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
 ///
 /// - Form: `= "foo", <1>;` | `;`.
 fn dt_property(m: Marker, p: &mut Parser) -> CompletedMarker {
-    let _span = tracy_client::span!("grammar::dt_property");
+    profiling::scope!("grammar::dt_property");
 
     vis!(begin);
     if p.eat(TokenKind::Semicolon) {
@@ -385,7 +385,7 @@ fn dt_property(m: Marker, p: &mut Parser) -> CompletedMarker {
 /// - Form: `{ foo = "bar"; baz {}; };`.
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn dt_node_body(p: &mut Parser, m: Marker) {
-    let _span = tracy_client::span!("grammar::dt_node_body");
+    profiling::scope!("grammar::dt_node_body");
 
     vis!(begin);
     debug!("dt_node_body start");
@@ -424,7 +424,7 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
 
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn item(p: &mut Parser) {
-    let _span = tracy_client::span!("grammar::item");
+    profiling::scope!("grammar::item");
 
     vis!(begin);
     debug!("item start");
@@ -621,7 +621,7 @@ impl TokenMatcher for UnitAddress {
 }
 
 pub(super) fn entry_sourcefile(p: &mut Parser) {
-    let _span = tracy_client::span!("grammar::entry_sourcefile");
+    profiling::scope!("grammar::entry_sourcefile");
 
     while !p.at_end() {
         if p.check(TokenKind::RCurly).silent().at() {

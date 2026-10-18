@@ -588,13 +588,13 @@ dependencies = [
  "notify",
  "owo-colors",
  "pretty_assertions",
+ "profiling",
  "serde_json",
  "smallvec",
  "strum",
  "thiserror",
  "tracing",
  "tracing-subscriber",
- "tracy-client",
 ]
 
 [[package]]

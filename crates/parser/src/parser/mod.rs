@@ -107,12 +107,11 @@ impl Entrypoint {
     /// Parses the input according to the entrypoint.
     #[must_use]
     pub fn parse(self, input: &str) -> Parse<'_> {
-        let span = tracy_client::span!("parser::parse");
-        span.emit_text(&format!("Entrypoint: {self:?}"));
+        profiling::scope!("parser::parse", &format!("Entrypoint: {self:?}"));
 
         // TODO: typesafe Entrypoint -> correct AST struct
         let tokens: Vec<_> = {
-            let _span = tracy_client::span!("parser::parse::lex");
+            profiling::scope!("parser::parse::lex");
             Lexer::new(input).collect()
         };
 
@@ -134,7 +133,7 @@ impl Entrypoint {
         let p = &mut parser;
 
         let root_kind = {
-            let _span = tracy_client::span!("parser::grammar");
+            profiling::scope!("parser::grammar");
             match self {
                 Self::SourceFile => {
                     grammar::entry_sourcefile(p);
@@ -404,7 +403,7 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     #[inline]
     fn bump_name_generic(&mut self, set: &[TokenKind]) {
-        let _span = tracy_client::span!("parser::Parser::bump_name_generic");
+        profiling::scope!("parser::Parser::bump_name_generic");
 
         #[cfg(feature = "grammar-tracing")]
         tracing::info!("bump_name_generic");
@@ -445,7 +444,7 @@ impl<'t, 'input> Parser<'t, 'input> {
     ///
     /// This equals the result of any previous `peek_*` calls
     pub fn bump(&mut self) {
-        let _span = tracy_client::span!("parser::Parser::bump");
+        profiling::scope!("parser::Parser::bump");
 
         self.expected.clear();
 
@@ -528,7 +527,7 @@ impl<'p, 't, 'input, M: TokenMatcher> Check<'p, 't, 'input, M, false> {
 impl<M: TokenMatcher, const SILENT: bool> Check<'_, '_, '_, M, SILENT> {
     /// Tests whether the matcher matches.
     pub fn at(&mut self) -> bool {
-        let _span = tracy_client::span!("parser::Check::at");
+        profiling::scope!("parser::Check::at");
 
         if !SILENT {
             self.matcher.push_expected(self.p);

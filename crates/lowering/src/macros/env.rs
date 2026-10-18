@@ -44,8 +44,7 @@ impl<'db> TrackedMapEnv<'db> {
         db: &'db dyn BaseDb,
         name: InternedKey<'db>,
     ) -> Option<(MacroDefinition, Span<File>)> {
-        let span = profiling::tracy_client::span!("TrackedMapEnv::get_macro");
-        span.emit_text(name.text(db));
+        profiling::scope!("TrackedMapEnv::get_macro", name.text(db));
 
         tracing::trace!(
             name = name.text(db),
@@ -69,8 +68,7 @@ impl<'db> TrackedMapEnv<'db> {
         db: &'db dyn BaseDb,
         name: InternedKey<'db>,
     ) -> Option<MacroDefinition> {
-        let span = profiling::tracy_client::span!("TrackedMapEnv::get_macro_def");
-        span.emit_text(name.text(db));
+        profiling::scope!("TrackedMapEnv::get_macro_def", name.text(db));
 
         tracing::trace!(
             name = name.text(db),
@@ -94,8 +92,7 @@ impl<'db> TrackedMapEnv<'db> {
         db: &'db dyn BaseDb,
         name: InternedKey<'db>,
     ) -> Option<(String, Span<File>)> {
-        let span = profiling::tracy_client::span!("TrackedMapEnv::get_label");
-        span.emit_text(name.text(db));
+        profiling::scope!("TrackedMapEnv::get_label", name.text(db));
 
         tracing::trace!(
             name = name.text(db),
@@ -115,8 +112,7 @@ impl<'db> TrackedMapEnv<'db> {
     /// See [`Self::get_macro`] for details about Salsa integration.
     #[salsa::tracked(returns(as_ref), lru = 512)]
     pub fn get_label_path(self, db: &'db dyn BaseDb, name: InternedKey<'db>) -> Option<String> {
-        let span = profiling::tracy_client::span!("TrackedMapEnv::get_label_path");
-        span.emit_text(name.text(db));
+        profiling::scope!("TrackedMapEnv::get_label_path", name.text(db));
 
         tracing::trace!(
             name = name.text(db),
@@ -183,8 +179,7 @@ impl<'db> TrackedMapEnvMut<'db> {
         db: &'db dyn BaseDb,
         name: &str,
     ) -> Option<&(MacroDefinition, Span<File>)> {
-        let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_macro");
-        span.emit_text(name);
+        profiling::scope!("TrackedMapEnvMut::get_macro", name);
 
         self.own_macro_map
             .get(name)
@@ -201,8 +196,7 @@ impl<'db> TrackedMapEnvMut<'db> {
 
     // Gets a macro definition by name
     pub fn get_macro_def(&self, db: &'db dyn BaseDb, name: &str) -> Option<&MacroDefinition> {
-        let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_macro_def");
-        span.emit_text(name);
+        profiling::scope!("TrackedMapEnvMut::get_macro_def", name);
 
         self.own_macro_map
             .get(name)
@@ -219,8 +213,7 @@ impl<'db> TrackedMapEnvMut<'db> {
 
     // Gets a label by name
     pub fn get_label(&self, db: &'db dyn BaseDb, name: &str) -> Option<&(String, Span<File>)> {
-        let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_label");
-        span.emit_text(name);
+        profiling::scope!("TrackedMapEnvMut::get_label", name);
 
         self.own_label_map
             .get(name)
@@ -237,8 +230,7 @@ impl<'db> TrackedMapEnvMut<'db> {
 
     // Gets a label's path by name
     pub fn get_label_path(&self, db: &'db dyn BaseDb, name: &str) -> Option<&String> {
-        let span = profiling::tracy_client::span!("TrackedMapEnvMut::get_label_path");
-        span.emit_text(name);
+        profiling::scope!("TrackedMapEnvMut::get_label_path", name);
 
         self.own_label_map
             .get(name)
@@ -261,7 +253,7 @@ impl<'db> TrackedMapEnvMut<'db> {
 
     /// Flatten ancestors to `self`, removing any indirection.
     pub fn flatten_ancestors(&mut self, db: &'db dyn BaseDb) {
-        let _span = profiling::tracy_client::span!("TrackedMapEnvMut::flatten_ancestors");
+        profiling::scope!("TrackedMapEnvMut::flatten_ancestors");
 
         let mut macro_map = FxHashMap::default();
         let mut label_map = FxHashMap::default();

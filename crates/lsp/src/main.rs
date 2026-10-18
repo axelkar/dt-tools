@@ -483,6 +483,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Set up profiling
+    #[cfg(feature = "tracy")]
     profiling::tracy_client::Client::start();
     profiling::register_thread!("Main Thread");
 

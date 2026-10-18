@@ -25,7 +25,7 @@ dt-tools-diagnostic = { workspace = true, features = ["codespan-reporting"] }
 displaydoc.workspace = true
 expect-test.workspace = true
 constcat = "0.6.1"
-tracy-client = "0.18.4"
+profiling = "1.0.18"
 
 [dev-dependencies]
 notify = "8.0.0"
@@ -38,6 +38,7 @@ strum.workspace = true
 [features]
 default = []
 grammar-tracing = []
+tracy = ["profiling/profile-with-tracy"]
 visualize = []
 
 [lints]

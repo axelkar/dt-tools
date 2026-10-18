@@ -101,8 +101,7 @@ pub(crate) fn lower_file<'db>(
     parent_is_overlay: bool,
     parent_node_path: String,
 ) -> Option<LoweredFile<'db>> {
-    let span = profiling::tracy_client::span!("lsp::salsa::lowering::lower_file");
-    span.emit_text(file.path(db).as_str());
+    profiling::scope!("lsp::salsa::lowering::lower_file", file.path(db).as_str());
 
     let mut env = TrackedMapEnvMut::from_parent(parent_env);
 
