@@ -2,15 +2,17 @@
 
 mod directive;
 mod rescan;
+mod substitution;
 
 use std::borrow::Cow;
 
 use dt_tools_diagnostic::{Diagnostic, Severity, text_range::TextRange};
+pub(crate) use rescan::MacroToken;
 
 use crate::{
     config::PreprocessorConfig,
     env::{MacroEnv, MacroKind},
-    expand::rescan::{HideSet, MacroToken, TokenStream, extend_hide, union_hide},
+    expand::rescan::{TokenStream, extend_hide},
     files::SourceId,
     lexer::PpTokenKind,
     output::MacroDefSite,
@@ -19,7 +21,7 @@ use crate::{
 
 /// The token stream after directives are handled and macros are expanded.
 pub(crate) struct Expansion {
-    pub(crate) tokens: Vec<PpToken>,
+    pub(crate) tokens: Vec<MacroToken>,
     pub(crate) macro_defs: Vec<MacroDefSite>,
     pub(crate) diagnostics: Vec<Diagnostic<SourceId>>,
 }
@@ -67,11 +69,7 @@ pub(crate) fn expand(
     }
 
     Expansion {
-        tokens: expander
-            .tokens
-            .into_iter()
-            .map(|token| token.token)
-            .collect(),
+        tokens: expander.tokens,
         macro_defs: expander.macro_defs,
         diagnostics: expander.diagnostics,
     }
@@ -99,12 +97,15 @@ struct Arguments {
     commas: Vec<PpToken>,
 }
 
+/// Returns true if `token` is the punctuator `text`.
+fn is_punct_token(token: Option<&PpToken>, text: &str, cleaned: &str) -> bool {
+    token.is_some_and(|token| token.kind == PpTokenKind::Punct && token.text(cleaned) == text)
+}
+
 impl Expander<'_> {
     /// Returns true if `token` is the punctuator `text`.
     fn is_punct(&self, token: Option<&PpToken>, text: &str) -> bool {
-        token.is_some_and(|token| {
-            token.kind == PpTokenKind::Punct && token.text(self.cleaned_text) == text
-        })
+        is_punct_token(token, text, self.cleaned_text)
     }
 
     /// Expands one token, pushing its replacement for rescan.
@@ -117,7 +118,7 @@ impl Expander<'_> {
 
         if self.expanded_bytes <= self.config.max_expanded_bytes
             && token.token.kind == PpTokenKind::Ident
-            && let name = token.token.text(cleaned)
+            && let name = token.text(cleaned)
             && !token.is_hidden(name)
             && let Some(definition) = self.env.get(name).cloned()
         {
@@ -133,7 +134,9 @@ impl Expander<'_> {
                     let next = stream.peek();
 
                     // Only a macro invocation when followed by left parenthesis: WG14 N3220 § 6.10.5 Macro replacement, para 10
-                    if !next.is_some_and(|next| self.is_punct(Some(&next), "(")) {
+                    if !next.is_some_and(|next| {
+                        next.token.kind == PpTokenKind::Punct && next.text(cleaned) == "("
+                    }) {
                         self.push(token.clone());
                         return;
                     }
@@ -197,6 +200,7 @@ impl Expander<'_> {
             }
             out.push(MacroToken {
                 token: replacement,
+                text: None,
                 hide: Some(hide.clone()),
                 depth,
             });
@@ -265,7 +269,7 @@ impl Expander<'_> {
 
             // Comma and inner parentheses handling: WG14 N3220 § 6.10.5 Macro replacement, para 11
             if token.token.kind == PpTokenKind::Punct {
-                let text = token.token.text(self.cleaned_text);
+                let text = token.text(self.cleaned_text);
                 if text == "(" {
                     depth += 1;
                 } else if text == ")" {
@@ -285,115 +289,6 @@ impl Expander<'_> {
         }
 
         Some(Arguments { lists, commas })
-    }
-
-    /// Substitutes a function-like macro invocation's arguments.
-    ///
-    /// Reference: [WG14 N3220 (C23 draft) § 6.10.5.1 Argument substitution](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#subsubsection.6.10.5.1).
-    #[expect(clippy::too_many_arguments, reason = "internal substitution step")]
-    fn substitute_function_like(
-        &mut self,
-        invocation: &MacroToken,
-        name: &str,
-        replacement: &[PpToken],
-        params: &[String],
-        is_variadic: bool,
-        args: Arguments,
-        stream: &mut TokenStream<'_>,
-    ) {
-        let Arguments { mut lists, commas } = args;
-        let fixed = params.len();
-
-        if fixed == 0 && lists.len() == 1 && lists[0].is_empty() {
-            lists.clear();
-        }
-
-        if is_variadic {
-            if lists.len() < fixed {
-                self.report(
-                    Severity::Error,
-                    format!("macro `{name}` requires at least {fixed} arguments"),
-                    invocation.token.orig,
-                );
-                return;
-            }
-        } else if lists.len() != fixed {
-            self.report(
-                Severity::Error,
-                format!(
-                    "macro `{name}` requires {fixed} arguments, but {} were given",
-                    lists.len()
-                ),
-                invocation.token.orig,
-            );
-            return;
-        }
-
-        let expanded_args: Vec<Vec<MacroToken>> = lists
-            .into_iter()
-            .map(|argument| self.prescan(argument))
-            .collect();
-
-        let varargs = if is_variadic {
-            let mut varargs = Vec::new();
-            for (offset, argument) in expanded_args[fixed..].iter().enumerate() {
-                if offset > 0 {
-                    varargs.push(MacroToken {
-                        token: commas[fixed + offset - 1],
-                        hide: None,
-                        depth: 0,
-                    });
-                }
-                varargs.extend(argument.iter().cloned());
-            }
-            varargs
-        } else {
-            Vec::new()
-        };
-
-        let hide = extend_hide(invocation.hide.as_ref(), name);
-        let depth = invocation.depth + 1;
-        let mut out = Vec::new();
-        let mut first_output = true;
-
-        for &token in replacement {
-            let text = token.text(self.cleaned_text);
-            if let Some(index) = params.iter().position(|param| param == text) {
-                push_argument(
-                    &mut out,
-                    &expanded_args[index],
-                    token,
-                    &hide,
-                    depth,
-                    &mut first_output,
-                    invocation,
-                );
-            } else if is_variadic && text == "__VA_ARGS__" {
-                push_argument(
-                    &mut out,
-                    &varargs,
-                    token,
-                    &hide,
-                    depth,
-                    &mut first_output,
-                    invocation,
-                );
-            } else {
-                let mut token = MacroToken {
-                    token,
-                    hide: Some(hide.clone()),
-                    depth,
-                };
-                if first_output {
-                    token.token.has_space_before = invocation.token.has_space_before;
-                    token.token.line_start = invocation.token.line_start;
-                    first_output = false;
-                }
-                out.push(token);
-            }
-        }
-
-        stream.push_replacement(out);
     }
 
     /// Expands an argument before substitution.
@@ -430,32 +325,5 @@ impl Expander<'_> {
             Cow::Owned(message),
             severity,
         ));
-    }
-}
-
-/// Appends a substituted argument to the expansion.
-fn push_argument(
-    out: &mut Vec<MacroToken>,
-    argument: &[MacroToken],
-    parameter: PpToken,
-    hide: &HideSet,
-    depth: usize,
-    first_output: &mut bool,
-    invocation: &MacroToken,
-) {
-    for (index, token) in argument.iter().enumerate() {
-        let mut token = token.clone();
-        if index == 0 {
-            token.token.has_space_before = parameter.has_space_before;
-            token.token.line_start = parameter.line_start;
-        }
-        token.hide = Some(union_hide(token.hide.as_ref(), hide));
-        token.depth = depth;
-        if *first_output {
-            token.token.has_space_before = invocation.token.has_space_before;
-            token.token.line_start = invocation.token.line_start;
-            *first_output = false;
-        }
-        out.push(token);
     }
 }

@@ -4,10 +4,10 @@ use dt_tools_diagnostic::text_range::TextRange;
 use logos::Logos;
 
 use crate::{
+    expand::MacroToken,
     files::SourceId,
     lexer::PpTokenKind,
     origin::{Origin, ProvenanceMap},
-    token::PpToken,
 };
 
 /// The longest C punctuator is four characters, so a merge can span at most four one-character
@@ -20,14 +20,18 @@ const MAX_RUN: usize = 4;
 /// merge into different tokens when re-lexed. Separators are recorded as [`Origin::Generated`].
 // TODO: take the file from each token once expansion produces tokens from other files.
 #[must_use]
-pub(crate) fn emit(tokens: &[PpToken], cleaned: &str, file: SourceId) -> (String, ProvenanceMap) {
+pub(crate) fn emit(
+    tokens: &[MacroToken],
+    cleaned: &str,
+    file: SourceId,
+) -> (String, ProvenanceMap) {
     let mut out = String::with_capacity(cleaned.len());
     let mut map = ProvenanceMap::new();
-    let mut run: Vec<PpToken> = Vec::new();
+    let mut run: Vec<&MacroToken> = Vec::new();
 
-    let mut push = |str, origin| {
+    let mut push = |text: &str, origin| {
         let start = out.len();
-        out.push_str(str);
+        out.push_str(text);
         map.push(TextRange::new(start, out.len()), origin);
     };
 
@@ -35,9 +39,9 @@ pub(crate) fn emit(tokens: &[PpToken], cleaned: &str, file: SourceId) -> (String
         // Emit separator before token
         let is_first = index == 0;
         if !is_first {
-            let separator = if token.line_start {
+            let separator = if token.token.line_start {
                 Some("\n")
-            } else if token.has_space_before || !can_follow(&run, token, cleaned) {
+            } else if token.token.has_space_before || !can_follow(&run, token, cleaned) {
                 Some(" ")
             } else {
                 None
@@ -54,26 +58,26 @@ pub(crate) fn emit(tokens: &[PpToken], cleaned: &str, file: SourceId) -> (String
             token.text(cleaned),
             Origin::File {
                 file,
-                range: token.orig,
+                range: token.token.orig,
             },
         );
 
         if run.len() == MAX_RUN {
             run.remove(0);
         }
-        run.push(*token);
+        run.push(token);
     }
 
     (out, map)
 }
 
 /// Returns true if `next` can directly follow `run` without a separator.
-fn can_follow(run: &[PpToken], next: &PpToken, cleaned: &str) -> bool {
+fn can_follow(run: &[&MacroToken], next: &MacroToken, cleaned: &str) -> bool {
     if run.is_empty() {
         return true;
     }
 
-    let expected: Vec<_> = run.iter().chain([next]).collect();
+    let expected: Vec<&MacroToken> = run.iter().copied().chain([next]).collect();
     let mut text = String::new();
     for token in &expected {
         text.push_str(token.text(cleaned));
@@ -87,7 +91,7 @@ fn can_follow(run: &[PpToken], next: &PpToken, cleaned: &str) -> bool {
         let Ok(kind) = result else {
             return false;
         };
-        if kind != token.kind || lexer.slice() != token.text(cleaned) {
+        if kind != token.token.kind || lexer.slice() != token.text(cleaned) {
             return false;
         }
     }
@@ -102,26 +106,27 @@ mod tests {
 
     use super::emit;
     use crate::{
+        expand::MacroToken,
         files::SourceId,
         lexer::{PpTokenKind, lex},
         token::PpToken,
     };
 
     /// Builds a cleaned text and its tokens from `(kind, spelling, has_space_before, line_start)`.
-    fn tokens(specs: &[(PpTokenKind, &str, bool, bool)]) -> (String, Vec<PpToken>) {
+    fn tokens(specs: &[(PpTokenKind, &str, bool, bool)]) -> (String, Vec<MacroToken>) {
         let mut cleaned = String::new();
         let mut tokens = Vec::new();
 
         for &(kind, spelling, has_space_before, line_start) in specs {
             let start = cleaned.len();
             cleaned.push_str(spelling);
-            tokens.push(PpToken {
+            tokens.push(MacroToken::source(PpToken {
                 kind,
                 cleaned: TextRange::new(start, cleaned.len()),
                 orig: TextRange::new(start, cleaned.len()),
                 has_space_before,
                 line_start,
-            });
+            }));
         }
 
         (cleaned, tokens)
@@ -246,7 +251,13 @@ mod tests {
             "1.5e+3 + 12abc",
         ] {
             let cleaned = lex(input);
-            let (emitted, _) = emit(&cleaned.tokens, &cleaned.cleaned_text, SourceId(0));
+            let tokens: Vec<_> = cleaned
+                .tokens
+                .iter()
+                .copied()
+                .map(MacroToken::source)
+                .collect();
+            let (emitted, _) = emit(&tokens, &cleaned.cleaned_text, SourceId(0));
 
             let expected: Vec<_> = cleaned
                 .tokens
@@ -265,7 +276,13 @@ mod tests {
     fn emitted_dts_parses() {
         let input = "/dts-v1/;\n\n/ {\n    #address-cells = <1>;\n    #size-cells = <0>;\n    foo = <&gpio1 1 2>;\n};\n";
         let cleaned = lex(input);
-        let (emitted, _) = emit(&cleaned.tokens, &cleaned.cleaned_text, SourceId(0));
+        let tokens: Vec<_> = cleaned
+            .tokens
+            .iter()
+            .copied()
+            .map(MacroToken::source)
+            .collect();
+        let (emitted, _) = emit(&tokens, &cleaned.cleaned_text, SourceId(0));
 
         let parse = dt_tools_parser::ast::SourceFile::parse(&emitted);
         assert!(

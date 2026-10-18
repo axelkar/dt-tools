@@ -220,6 +220,90 @@ mod tests {
     }
 
     #[test]
+    fn stringifies_arguments() {
+        assert_eq!(preprocess_str("#define S(x) #x\nS(abc)\n").text, "\"abc\"");
+        assert_eq!(preprocess_str("#define S(x) #x\nS(a b)\n").text, "\"a b\"");
+        assert_eq!(
+            preprocess_str("#define S(x) #x\nS( a   b )\n").text,
+            "\"a b\""
+        );
+        assert_eq!(
+            preprocess_str("#define S(x) #x\nS(\"a b\")\n").text,
+            r#""\"a b\"""#
+        );
+        assert_eq!(preprocess_str("#define S(x) #x\nS()\n").text, "\"\"");
+    }
+
+    #[test]
+    fn pastes_tokens() {
+        assert_eq!(
+            preprocess_str("#define CAT(a, b) a ## b\nCAT(foo, bar)\n").text,
+            "foobar"
+        );
+        assert_eq!(
+            preprocess_str("#define CAT(a, b) a ## b\nCAT(+, +)\n").text,
+            "++"
+        );
+    }
+
+    #[test]
+    fn does_not_prescan_operands_of_hash_and_paste() {
+        assert_eq!(
+            preprocess_str("#define A 1\n#define S(x) #x\nS(A)\n").text,
+            "\"A\""
+        );
+        assert_eq!(
+            preprocess_str("#define A 1\n#define B 2\n#define CAT(a, b) a ## b\nCAT(A, B)\n").text,
+            "AB"
+        );
+    }
+
+    #[test]
+    fn handles_empty_paste_operands() {
+        assert_eq!(
+            preprocess_str("#define CAT(a, b) a ## b\nCAT(, x)\n").text,
+            "x"
+        );
+        assert_eq!(
+            preprocess_str("#define CAT(a, b) a ## b\nCAT(x,)\n").text,
+            "x"
+        );
+        assert_eq!(
+            preprocess_str("#define CAT(a, b) a ## b\nCAT(,)\n").text,
+            ""
+        );
+    }
+
+    #[test]
+    fn reports_invalid_pastes() {
+        for input in [
+            "#define BAD(a, b) a ## b\nBAD(+, -)\n",
+            "#define BAD(a, b) a ## b\nBAD(/, *)\n",
+            "#define BAD(x) ## x\nBAD(1)\n",
+            "#define BAD(x) x ##\nBAD(1)\n",
+        ] {
+            let result = preprocess_str(input);
+            assert!(!result.diagnostics.is_empty(), "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn elides_the_gnu_variadic_comma() {
+        assert_eq!(
+            preprocess_str("#define F(a, ...) a, ## __VA_ARGS__\nF(1)\n").text,
+            "1"
+        );
+        assert_eq!(
+            preprocess_str("#define F(a, ...) a, ## __VA_ARGS__\nF(1, 2)\n").text,
+            "1, 2"
+        );
+        assert_eq!(
+            preprocess_str("#define F(a, ...) a, ## __VA_ARGS__\nF(1,)\n").text,
+            "1,"
+        );
+    }
+
+    #[test]
     fn reports_bad_macro_parameter_lists() {
         // Malformed lists are errors, and no macro is defined.
         for input in [

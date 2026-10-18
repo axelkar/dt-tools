@@ -12,6 +12,8 @@ pub(crate) type HideSet = Arc<FxHashSet<String>>;
 pub(crate) struct MacroToken {
     /// The preprocessing token.
     pub(crate) token: PpToken,
+    /// A synthetic spelling for tokens produced by `#` or `##`.
+    pub(crate) text: Option<Arc<str>>,
     /// The set of macro names that must not expand again.
     pub(crate) hide: Option<HideSet>,
     /// The number of macro expansions that produced this token.
@@ -23,9 +25,17 @@ impl MacroToken {
     pub(crate) fn source(token: PpToken) -> Self {
         Self {
             token,
+            text: None,
             hide: None,
             depth: 0,
         }
+    }
+
+    /// Returns the token's spelling.
+    pub(crate) fn text<'a>(&'a self, cleaned: &'a str) -> &'a str {
+        self.text
+            .as_deref()
+            .unwrap_or_else(|| self.token.text(cleaned))
     }
 
     /// Returns whether `name` is hidden on this token.
@@ -71,11 +81,11 @@ impl<'a> TokenStream<'a> {
     }
 
     /// Returns the next token without consuming it.
-    pub(crate) fn peek(&self) -> Option<PpToken> {
+    pub(crate) fn peek(&self) -> Option<MacroToken> {
         self.pending
             .last()
-            .map(|token| token.token)
-            .or_else(|| self.source.get(self.index).copied())
+            .cloned()
+            .or_else(|| self.source.get(self.index).copied().map(MacroToken::source))
     }
 
     /// Returns whether no replacement tokens are waiting for rescan.

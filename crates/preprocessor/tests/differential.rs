@@ -183,6 +183,25 @@ const MACRO_EDGE_CASES: &[&str] = &[
     "#define F(a, ...) a __VA_ARGS__\nF()\n",
     "#define F(...) __VA_ARGS__\nF()\n",
     "#define A 1\n#define F(...) __VA_ARGS__\nF(A, 2)\n",
+    // Stringification.
+    "#define S(x) #x\nS(abc)\n",
+    "#define S(x) #x\nS(a b)\n",
+    "#define S(x) #x\nS( a   b )\n",
+    "#define S(x) #x\nS(\"a b\")\n",
+    "#define S(x) #x\nS()\n",
+    "#define A 1\n#define S(x) #x\nS(A)\n",
+    "#define HASH #\nHASH\n",
+    // Token pasting.
+    "#define CAT(a, b) a ## b\nCAT(foo, bar)\n",
+    "#define CAT(a, b) a ## b\nCAT(+, +)\n",
+    "#define A 1\n#define B 2\n#define CAT(a, b) a ## b\nCAT(A, B)\n",
+    "#define CAT(a, b) a ## b\nCAT(, x)\n",
+    "#define CAT(a, b) a ## b\nCAT(x,)\n",
+    "#define CAT(a, b) a ## b\nCAT(,)\n",
+    // GNU comma elision.
+    "#define F(a, ...) a, ## __VA_ARGS__\nF(1)\n",
+    "#define F(a, ...) a, ## __VA_ARGS__\nF(1, 2)\n",
+    "#define F(a, ...) a, ## __VA_ARGS__\nF(1,)\n",
     // Malformed directives and invocations.
     "#define\n",
     "#undef\n",
