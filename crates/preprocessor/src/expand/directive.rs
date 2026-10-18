@@ -2,7 +2,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use dt_tools_diagnostic::{Severity, Span};
 
 use super::{
-    Expander, condition::evaluate, conditional::Conditionals, expand_file, is_punct_token,
+    Expander, MacroToken, condition::evaluate, conditional::Conditionals, expand_file,
+    is_punct_token,
 };
 use crate::{
     directive::{Directive, DirectiveKind},
@@ -426,38 +427,48 @@ where
 
     /// Parses the header name after `#include`.
     fn header_name(&mut self) -> Option<HeaderName> {
-        let tokens = self.directive.argument;
-        let Some(first) = tokens.first() else {
+        let raw = self.directive.argument;
+        let Some(first) = raw.first() else {
             self.expander.report(
                 Severity::Error,
-                "expected a header name after `#include`".to_owned(),
+                HEADER_NAME_EXPECTED.to_owned(),
                 self.span(),
             );
             return None;
         };
 
-        if is_punct_token(Some(first), "<", &self.files.cleaned) {
-            let Some(rangle) = tokens
-                .iter()
-                .find(|token| is_punct_token(Some(token), ">", &self.files.cleaned))
-            else {
-                self.expander.report(
-                    Severity::Error,
-                    "unterminated header name".to_owned(),
-                    first.orig.within_file(first.file),
-                );
-                return None;
-            };
-            let name = self.files.cleaned[first.cleaned.end..rangle.cleaned.start].to_owned();
+        let is_raw = is_punct_token(Some(first), "<", &self.files.cleaned)
+            || first.kind == PpTokenKind::String;
+        let tokens: Vec<MacroToken> = raw.iter().copied().map(MacroToken::source).collect();
+        let (tokens, source) = if is_raw {
+            (tokens, HeaderTokens::Raw)
+        } else {
+            (
+                self.expander.prescan(tokens, &self.files.cleaned),
+                HeaderTokens::Expanded,
+            )
+        };
 
-            return Some(HeaderName {
-                name,
-                quoted: false,
-            });
-        }
+        self.scan_header_name(&tokens, source)
+    }
 
-        if first.kind == PpTokenKind::String {
-            let text = first.text(&self.files.cleaned);
+    /// Parses a header name from its tokens.
+    fn scan_header_name(
+        &mut self,
+        tokens: &[MacroToken],
+        source: HeaderTokens,
+    ) -> Option<HeaderName> {
+        let Some(first) = tokens.first() else {
+            self.expander.report(
+                Severity::Error,
+                HEADER_NAME_EXPECTED.to_owned(),
+                self.span(),
+            );
+            return None;
+        };
+        let text = first.text(&self.files.cleaned);
+
+        if first.token.kind == PpTokenKind::String {
             let Some(name) = text
                 .strip_prefix('"')
                 .and_then(|text| text.strip_suffix('"'))
@@ -465,24 +476,101 @@ where
                 self.expander.report(
                     Severity::Error,
                     "unterminated header name".to_owned(),
-                    first.orig.within_file(first.file),
+                    first.token.orig.within_file(first.token.file),
                 );
                 return None;
             };
+            let name = name.to_owned();
+            self.warn_extra(
+                tokens
+                    .get(1)
+                    .map(|token| token.token.orig.within_file(token.token.file)),
+            );
+
+            return Some(HeaderName { name, quoted: true });
+        }
+
+        let is_left_angle = first.token.kind == PpTokenKind::Punct && text == "<";
+        if is_left_angle {
+            let Some(rangle) = tokens.iter().position(|token| {
+                token.token.kind == PpTokenKind::Punct && token.text(&self.files.cleaned) == ">"
+            }) else {
+                self.expander.report(
+                    Severity::Error,
+                    "unterminated header name".to_owned(),
+                    first.token.orig.within_file(first.token.file),
+                );
+                return None;
+            };
+            let name = match source {
+                HeaderTokens::Raw => self.files.cleaned
+                    [first.token.cleaned.end..tokens[rangle].token.cleaned.start]
+                    .to_owned(),
+                HeaderTokens::Expanded => {
+                    let mut name = render_tokens(&tokens[1..rangle], &self.files.cleaned);
+                    if tokens[rangle].token.has_space_before {
+                        name.push(' ');
+                    }
+                    name
+                }
+            };
+            self.warn_extra(
+                tokens
+                    .get(rangle + 1)
+                    .map(|token| token.token.orig.within_file(token.token.file)),
+            );
 
             return Some(HeaderName {
-                name: name.to_owned(),
-                quoted: true,
+                name,
+                quoted: false,
             });
         }
 
         self.expander.report(
             Severity::Error,
-            "macro-expanded header names are not supported yet".to_owned(),
-            first.orig.within_file(first.file),
+            HEADER_NAME_EXPECTED.to_owned(),
+            first.token.orig.within_file(first.token.file),
         );
         None
     }
+
+    /// Warns about the first token after a header name.
+    fn warn_extra(&mut self, span: Option<Span<SourceId>>) {
+        let Some(span) = span else {
+            return;
+        };
+        self.expander.report(
+            Severity::Warn,
+            "extra tokens at end of `#include` directive".to_owned(),
+            span,
+        );
+    }
+}
+
+/// The message for a computed include that is not a header name.
+const HEADER_NAME_EXPECTED: &str = "`#include` expects a file name in quotes or angle brackets";
+
+/// Renders `tokens` with a space wherever the source had one.
+fn render_tokens(tokens: &[MacroToken], cleaned: &str) -> String {
+    let mut out = String::new();
+
+    for token in tokens {
+        if token.token.has_space_before {
+            out.push(' ');
+        }
+        out.push_str(token.text(cleaned));
+    }
+
+    out
+}
+
+/// How a header name's tokens were produced.
+#[derive(Clone, Copy)]
+enum HeaderTokens {
+    /// Copied from the directive without macro expansion.
+    Raw,
+    /// The result of macro expansion.
+    Expanded,
 }
 
 /// A header name written after `#include`.

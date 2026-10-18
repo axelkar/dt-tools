@@ -951,4 +951,117 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert_eq!(result.text, "once");
     }
+
+    #[test]
+    fn includes_a_computed_quoted_name() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#define H \"a.h\"\n#include H\n"),
+                ("a.h", "header\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "header");
+    }
+
+    #[test]
+    fn includes_a_computed_angle_name() {
+        let config = PreprocessorConfig {
+            include_dirs: vec![camino::Utf8PathBuf::from("inc")],
+            ..PreprocessorConfig::default()
+        };
+        let result = preprocess_files_with(
+            &[
+                ("main.dts", "#define H <a.h>\n#include H\n"),
+                ("inc/a.h", "header\n"),
+            ],
+            "main.dts",
+            &config,
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "header");
+    }
+
+    #[test]
+    fn includes_a_stringified_header_name() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#define S(x) #x\n#include S(a.h)\n"),
+                ("a.h", "header\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "header");
+    }
+
+    #[test]
+    fn resolves_nested_computed_names() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#define H \"a.h\"\n#define I H\n#include I\n"),
+                ("a.h", "header\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "header");
+    }
+
+    #[test]
+    fn reports_a_computed_name_that_is_not_a_header() {
+        let result = preprocess_files(
+            &[("main.dts", "#define H a.h\n#include H\nroot\n")],
+            "main.dts",
+        );
+
+        assert_eq!(result.text, "root");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn preserves_whitespace_only_in_raw_header_names() {
+        // gcc and clang keep the exact text of a raw `<...>` name, but re-render macro-expanded
+        // names with one space per token boundary.
+        let config = PreprocessorConfig {
+            include_dirs: vec![camino::Utf8PathBuf::from("inc")],
+            ..PreprocessorConfig::default()
+        };
+        let result = preprocess_files_with(
+            &[
+                (
+                    "main.dts",
+                    "#define H <a  b.h>\n#include <a  b.h>\n#include H\n",
+                ),
+                ("inc/a  b.h", "two\n"),
+                ("inc/a b.h", "one\n"),
+            ],
+            "main.dts",
+            &config,
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "two\none");
+    }
+
+    #[test]
+    fn warns_on_extra_tokens_after_a_header_name() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#include \"a.h\" extra\n"),
+                ("a.h", "header\n"),
+            ],
+            "main.dts",
+        );
+
+        assert_eq!(result.text, "header");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Warn);
+    }
 }
