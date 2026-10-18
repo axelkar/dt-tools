@@ -7,6 +7,7 @@ use dt_tools_diagnostic::{Diagnostic, Severity, text_range::TextRange};
 
 mod cleaner;
 mod config;
+mod emit;
 pub mod files;
 mod lexer;
 pub mod origin;
@@ -63,10 +64,10 @@ pub fn preprocess(
         })
         .collect();
 
-    let map = ProvenanceMap::from_lexed_file(root_id, &cleaned);
+    let (text, map) = emit::emit(&cleaned.tokens, &cleaned.cleaned_text, root_id);
 
     PreprocessedRoot {
-        text: cleaned.cleaned_text,
+        text,
         map,
         sources: sources.into_files(),
         includes: Vec::new(),
@@ -89,7 +90,7 @@ mod tests {
             (path == root).then(|| "/dts-v1/;\n".to_owned())
         });
 
-        assert_eq!(result.text, "/dts-v1/;\n");
+        assert_eq!(result.text, "/dts-v1/;");
         assert!(result.diagnostics.is_empty());
         assert_eq!(result.sources.len(), 1);
         assert_eq!(result.sources[0].path.as_path(), root);

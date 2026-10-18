@@ -3,7 +3,6 @@
 use dt_tools_diagnostic::{MultiSpan, Span, text_range::TextRange};
 
 use crate::files::SourceId;
-use crate::lexer::LexedFile;
 
 /// Where a run of expanded text came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,44 +85,6 @@ impl ProvenanceMap {
         }
 
         self.segments.push(Segment { range, origin });
-    }
-
-    /// Returns the map for a file that has only been cleaned and lexed.
-    ///
-    /// Token runs map exactly. Gaps map approximately when they contain a removed comment or line
-    /// continuation.
-    #[must_use]
-    pub(crate) fn from_lexed_file(file: SourceId, cleaned: &LexedFile) -> Self {
-        let mut map = Self::new();
-        let mut prev_cleaned = 0;
-        let mut prev_orig = 0;
-
-        for token in &cleaned.tokens {
-            map.push_file_run(
-                file,
-                TextRange::new(prev_cleaned, token.cleaned.start),
-                TextRange::new(prev_orig, token.orig.start),
-            );
-            map.push_file_run(file, token.cleaned, token.orig);
-            prev_cleaned = token.cleaned.end;
-            prev_orig = token.orig.end;
-        }
-
-        map.push_file_run(
-            file,
-            TextRange::new(prev_cleaned, cleaned.cleaned_text.len()),
-            TextRange::new(prev_orig, cleaned.orig_len),
-        );
-
-        map
-    }
-
-    /// Pushes a run from `file`, skipping empty cleaned ranges.
-    fn push_file_run(&mut self, file: SourceId, cleaned: TextRange, orig: TextRange) {
-        if cleaned.length() == 0 {
-            return;
-        }
-        self.push(cleaned, Origin::File { file, range: orig });
     }
 
     /// Resolves a range in the expanded text to a multi-span of source files.
