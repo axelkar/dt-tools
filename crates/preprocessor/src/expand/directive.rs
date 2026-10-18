@@ -1,4 +1,4 @@
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use dt_tools_diagnostic::{Severity, Span};
 
 use super::{
@@ -8,7 +8,7 @@ use super::{
 use crate::{
     directive::{Directive, DirectiveKind},
     env::{MacroDef, MacroKind},
-    files::{LoadedFiles, SourceId},
+    files::{IncludeSearch, LoadedFiles, SourceId, resolve_file},
     lexer::PpTokenKind,
     output::{IncludeEdge, MacroDefSite},
     token::PpToken,
@@ -415,10 +415,16 @@ where
         let Some(header) = self.header_name() else {
             return;
         };
-        let Some((path, contents)) = resolve_include(
+        let search = if header.quoted {
+            IncludeSearch::IncluderFirst
+        } else {
+            IncludeSearch::IncludePaths
+        };
+        let Some((path, contents)) = resolve_file(
             &self.expander.config.include_dirs,
             self.files.path(self.file),
-            &header,
+            &header.name,
+            search,
             self.read_file,
         ) else {
             self.expander.report(
@@ -608,35 +614,6 @@ struct HeaderName {
     name: String,
     /// Whether the name was quoted, so the includer's directory is searched.
     quoted: bool,
-}
-
-/// Returns the first readable candidate for `header`.
-fn resolve_include<R>(
-    include_dirs: &[Utf8PathBuf],
-    includer: &Utf8Path,
-    header: &HeaderName,
-    read_file: &mut R,
-) -> Option<(Utf8PathBuf, String)>
-where
-    R: FnMut(&Utf8Path) -> Option<String>,
-{
-    let name = Utf8Path::new(&header.name);
-    let mut candidates = Vec::new();
-
-    if name.is_absolute() {
-        candidates.push(name.to_owned());
-    } else {
-        if header.quoted
-            && let Some(dir) = includer.parent()
-        {
-            candidates.push(dir.join(name));
-        }
-        candidates.extend(include_dirs.iter().map(|dir| dir.join(name)));
-    }
-
-    candidates
-        .into_iter()
-        .find_map(|candidate| read_file(&candidate).map(|contents| (candidate, contents)))
 }
 
 /// Returns true if two replacement lists are identical.

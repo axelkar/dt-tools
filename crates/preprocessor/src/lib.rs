@@ -8,6 +8,7 @@ use dt_tools_diagnostic::{Diagnostic, Severity, text_range::TextRange};
 mod cleaner;
 mod config;
 mod directive;
+mod dts_include;
 mod emit;
 mod env;
 mod expand;
@@ -77,12 +78,23 @@ pub fn preprocess(
     diagnostics.extend(expansion.diagnostics);
 
     let (text, map) = emit::emit(&expansion.tokens, &files.cleaned);
+    let spliced = dts_include::splice(
+        &text,
+        &map,
+        &mut files.sources,
+        config,
+        &mut read_file,
+        root_id,
+    );
+    diagnostics.extend(spliced.diagnostics);
+    let mut includes = expansion.includes;
+    includes.extend(spliced.includes);
 
     PreprocessedRoot {
-        text,
-        map,
+        text: spliced.text,
+        map: spliced.map,
         sources: files.sources.into_files(),
-        includes: expansion.includes,
+        includes,
         skipped: expansion.skipped,
         macro_defs: expansion.macro_defs,
         diagnostics,
@@ -1115,5 +1127,141 @@ mod tests {
         assert_eq!(result.text, "header");
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].severity, Severity::Warn);
+    }
+
+    #[test]
+    fn splices_dts_includes() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "/dts-v1/;\n/include/ \"a.dtsi\"\n"),
+                ("a.dtsi", "included;\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "/dts-v1/;\nincluded;\n");
+        assert_eq!(result.sources.len(), 2);
+        assert_eq!(result.includes.len(), 1);
+        assert_eq!(result.includes[0].file, result.sources[1].id);
+        assert_eq!(result.includes[0].span.file, result.sources[0].id);
+    }
+
+    #[test]
+    fn resolves_nested_dts_includes_from_the_included_file() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "/include/ \"sub/a.dtsi\"\n"),
+                ("sub/a.dtsi", "/include/ \"b.dtsi\"\n"),
+                ("sub/b.dtsi", "deep;\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert!(result.text.contains("deep;"), "{:?}", result.text);
+        assert_eq!(result.sources.len(), 3);
+        assert_eq!(result.includes.len(), 2);
+    }
+
+    #[test]
+    fn does_not_preprocess_dts_included_files() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "/include/ \"a.dtsi\"\n"),
+                ("a.dtsi", "#define A 1\nA\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "#define A 1\nA\n");
+    }
+
+    #[test]
+    fn splices_macro_produced_dts_includes() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#define I /include/\nI \"a.dtsi\"\n"),
+                ("a.dtsi", "included;\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "included;\n");
+        assert_eq!(result.includes.len(), 1);
+    }
+
+    #[test]
+    fn reports_a_missing_dts_include() {
+        let result = preprocess_files(
+            &[("main.dts", "/include/ \"nope.dtsi\"\nroot\n")],
+            "main.dts",
+        );
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Error);
+        assert_eq!(
+            result.diagnostics[0].span.primary_spans[0].file,
+            result.sources[0].id
+        );
+        assert!(result.text.contains("root"), "{:?}", result.text);
+        assert!(!result.text.contains("/include/"), "{:?}", result.text);
+    }
+
+    #[test]
+    fn caps_dts_include_depth() {
+        let config = PreprocessorConfig {
+            max_include_depth: 2,
+            ..PreprocessorConfig::default()
+        };
+        let result = preprocess_files_with(
+            &[
+                ("main.dts", "/include/ \"self.dtsi\"\n"),
+                ("self.dtsi", "/include/ \"self.dtsi\"\n"),
+            ],
+            "main.dts",
+            &config,
+        );
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn maps_dts_included_text_to_its_file() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "/include/ \"a.dtsi\"\n"),
+                ("a.dtsi", "included;\n"),
+            ],
+            "main.dts",
+        );
+
+        let start = result.text.find("included;").expect("included text");
+        let span = result.resolve(TextRange::new(start, start + "included;".len()));
+        assert_eq!(span.primary_spans[0].file, result.sources[1].id);
+        assert_eq!(span.primary_spans[0].text_range, TextRange::new(0, 9));
+    }
+
+    #[test]
+    fn ignores_dts_include_like_text_in_strings() {
+        let result = preprocess_files(
+            &[("main.dts", "/dts-v1/;\n/ { x = \"/include/\"; };\n")],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert!(result.text.contains("/include/"), "{:?}", result.text);
+        assert!(result.includes.is_empty());
+    }
+
+    #[test]
+    fn reports_a_dts_include_without_a_string() {
+        let result = preprocess_files(&[("main.dts", "/include/ foo\n")], "main.dts");
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Error);
     }
 }

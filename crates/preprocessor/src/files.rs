@@ -63,6 +63,45 @@ impl SourceSet {
     }
 }
 
+/// Where a relative include is searched.
+#[derive(Clone, Copy)]
+pub(crate) enum IncludeSearch {
+    /// The includer's directory, then the include paths.
+    IncluderFirst,
+    /// Only the include paths.
+    IncludePaths,
+}
+
+/// Returns the first readable candidate for `name`.
+pub(crate) fn resolve_file<R>(
+    include_dirs: &[Utf8PathBuf],
+    includer: &Utf8Path,
+    name: &str,
+    search: IncludeSearch,
+    read_file: &mut R,
+) -> Option<(Utf8PathBuf, String)>
+where
+    R: FnMut(&Utf8Path) -> Option<String>,
+{
+    let name = Utf8Path::new(name);
+    let mut candidates = Vec::new();
+
+    if name.is_absolute() {
+        candidates.push(name.to_owned());
+    } else {
+        if matches!(search, IncludeSearch::IncluderFirst)
+            && let Some(dir) = includer.parent()
+        {
+            candidates.push(dir.join(name));
+        }
+        candidates.extend(include_dirs.iter().map(|dir| dir.join(name)));
+    }
+
+    candidates
+        .into_iter()
+        .find_map(|candidate| read_file(&candidate).map(|contents| (candidate, contents)))
+}
+
 /// Files loaded during one preprocessing run.
 #[derive(Debug, Default)]
 pub(crate) struct LoadedFiles {
