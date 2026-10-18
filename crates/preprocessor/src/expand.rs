@@ -12,7 +12,10 @@ pub(crate) use rescan::MacroToken;
 use crate::{
     config::PreprocessorConfig,
     env::{MacroEnv, MacroKind},
-    expand::rescan::{TokenStream, extend_hide},
+    expand::{
+        rescan::{TokenStream, extend_hide},
+        substitution::substitute_object_like,
+    },
     files::SourceId,
     lexer::PpTokenKind,
     output::MacroDefSite,
@@ -190,20 +193,14 @@ impl Expander<'_> {
 
         let hide = extend_hide(instance_token.hide.as_ref(), name);
         let depth = instance_token.depth + 1;
-        let mut out = Vec::with_capacity(replacement.len());
+        let (mut out, errors) = substitute_object_like(self.cleaned_text, hide, depth, replacement);
+        for (message, range) in errors {
+            self.report(Severity::Error, message, range);
+        }
 
-        for (index, &replacement) in replacement.iter().enumerate() {
-            let mut replacement = replacement;
-            if index == 0 {
-                replacement.has_space_before = instance_token.token.has_space_before;
-                replacement.line_start = instance_token.token.line_start;
-            }
-            out.push(MacroToken {
-                token: replacement,
-                text: None,
-                hide: Some(hide.clone()),
-                depth,
-            });
+        if let Some(first) = out.first_mut() {
+            first.token.has_space_before = instance_token.token.has_space_before;
+            first.token.line_start = instance_token.token.line_start;
         }
 
         stream.push_replacement(out);

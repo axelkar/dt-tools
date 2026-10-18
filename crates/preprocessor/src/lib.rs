@@ -247,6 +247,13 @@ mod tests {
     }
 
     #[test]
+    fn pastes_tokens_in_object_like_macros() {
+        // `##` applies to both macro kinds, unlike `#`.
+        assert_eq!(preprocess_str("#define C 0##0\nC\n").text, "00");
+        assert_eq!(preprocess_str("#define H # x\nH\n").text, "# x");
+    }
+
+    #[test]
     fn does_not_prescan_operands_of_hash_and_paste() {
         assert_eq!(
             preprocess_str("#define A 1\n#define S(x) #x\nS(A)\n").text,

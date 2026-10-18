@@ -20,7 +20,7 @@ enum Substituted {
     Token(MacroToken),
 }
 
-/// The replacement list and prepared arguments of a function-like invocation.
+/// The replacement list and prepared arguments of an invocation.
 #[derive(Clone, Copy)]
 struct SubstitutionInfo<'a> {
     /// Replacement tokens.
@@ -35,6 +35,8 @@ struct SubstitutionInfo<'a> {
     raw_varargs: &'a [MacroToken],
     /// Prescanned variadic arguments joined with their commas.
     expanded_varargs: &'a [MacroToken],
+    /// Whether the macro is function-like.
+    is_function_like: bool,
     /// Whether the macro takes `...`.
     is_variadic: bool,
 }
@@ -202,7 +204,7 @@ impl<'a> SubstitutionBuilder<'a> {
                 continue;
             }
 
-            if token.kind == PpTokenKind::Punct && text == "#" {
+            if info.is_function_like && token.kind == PpTokenKind::Punct && text == "#" {
                 match self.stringify(index) {
                     Ok(consumed) => index += consumed,
                     Err(message) => {
@@ -412,6 +414,7 @@ impl Expander<'_> {
             expanded_arguments: &expanded_arguments,
             raw_varargs: &raw_varargs,
             expanded_varargs: &expanded_varargs,
+            is_function_like: true,
             is_variadic,
         };
 
@@ -433,6 +436,28 @@ impl Expander<'_> {
 
         stream.push_replacement(out);
     }
+}
+
+/// Substitutes an object-like macro's replacement list.
+pub(super) fn substitute_object_like(
+    cleaned: &str,
+    hide: HideSet,
+    depth: usize,
+    replacement: &[PpToken],
+) -> (Vec<MacroToken>, Vec<(String, TextRange)>) {
+    let substitution_info = SubstitutionInfo {
+        replacement,
+        params: &[],
+        raw_arguments: &[],
+        expanded_arguments: &[],
+        raw_varargs: &[],
+        expanded_varargs: &[],
+        is_function_like: false,
+        is_variadic: false,
+    };
+    let mut builder = SubstitutionBuilder::new(cleaned, hide, depth, substitution_info);
+    builder.substitute();
+    builder.finish()
 }
 
 /// Pastes two paste operands into one token.
