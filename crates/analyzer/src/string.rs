@@ -42,14 +42,15 @@ impl Iterator for InterpretEscapedString<'_> {
                     let Some(mut num) = self.s.next().and_then(|c| c.to_digit(16)) else {
                         return Err(StringParseError::HexNoDigits);
                     };
-                    if let Some(second) = self.s.peek().and_then(|c| c.to_digit(16)) {
+
+                    while let Some(digit) = self.s.peek().and_then(|c| c.to_digit(16)) {
                         self.s.next();
-                        num += second << 4;
+                        num = num.wrapping_mul(16).wrapping_add(digit);
                     }
 
                     #[expect(
                         clippy::cast_possible_truncation,
-                        reason = "guaranteed to be in range"
+                        reason = "escapes are truncated to one byte"
                     )]
                     Ok(num as u8 as char)
                 }
@@ -68,6 +69,8 @@ impl Iterator for InterpretEscapedString<'_> {
 /// use dt_tools_analyzer::string::{interpret_escaped_string, StringParseError};
 ///
 /// assert_eq!(interpret_escaped_string(r#""\\a\a""#), Ok("\\a\x07".into()));
+/// assert_eq!(interpret_escaped_string(r#""\x41""#), Ok("A".into()));
+/// assert_eq!(interpret_escaped_string(r#""\x123""#), Ok("#".into()));
 /// assert_eq!(interpret_escaped_string(r#""\""#), Err(StringParseError::EscapeAtEndOfString));
 /// ```
 ///
@@ -95,6 +98,8 @@ pub fn interpret_escaped_string(s: &str) -> Result<String, StringParseError> {
 ///
 /// assert_eq!(interpret_escaped_char(r"'\0'"), Ok('\0'));
 /// assert_eq!(interpret_escaped_char(r"'\a'"), Ok('\x07'));
+/// assert_eq!(interpret_escaped_char(r"'\x41'"), Ok('A'));
+/// assert_eq!(interpret_escaped_char(r"'\xFF'"), Ok('\u{FF}'));
 /// assert_eq!(interpret_escaped_char("'a'"), Ok('a'));
 /// assert_eq!(interpret_escaped_char("'aa'"), Err(StringParseError::CharTooManyChars));
 /// assert_eq!(interpret_escaped_char(r"'\'"), Err(StringParseError::EscapeAtEndOfString));
