@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use dt_tools_diagnostic::{Severity, text_range::TextRange};
+use dt_tools_diagnostic::{Severity, Span};
 
-use super::{Expander, MacroToken};
-use crate::{lexer::PpTokenKind, token::PpToken};
+use super::{Expander, MacroToken, is_punct_token};
+use crate::{files::SourceId, lexer::PpTokenKind, token::PpToken};
 
 /// A binary operator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,16 +106,21 @@ impl PrefixOp {
 
 impl Expander<'_> {
     /// Expands a condition's tokens.
-    pub(super) fn expand_condition(&mut self, tokens: &[PpToken]) -> Vec<MacroToken> {
+    pub(super) fn expand_condition(
+        &mut self,
+        tokens: &[PpToken],
+        cleaned: &str,
+    ) -> Vec<MacroToken> {
         let mut replaced = Vec::with_capacity(tokens.len());
         let mut index = 0;
 
         while index < tokens.len() {
             let token = tokens[index];
-            if token.kind == PpTokenKind::Ident && token.text(self.cleaned_text) == "defined" {
-                let (value, consumed) = self.eval_defined(tokens, index);
+            if token.kind == PpTokenKind::Ident && token.text(cleaned) == "defined" {
+                let (value, consumed) = self.eval_defined(tokens, index, cleaned);
                 replaced.push(MacroToken {
                     token: PpToken {
+                        file: token.file,
                         kind: PpTokenKind::Number,
                         cleaned: token.cleaned,
                         orig: token.orig,
@@ -134,21 +139,21 @@ impl Expander<'_> {
             index += 1;
         }
 
-        self.prescan(replaced)
+        self.prescan(replaced, cleaned)
     }
 
     /// Evaluates `defined` at `index`, returning its value and consumed token count.
-    fn eval_defined(&mut self, tokens: &[PpToken], index: usize) -> (bool, usize) {
+    fn eval_defined(&mut self, tokens: &[PpToken], index: usize, cleaned: &str) -> (bool, usize) {
         debug_assert_eq!(tokens[index].kind, PpTokenKind::Ident);
-        debug_assert_eq!(tokens[index].text(self.cleaned_text), "defined");
+        debug_assert_eq!(tokens[index].text(cleaned), "defined");
 
         let (name, consumed) = match tokens.get(index + 1) {
             Some(lparen)
-                if self.is_punct(Some(lparen), "(")
+                if is_punct_token(Some(lparen), "(", cleaned)
                     && let (Some(name), Some(rparen)) =
                         (tokens.get(index + 2), tokens.get(index + 3))
                     && name.kind == PpTokenKind::Ident
-                    && self.is_punct(Some(rparen), ")") =>
+                    && is_punct_token(Some(rparen), ")", cleaned) =>
             {
                 (*name, 4)
             }
@@ -157,13 +162,13 @@ impl Expander<'_> {
                 self.report(
                     Severity::Error,
                     "`defined` requires a macro name".to_owned(),
-                    tokens[index].orig,
+                    tokens[index].orig.within_file(tokens[index].file),
                 );
                 return (false, 1);
             }
         };
 
-        let value = self.env.get(name.text(self.cleaned_text)).is_some();
+        let value = self.env.get(name.text(cleaned)).is_some();
         (value, consumed)
     }
 }
@@ -172,8 +177,8 @@ impl Expander<'_> {
 pub(super) fn evaluate(
     tokens: &[MacroToken],
     cleaned: &str,
-    origin: TextRange,
-) -> (i64, Vec<(String, TextRange)>) {
+    origin: Span<SourceId>,
+) -> (i64, Vec<(String, Span<SourceId>)>) {
     let mut parser = Parser {
         tokens,
         index: 0,
@@ -191,9 +196,9 @@ struct Parser<'a> {
     tokens: &'a [MacroToken],
     index: usize,
     cleaned: &'a str,
-    /// Range of the whole directive.
-    origin: TextRange,
-    diagnostics: Vec<(String, TextRange)>,
+    /// Span of the whole directive.
+    origin: Span<SourceId>,
+    diagnostics: Vec<(String, Span<SourceId>)>,
 }
 
 impl Parser<'_> {
@@ -202,7 +207,10 @@ impl Parser<'_> {
         let value = self.expr_bp(0, true);
 
         if let Some(token) = self.tokens.get(self.index) {
-            self.error("unexpected token in condition".to_owned(), token.token.orig);
+            self.error(
+                "unexpected token in condition".to_owned(),
+                token.token.orig.within_file(token.token.file),
+            );
         }
 
         value
@@ -298,7 +306,7 @@ impl Parser<'_> {
                 } else {
                     self.error(
                         format!("invalid integer literal `{text}`"),
-                        token.token.orig,
+                        token.token.orig.within_file(token.token.file),
                     );
                     0
                 }
@@ -309,7 +317,7 @@ impl Parser<'_> {
                 } else {
                     self.error(
                         format!("invalid character constant `{text}`"),
-                        token.token.orig,
+                        token.token.orig.within_file(token.token.file),
                     );
                     0
                 }
@@ -324,14 +332,14 @@ impl Parser<'_> {
             PpTokenKind::Punct => {
                 self.error(
                     format!("unsupported operator `{text}` in condition"),
-                    token.token.orig,
+                    token.token.orig.within_file(token.token.file),
                 );
                 0
             }
             _ => {
                 self.error(
                     "unsupported token in condition".to_owned(),
-                    token.token.orig,
+                    token.token.orig.within_file(token.token.file),
                 );
                 0
             }
@@ -339,7 +347,7 @@ impl Parser<'_> {
     }
 
     /// Applies a binary operator to two live values.
-    fn apply(&mut self, op: InfixOp, lhs: i64, rhs: i64, origin: TextRange) -> i64 {
+    fn apply(&mut self, op: InfixOp, lhs: i64, rhs: i64, origin: Span<SourceId>) -> i64 {
         match op {
             InfixOp::Mul => lhs.wrapping_mul(rhs),
             InfixOp::Div => {
@@ -377,14 +385,14 @@ impl Parser<'_> {
         }
     }
 
-    /// Returns the next infix operator and its range.
-    fn peek_infix(&self) -> Option<(InfixOp, TextRange)> {
+    /// Returns the next infix operator and its span.
+    fn peek_infix(&self) -> Option<(InfixOp, Span<SourceId>)> {
         let token = self.tokens.get(self.index)?;
         if token.token.kind != PpTokenKind::Punct {
             return None;
         }
         let op = InfixOp::at(token.text(self.cleaned))?;
-        Some((op, token.token.orig))
+        Some((op, token.token.orig.within_file(token.token.file)))
     }
 
     /// Consumes the punctuator `text`.
@@ -396,13 +404,16 @@ impl Parser<'_> {
         if token.token.kind == PpTokenKind::Punct && token.text(self.cleaned) == text {
             self.index += 1;
         } else {
-            self.error(format!("expected `{text}`"), token.token.orig);
+            self.error(
+                format!("expected `{text}`"),
+                token.token.orig.within_file(token.token.file),
+            );
         }
     }
 
     /// Records a diagnostic.
-    fn error(&mut self, message: String, range: TextRange) {
-        self.diagnostics.push((message, range));
+    fn error(&mut self, message: String, span: Span<SourceId>) {
+        self.diagnostics.push((message, span));
     }
 }
 

@@ -5,7 +5,6 @@ use logos::Logos;
 
 use crate::{
     expand::MacroToken,
-    files::SourceId,
     lexer::PpTokenKind,
     origin::{Origin, ProvenanceMap},
 };
@@ -18,13 +17,8 @@ const MAX_RUN: usize = 4;
 ///
 /// One space is written where the source had one. Otherwise tokens stay adjacent unless they would
 /// merge into different tokens when re-lexed. Separators are recorded as [`Origin::Generated`].
-// TODO: take the file from each token once expansion produces tokens from other files.
 #[must_use]
-pub(crate) fn emit(
-    tokens: &[MacroToken],
-    cleaned: &str,
-    file: SourceId,
-) -> (String, ProvenanceMap) {
+pub(crate) fn emit(tokens: &[MacroToken], cleaned: &str) -> (String, ProvenanceMap) {
     let mut out = String::with_capacity(cleaned.len());
     let mut map = ProvenanceMap::new();
     let mut run: Vec<&MacroToken> = Vec::new();
@@ -57,7 +51,7 @@ pub(crate) fn emit(
         push(
             token.text(cleaned),
             Origin::File {
-                file,
+                file: token.token.file,
                 range: token.token.orig,
             },
         );
@@ -121,6 +115,7 @@ mod tests {
             let start = cleaned.len();
             cleaned.push_str(spelling);
             tokens.push(MacroToken::source(PpToken {
+                file: SourceId(0),
                 kind,
                 cleaned: TextRange::new(start, cleaned.len()),
                 orig: TextRange::new(start, cleaned.len()),
@@ -134,7 +129,7 @@ mod tests {
 
     fn emitted(specs: &[(PpTokenKind, &str, bool, bool)]) -> String {
         let (cleaned, tokens) = tokens(specs);
-        emit(&tokens, &cleaned, SourceId(0)).0
+        emit(&tokens, &cleaned).0
     }
 
     #[test]
@@ -210,7 +205,7 @@ mod tests {
             (PpTokenKind::Punct, ".", false, false),
         ]);
         assert_eq!(
-            raw_tokens(&emit(&dots, &cleaned, SourceId(0)).0),
+            raw_tokens(&emit(&dots, &cleaned).0),
             vec![
                 (PpTokenKind::Punct, "."),
                 (PpTokenKind::Punct, "."),
@@ -250,14 +245,14 @@ mod tests {
             "\"a b\" 'c'",
             "1.5e+3 + 12abc",
         ] {
-            let cleaned = lex(input);
+            let cleaned = lex(input, SourceId(0));
             let tokens: Vec<_> = cleaned
                 .tokens
                 .iter()
                 .copied()
                 .map(MacroToken::source)
                 .collect();
-            let (emitted, _) = emit(&tokens, &cleaned.cleaned_text, SourceId(0));
+            let (emitted, _) = emit(&tokens, &cleaned.cleaned_text);
 
             let expected: Vec<_> = cleaned
                 .tokens
@@ -275,14 +270,14 @@ mod tests {
     #[test]
     fn emitted_dts_parses() {
         let input = "/dts-v1/;\n\n/ {\n    #address-cells = <1>;\n    #size-cells = <0>;\n    foo = <&gpio1 1 2>;\n};\n";
-        let cleaned = lex(input);
+        let cleaned = lex(input, SourceId(0));
         let tokens: Vec<_> = cleaned
             .tokens
             .iter()
             .copied()
             .map(MacroToken::source)
             .collect();
-        let (emitted, _) = emit(&tokens, &cleaned.cleaned_text, SourceId(0));
+        let (emitted, _) = emit(&tokens, &cleaned.cleaned_text);
 
         let parse = dt_tools_parser::ast::SourceFile::parse(&emitted);
         assert!(
@@ -300,7 +295,7 @@ mod tests {
             (PpTokenKind::Punct, "=", true, false),
             (PpTokenKind::Number, "1", true, false),
         ]);
-        let (text, map) = emit(&tokens, &cleaned, SourceId(0));
+        let (text, map) = emit(&tokens, &cleaned);
 
         assert_eq!(text, "foo = 1");
         let span = map.resolve(TextRange::new(0, 3));

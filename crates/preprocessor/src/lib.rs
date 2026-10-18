@@ -18,6 +18,7 @@ mod output;
 mod token;
 
 pub use config::{Define, PreprocessorConfig};
+use files::LoadedFiles;
 pub use files::{SourceFile, SourceId, SourceSet};
 pub use lexer::{LexError, LexErrorAt, LexedFile, PpTokenKind, lex};
 pub use origin::{Origin, ProvenanceMap, Segment};
@@ -33,14 +34,14 @@ pub fn preprocess(
     config: &PreprocessorConfig,
     mut read_file: impl FnMut(&Utf8Path) -> Option<String>,
 ) -> PreprocessedRoot {
-    let mut sources = SourceSet::default();
-    let root_id = sources.add(root);
+    let mut files = LoadedFiles::default();
+    let root_id = files.sources.add(root);
 
     let Some(contents) = read_file(root) else {
         return PreprocessedRoot {
             text: String::new(),
             map: ProvenanceMap::new(),
-            sources: sources.into_files(),
+            sources: files.sources.into_files(),
             includes: Vec::new(),
             skipped: Vec::new(),
             macro_defs: Vec::new(),
@@ -52,8 +53,8 @@ pub fn preprocess(
         };
     };
 
-    let cleaned = lex(&contents);
-    let mut diagnostics: Vec<Diagnostic<SourceId>> = cleaned
+    let loaded = files.add(root, &contents);
+    let mut diagnostics: Vec<Diagnostic<SourceId>> = loaded
         .errors
         .iter()
         .map(|error| {
@@ -66,21 +67,22 @@ pub fn preprocess(
         .collect();
 
     let expansion = expand::expand(
-        &cleaned.tokens,
-        &cleaned.cleaned_text,
-        cleaned.orig_len,
+        &loaded.tokens,
+        &mut files,
+        loaded.orig_len,
         root_id,
         config,
+        &mut read_file,
     );
     diagnostics.extend(expansion.diagnostics);
 
-    let (text, map) = emit::emit(&expansion.tokens, &cleaned.cleaned_text, root_id);
+    let (text, map) = emit::emit(&expansion.tokens, &files.cleaned);
 
     PreprocessedRoot {
         text,
         map,
-        sources: sources.into_files(),
-        includes: Vec::new(),
+        sources: files.sources.into_files(),
+        includes: expansion.includes,
         skipped: expansion.skipped,
         macro_defs: expansion.macro_defs,
         diagnostics,
@@ -175,7 +177,7 @@ mod tests {
     #[test]
     fn reports_unsupported_directives() {
         // Known but unimplemented directives are diagnosed and skipped.
-        let result = preprocess_str("#include <a.h>\n");
+        let result = preprocess_str("#pragma once\n");
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.diagnostics[0].severity, Severity::Warn);
     }
@@ -729,5 +731,224 @@ mod tests {
             let result = preprocess_str(input);
             assert!(!result.diagnostics.is_empty(), "input: {input:?}");
         }
+    }
+
+    /// Preprocesses `root` from an in-memory file set with the default config.
+    fn preprocess_files(files: &[(&str, &str)], root: &str) -> PreprocessedRoot {
+        preprocess_files_with(files, root, &PreprocessorConfig::default())
+    }
+
+    /// Preprocesses `root` from an in-memory file set.
+    fn preprocess_files_with(
+        files: &[(&str, &str)],
+        root: &str,
+        config: &PreprocessorConfig,
+    ) -> PreprocessedRoot {
+        let files: std::collections::HashMap<camino::Utf8PathBuf, String> = files
+            .iter()
+            .map(|(path, contents)| (camino::Utf8PathBuf::from(path), (*contents).to_owned()))
+            .collect();
+        preprocess(Utf8Path::new(root), config, |path| files.get(path).cloned())
+    }
+
+    #[test]
+    fn includes_a_quoted_file() {
+        // The included file's macros and text join the parent's output.
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#include \"a.h\"\nroot\n"),
+                ("a.h", "#define A 1\nA\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "1\nroot");
+        assert_eq!(result.sources.len(), 2);
+        assert_eq!(result.includes.len(), 1);
+        assert_eq!(result.includes[0].file, result.sources[1].id);
+        assert_eq!(result.includes[0].span.file, result.sources[0].id);
+    }
+
+    #[test]
+    fn includes_an_angle_file_from_the_include_dirs() {
+        let mut config = PreprocessorConfig::default();
+        config.include_dirs.push(camino::Utf8PathBuf::from("inc"));
+        let result = preprocess_files_with(
+            &[
+                ("main.dts", "#include <a.h>\nroot\n"),
+                ("inc/a.h", "header\n"),
+            ],
+            "main.dts",
+            &config,
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "header\nroot");
+        assert_eq!(result.sources[1].path.as_str(), "inc/a.h");
+    }
+
+    #[test]
+    fn quoted_includes_search_the_includer_first() {
+        let mut config = PreprocessorConfig::default();
+        config.include_dirs.push(camino::Utf8PathBuf::from("inc"));
+        let result = preprocess_files_with(
+            &[
+                ("main.dts", "#include \"a.h\"\n"),
+                ("a.h", "near\n"),
+                ("inc/a.h", "far\n"),
+            ],
+            "main.dts",
+            &config,
+        );
+
+        assert_eq!(result.text, "near");
+    }
+
+    #[test]
+    fn angle_includes_skip_the_includer_directory() {
+        let result = preprocess_files(
+            &[("main.dts", "#include <a.h>\nroot\n"), ("a.h", "near\n")],
+            "main.dts",
+        );
+
+        assert_eq!(result.text, "root");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn resolves_nested_includes_from_the_included_file() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#include \"sub/a.h\"\n"),
+                ("sub/a.h", "#include \"b.h\"\n"),
+                ("sub/b.h", "deep\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "deep");
+    }
+
+    #[test]
+    fn shares_macros_across_include_boundaries() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#define A 1\n#include \"a.h\"\nB\n"),
+                ("a.h", "A\n#define B 2\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "1\n2");
+    }
+
+    #[test]
+    fn reports_a_missing_include() {
+        let result = preprocess_files(&[("main.dts", "#include \"nope.h\"\nroot\n")], "main.dts");
+
+        assert_eq!(result.text, "root");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Error);
+        assert_eq!(
+            result.diagnostics[0].span.primary_spans[0].file,
+            result.sources[0].id
+        );
+    }
+
+    #[test]
+    fn caps_include_depth() {
+        let config = PreprocessorConfig {
+            max_include_depth: 2,
+            ..PreprocessorConfig::default()
+        };
+        let result = preprocess_files_with(
+            &[
+                ("main.dts", "#include \"self.h\"\n"),
+                ("self.h", "#include \"self.h\"\n"),
+            ],
+            "main.dts",
+            &config,
+        );
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn reports_lex_errors_in_included_files() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#include \"a.h\"\n"),
+                ("a.h", "/* unterminated\n"),
+            ],
+            "main.dts",
+        );
+
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].span.primary_spans[0].file.0, 1);
+    }
+
+    #[test]
+    fn skips_includes_in_inactive_branches() {
+        let result = preprocess_files(
+            &[("main.dts", "#if 0\n#include \"missing.h\"\n#endif\nroot\n")],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "root");
+    }
+
+    #[test]
+    fn maps_included_text_to_its_file() {
+        let result = preprocess_files(
+            &[("main.dts", "#include \"a.h\"\n"), ("a.h", "header\n")],
+            "main.dts",
+        );
+
+        assert_eq!(result.text, "header");
+        let span = result.resolve(TextRange::new(0, 6));
+        assert_eq!(span.primary_spans.len(), 1);
+        assert_eq!(span.primary_spans[0].file, result.sources[1].id);
+        assert_eq!(span.primary_spans[0].text_range, TextRange::new(0, 6));
+    }
+
+    #[test]
+    fn keeps_conditionals_within_their_file() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#include \"open.h\"\n#endif\n"),
+                ("open.h", "#if 1\nx\n"),
+            ],
+            "main.dts",
+        );
+
+        assert_eq!(result.text, "x");
+        assert_eq!(result.diagnostics.len(), 2);
+        let files: Vec<_> = result
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.span.primary_spans[0].file)
+            .collect();
+        assert!(files.contains(&result.sources[0].id));
+        assert!(files.contains(&result.sources[1].id));
+    }
+
+    #[test]
+    fn include_guards_allow_repeated_includes() {
+        let result = preprocess_files(
+            &[
+                ("main.dts", "#include \"a.h\"\n#include \"a.h\"\n"),
+                ("a.h", "#ifndef A_H\n#define A_H\nonce\n#endif\n"),
+            ],
+            "main.dts",
+        );
+
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "once");
     }
 }

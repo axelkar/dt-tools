@@ -5,6 +5,7 @@ use logos::Logos;
 
 use crate::{
     cleaner::{Checkpoint, splice_lines},
+    files::SourceId,
     token::PpToken,
 };
 
@@ -217,7 +218,7 @@ impl LexedFile {
 ///
 /// Panic in debug mode when bugs are detected.
 #[must_use]
-pub fn lex(contents: &str) -> LexedFile {
+pub fn lex(contents: &str, file: SourceId) -> LexedFile {
     let (spliced, splice_checkpoints) = splice_lines(contents);
 
     let mut cleaned_text = String::with_capacity(spliced.len());
@@ -258,6 +259,7 @@ pub fn lex(contents: &str) -> LexedFile {
                 };
 
                 tokens.push(PpToken {
+                    file,
                     kind,
                     cleaned: TextRange::new(cleaned_start, cleaned_text.len()),
                     orig,
@@ -378,7 +380,7 @@ mod tests {
     #[track_caller]
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
     fn check(input: &str, expected: Expect) -> LexedFile {
-        let cleaned = lex(input);
+        let cleaned = lex(input, SourceId(0));
         expected.assert_eq(&render(&cleaned, input));
         cleaned
     }
@@ -467,7 +469,11 @@ mod tests {
     fn number_constants() {
         for text in ["12abc", "1.5e+3", "0xE+foo", "1e+", ".5", "0", "1..E+3.foo"] {
             let expected = format!("cleaned: {text:?}\nNumber {text:?} [line-start]\n");
-            assert_eq!(render(&lex(text), text), expected, "input: {text}");
+            assert_eq!(
+                render(&lex(text, SourceId(0)), text),
+                expected,
+                "input: {text}"
+            );
         }
     }
 
@@ -519,7 +525,11 @@ mod tests {
     fn char_constants() {
         for text in ["'a'", "'ab'", "'a b'", "'\\''", "'a", "''"] {
             let expected = format!("cleaned: {text:?}\nChar {text:?} [line-start]\n");
-            assert_eq!(render(&lex(text), text), expected, "input: {text}");
+            assert_eq!(
+                render(&lex(text, SourceId(0)), text),
+                expected,
+                "input: {text}"
+            );
         }
     }
 

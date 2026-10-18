@@ -2,12 +2,13 @@
 
 use std::sync::Arc;
 
-use dt_tools_diagnostic::{Severity, text_range::TextRange};
+use dt_tools_diagnostic::{Severity, Span};
 use logos::Logos;
 
 use super::{Arguments, Expander, MacroToken, is_punct_token};
 use crate::{
     expand::rescan::{HideSet, TokenStream, extend_hide, union_hide},
+    files::SourceId,
     lexer::PpTokenKind,
     token::PpToken,
 };
@@ -111,8 +112,8 @@ struct SubstitutionBuilder<'a> {
     depth: usize,
     /// Substituted replacement tokens.
     out: Vec<Substituted>,
-    errors: Vec<(String, TextRange)>,
-    pending_paste: Option<TextRange>,
+    errors: Vec<(String, Span<SourceId>)>,
+    pending_paste: Option<Span<SourceId>>,
 }
 
 impl<'a> SubstitutionBuilder<'a> {
@@ -163,7 +164,7 @@ impl<'a> SubstitutionBuilder<'a> {
     }
 
     /// Starts a `##` operation.
-    fn paste(&mut self, origin: TextRange) {
+    fn paste(&mut self, origin: Span<SourceId>) {
         if self.pending_paste.replace(origin).is_some() {
             self.error("`##` cannot appear next to another `##`".to_owned(), origin);
         }
@@ -218,7 +219,7 @@ impl<'a> SubstitutionBuilder<'a> {
             let text = token.text(self.cleaned);
 
             if token.kind == PpTokenKind::Punct && text == "##" {
-                self.paste(token.orig);
+                self.paste(token.orig.within_file(token.file));
                 index += 1;
                 continue;
             }
@@ -249,7 +250,7 @@ impl<'a> SubstitutionBuilder<'a> {
                 match self.stringify(index) {
                     Ok(consumed) => index += consumed,
                     Err(message) => {
-                        self.error(message, token.orig);
+                        self.error(message, token.orig.within_file(token.file));
                         index += 2;
                     }
                 }
@@ -312,6 +313,7 @@ impl<'a> SubstitutionBuilder<'a> {
         Ok((
             MacroToken {
                 token: PpToken {
+                    file: hash.file,
                     kind: PpTokenKind::String,
                     cleaned: hash.cleaned,
                     orig: hash.orig,
@@ -327,7 +329,7 @@ impl<'a> SubstitutionBuilder<'a> {
     }
 
     /// Applies a pending `##` with `right`.
-    fn paste_right(&mut self, origin: TextRange, right: Option<MacroToken>) {
+    fn paste_right(&mut self, origin: Span<SourceId>, right: Option<MacroToken>) {
         let left = match self.out.pop() {
             None => {
                 self.error(
@@ -358,7 +360,7 @@ impl<'a> SubstitutionBuilder<'a> {
     }
 
     /// Finishes the list, returning its tokens and substitution errors.
-    fn finish(mut self) -> (Vec<MacroToken>, Vec<(String, TextRange)>) {
+    fn finish(mut self) -> (Vec<MacroToken>, Vec<(String, Span<SourceId>)>) {
         if let Some(origin) = self.pending_paste.take() {
             self.error(
                 "`##` cannot appear at the end of a macro expansion".to_owned(),
@@ -379,8 +381,8 @@ impl<'a> SubstitutionBuilder<'a> {
     }
 
     /// Records a substitution error.
-    fn error(&mut self, message: String, range: TextRange) {
-        self.errors.push((message, range));
+    fn error(&mut self, message: String, span: Span<SourceId>) {
+        self.errors.push((message, span));
     }
 }
 
@@ -398,6 +400,7 @@ impl Expander<'_> {
         is_variadic: bool,
         args: Arguments,
         stream: &mut TokenStream<'_>,
+        cleaned: &str,
     ) {
         let Arguments {
             lists: mut raw_arguments,
@@ -414,7 +417,7 @@ impl Expander<'_> {
                 self.report(
                     Severity::Error,
                     format!("macro `{name}` requires at least {fixed} arguments"),
-                    invocation.token.orig,
+                    invocation.token.orig.within_file(invocation.token.file),
                 );
                 return;
             }
@@ -425,13 +428,13 @@ impl Expander<'_> {
                     "macro `{name}` requires {fixed} arguments, but {} were given",
                     raw_arguments.len()
                 ),
-                invocation.token.orig,
+                invocation.token.orig.within_file(invocation.token.file),
             );
             return;
         }
 
         let (params_to_expand, varargs_to_expand) =
-            arguments_to_expand(replacement, params, fixed, is_variadic, self.cleaned_text);
+            arguments_to_expand(replacement, params, fixed, is_variadic, cleaned);
         let expanded_arguments: Vec<Vec<MacroToken>> = raw_arguments
             .iter()
             .enumerate()
@@ -442,7 +445,7 @@ impl Expander<'_> {
                     varargs_to_expand
                 };
                 if expand {
-                    self.prescan(argument.clone())
+                    self.prescan(argument.clone(), cleaned)
                 } else {
                     argument.clone()
                 }
@@ -474,13 +477,12 @@ impl Expander<'_> {
 
         let hide = extend_hide(invocation.hide.as_ref(), name);
         let depth = invocation.depth + 1;
-        let mut builder =
-            SubstitutionBuilder::new(self.cleaned_text, hide, depth, substitution_info);
+        let mut builder = SubstitutionBuilder::new(cleaned, hide, depth, substitution_info);
         builder.substitute();
 
         let (mut out, errors) = builder.finish();
-        for (message, range) in errors {
-            self.report(Severity::Error, message, range);
+        for (message, span) in errors {
+            self.report(Severity::Error, message, span);
         }
 
         if let Some(first) = out.first_mut() {
@@ -498,7 +500,7 @@ pub(super) fn substitute_object_like(
     hide: HideSet,
     depth: usize,
     replacement: &[PpToken],
-) -> (Vec<MacroToken>, Vec<(String, TextRange)>) {
+) -> (Vec<MacroToken>, Vec<(String, Span<SourceId>)>) {
     let substitution_info = SubstitutionInfo {
         replacement,
         params: &[],
@@ -554,8 +556,9 @@ fn paste_pair(
 
             Ok(Some(MacroToken {
                 token: PpToken {
+                    file: left.token.file,
                     kind,
-                    // TODO: track both operands' origins once tokens carry a SourceId and Origin is a multi-span
+                    // TODO: track both operands' origins once Origin is a multi-span
                     cleaned: left.token.cleaned,
                     orig: left.token.orig,
                     has_space_before: left.token.has_space_before,

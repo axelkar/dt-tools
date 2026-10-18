@@ -2,7 +2,7 @@
 
 use dt_tools_diagnostic::text_range::TextRange;
 
-use crate::lexer::PpTokenKind;
+use crate::{files::SourceId, lexer::PpTokenKind};
 
 /// A token produced by the preprocessing lexer.
 ///
@@ -10,6 +10,8 @@ use crate::lexer::PpTokenKind;
 /// and [cppreference.com's translation phases](https://en.cppreference.com/c/language/translation_phases#Phase_3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PpToken {
+    /// The source file the ranges refer to.
+    pub file: SourceId,
     /// The token kind.
     pub kind: PpTokenKind,
     /// Range in the cleaned text ([C translation phases](https://en.cppreference.com/c/language/translation_phases) 1–3 applied).

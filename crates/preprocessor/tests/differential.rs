@@ -8,7 +8,7 @@ use std::{
 
 use arbitrary::{Arbitrary, Result, Unstructured};
 use camino::Utf8Path;
-use dt_tools_preprocessor::{PpTokenKind, PreprocessorConfig, lex, preprocess};
+use dt_tools_preprocessor::{PpTokenKind, PreprocessorConfig, SourceId, lex, preprocess};
 use logos::Logos;
 
 /// Fixed seed, so the generated corpus is identical on every run.
@@ -1112,7 +1112,7 @@ fn consensus(cpps: &[Cpp], input: &str, index: usize, label: &str) -> Consensus 
 
 /// Asserts that our cleaned text matches the preprocessors when they agree.
 fn check_consensus(cpps: &[Cpp], input: &str, index: usize) {
-    let cleaned = lex(input);
+    let cleaned = lex(input, SourceId(0));
 
     match consensus(cpps, input, index, "cleaned") {
         Consensus::Rejected => {

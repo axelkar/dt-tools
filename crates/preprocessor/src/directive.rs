@@ -19,6 +19,7 @@ pub(crate) enum DirectiveKind {
     Elifndef,
     Else,
     Endif,
+    Include,
     /// A known C directive that the preprocessor does not implement yet.
     Unsupported,
 }
@@ -46,7 +47,7 @@ pub(crate) struct Directive<'a> {
     /// The directive kind like `Define`.
     pub(crate) kind: DirectiveKind,
     /// The directive name like `define`.
-    pub(crate) name: &'a str,
+    pub(crate) name: &'static str,
     /// Tokens after the directive name, up to the end of the logical line.
     pub(crate) argument: &'a [PpToken],
     /// Range of the whole directive line in the original file.
@@ -59,7 +60,7 @@ pub(crate) struct Directive<'a> {
 ///
 /// Returns `None` when the tokens do not start a known directive. Unknown `#` lines are ordinary
 /// tokens in assembler mode.
-pub(crate) fn parse<'a>(tokens: &'a [PpToken], cleaned_text: &'a str) -> Option<Directive<'a>> {
+pub(crate) fn parse<'a>(tokens: &'a [PpToken], cleaned_text: &str) -> Option<Directive<'a>> {
     let hash = tokens.first()?;
     if hash.kind != PpTokenKind::Punct || hash.text(cleaned_text) != "#" || !hash.line_start {
         return None;
@@ -69,24 +70,25 @@ pub(crate) fn parse<'a>(tokens: &'a [PpToken], cleaned_text: &'a str) -> Option<
     if name_token.kind != PpTokenKind::Ident || name_token.line_start {
         return None;
     }
-    let name = name_token.text(cleaned_text);
-
-    let kind = match name {
-        "define" => DirectiveKind::Define,
-        "undef" => DirectiveKind::Undef,
-        "error" => DirectiveKind::Error,
-        "warning" => DirectiveKind::Warning,
-        "if" => DirectiveKind::If,
-        "ifdef" => DirectiveKind::Ifdef,
-        "ifndef" => DirectiveKind::Ifndef,
-        "elif" => DirectiveKind::Elif,
-        "elifdef" => DirectiveKind::Elifdef,
-        "elifndef" => DirectiveKind::Elifndef,
-        "else" => DirectiveKind::Else,
-        "endif" => DirectiveKind::Endif,
-        "include" | "include_next" | "import" | "embed" | "pragma" | "line" => {
-            DirectiveKind::Unsupported
-        }
+    let (kind, name) = match name_token.text(cleaned_text) {
+        "define" => (DirectiveKind::Define, "define"),
+        "undef" => (DirectiveKind::Undef, "undef"),
+        "error" => (DirectiveKind::Error, "error"),
+        "warning" => (DirectiveKind::Warning, "warning"),
+        "if" => (DirectiveKind::If, "if"),
+        "ifdef" => (DirectiveKind::Ifdef, "ifdef"),
+        "ifndef" => (DirectiveKind::Ifndef, "ifndef"),
+        "elif" => (DirectiveKind::Elif, "elif"),
+        "elifdef" => (DirectiveKind::Elifdef, "elifdef"),
+        "elifndef" => (DirectiveKind::Elifndef, "elifndef"),
+        "else" => (DirectiveKind::Else, "else"),
+        "endif" => (DirectiveKind::Endif, "endif"),
+        "include" => (DirectiveKind::Include, "include"),
+        "include_next" => (DirectiveKind::Unsupported, "include_next"),
+        "import" => (DirectiveKind::Unsupported, "import"),
+        "embed" => (DirectiveKind::Unsupported, "embed"),
+        "pragma" => (DirectiveKind::Unsupported, "pragma"),
+        "line" => (DirectiveKind::Unsupported, "line"),
         _ => return None,
     };
 
@@ -113,10 +115,10 @@ mod tests {
     use dt_tools_diagnostic::text_range::TextRange;
 
     use super::{DirectiveKind, parse};
-    use crate::lexer::lex;
+    use crate::{files::SourceId, lexer::lex};
 
     fn kind(input: &str) -> Option<DirectiveKind> {
-        let cleaned = lex(input);
+        let cleaned = lex(input, SourceId(0));
         parse(&cleaned.tokens, &cleaned.cleaned_text).map(|directive| directive.kind)
     }
 
@@ -135,7 +137,7 @@ mod tests {
         assert_eq!(kind("#elifndef A\n"), Some(DirectiveKind::Elifndef));
         assert_eq!(kind("#else\n"), Some(DirectiveKind::Else));
         assert_eq!(kind("#endif\n"), Some(DirectiveKind::Endif));
-        assert_eq!(kind("#include <a.h>\n"), Some(DirectiveKind::Unsupported));
+        assert_eq!(kind("#include <a.h>\n"), Some(DirectiveKind::Include));
     }
 
     #[test]
@@ -148,7 +150,7 @@ mod tests {
 
     #[test]
     fn directive_ends_at_the_next_line() {
-        let lexed = lex("#if A\nB\n");
+        let lexed = lex("#if A\nB\n", SourceId(0));
         let directive = parse(&lexed.tokens, &lexed.cleaned_text).expect("directive");
 
         assert_eq!(directive.text_range, TextRange { start: 0, end: 5 });

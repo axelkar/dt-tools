@@ -1,7 +1,13 @@
 //! Source file identities.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use dt_tools_diagnostic::text_range::TextRange;
 use rustc_hash::FxHashMap;
+
+use crate::{
+    lexer::{LexErrorAt, lex},
+    token::PpToken,
+};
 
 /// An identifier for a source file within one preprocessing run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -54,5 +60,56 @@ impl SourceSet {
     #[must_use]
     pub fn into_files(self) -> Vec<SourceFile> {
         self.files
+    }
+}
+
+/// Files loaded during one preprocessing run.
+#[derive(Debug, Default)]
+pub(crate) struct LoadedFiles {
+    /// File identities, in first-encounter order.
+    pub(crate) sources: SourceSet,
+    /// Concatenated cleaned text of every loaded file.
+    pub(crate) cleaned: String,
+}
+
+/// A file added to the cleaned buffer.
+pub(crate) struct LoadedFile {
+    /// The file's id.
+    pub(crate) id: SourceId,
+    /// The file's tokens, with `cleaned` ranges indexed into the buffer.
+    pub(crate) tokens: Vec<PpToken>,
+    /// Lexical errors.
+    pub(crate) errors: Vec<LexErrorAt>,
+    /// Length of the original file in bytes.
+    pub(crate) orig_len: usize,
+}
+
+impl LoadedFiles {
+    /// Lexes `contents` as `path` and appends it to the cleaned buffer.
+    pub(crate) fn add(&mut self, path: &Utf8Path, contents: &str) -> LoadedFile {
+        let id = self.sources.add(path);
+        let mut lexed = lex(contents, id);
+        let base = self.cleaned.len();
+
+        for token in &mut lexed.tokens {
+            token.cleaned = TextRange::new(token.cleaned.start + base, token.cleaned.end + base);
+        }
+        self.cleaned.push_str(&lexed.cleaned_text);
+
+        LoadedFile {
+            id,
+            tokens: lexed.tokens,
+            errors: lexed.errors,
+            orig_len: lexed.orig_len,
+        }
+    }
+
+    /// Returns the path of the file with `id`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` is out of range for the set.
+    pub(crate) fn path(&self, id: SourceId) -> &Utf8Path {
+        self.sources.get(id).path.as_path()
     }
 }

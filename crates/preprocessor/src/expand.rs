@@ -8,7 +8,8 @@ mod substitution;
 
 use std::borrow::Cow;
 
-use dt_tools_diagnostic::{Diagnostic, Severity, Span, text_range::TextRange};
+use camino::Utf8Path;
+use dt_tools_diagnostic::{Diagnostic, Severity, Span};
 pub(crate) use rescan::MacroToken;
 
 use crate::{
@@ -19,9 +20,9 @@ use crate::{
         rescan::{TokenStream, extend_hide},
         substitution::substitute_object_like,
     },
-    files::SourceId,
+    files::{LoadedFiles, SourceId},
     lexer::PpTokenKind,
-    output::MacroDefSite,
+    output::{IncludeEdge, MacroDefSite},
     token::PpToken,
 };
 
@@ -29,40 +30,85 @@ use crate::{
 pub(crate) struct Expansion {
     pub(crate) tokens: Vec<MacroToken>,
     pub(crate) macro_defs: Vec<MacroDefSite>,
+    pub(crate) includes: Vec<IncludeEdge>,
     pub(crate) diagnostics: Vec<Diagnostic<SourceId>>,
     pub(crate) skipped: Vec<Span<SourceId>>,
 }
 
-/// Handles directives, conditionals, and macros of a file in source order.
-pub(crate) fn expand(
+/// Handles directives, conditionals, and macros starting at a root file.
+pub(crate) fn expand<R>(
     tokens: &[PpToken],
-    cleaned: &str,
+    files: &mut LoadedFiles,
     orig_len: usize,
     file: SourceId,
     config: &PreprocessorConfig,
-) -> Expansion {
+    read_file: &mut R,
+) -> Expansion
+where
+    R: FnMut(&Utf8Path) -> Option<String>,
+{
     let mut expander = Expander {
         env: MacroEnv::default(),
-        cleaned_text: cleaned,
-        file,
         config,
         tokens: Vec::new(),
         macro_defs: Vec::new(),
+        includes: Vec::new(),
         diagnostics: Vec::new(),
+        skipped: Vec::new(),
         expanded_bytes: 0,
         byte_cap_reported: false,
-        conditionals: Conditionals::default(),
     };
 
+    expand_file(&mut expander, files, read_file, file, tokens, orig_len, 0);
+
+    let Expander {
+        tokens,
+        macro_defs,
+        includes,
+        diagnostics,
+        skipped,
+        ..
+    } = expander;
+
+    Expansion {
+        tokens,
+        macro_defs,
+        includes,
+        diagnostics,
+        skipped,
+    }
+}
+
+/// Handles directives, conditionals, and macros of one file in source order.
+///
+/// Each file has its own conditional group stack: conditional directives cannot span files.
+pub(super) fn expand_file<R>(
+    expander: &mut Expander<'_>,
+    files: &mut LoadedFiles,
+    read_file: &mut R,
+    file: SourceId,
+    tokens: &[PpToken],
+    orig_len: usize,
+    depth: usize,
+) where
+    R: FnMut(&Utf8Path) -> Option<String>,
+{
+    let mut conditionals = Conditionals::default();
     let mut stream = TokenStream::new(tokens);
 
     loop {
         if stream.is_rescan_empty()
-            && let Some(directive) = crate::directive::parse(stream.remaining_source(), cleaned)
+            && let Some(directive) =
+                crate::directive::parse(stream.remaining_source(), &files.cleaned)
         {
             stream.skip_source(directive.len_tokens);
             directive::DirectiveHandler {
-                expander: &mut expander,
+                expander,
+                conditionals: &mut conditionals,
+                files,
+                read_file,
+                file,
+                depth,
                 directive,
                 argument_pos: 0,
             }
@@ -74,45 +120,37 @@ pub(crate) fn expand(
             break;
         };
 
-        if expander.is_active() {
-            expander.expand_token(&token, &mut stream);
+        if conditionals.is_active() {
+            expander.expand_token(&token, &mut stream, &files.cleaned);
         }
     }
 
-    for opening in expander.conditionals.finish(orig_len) {
+    for opening in conditionals.finish(orig_len) {
         expander.report(
             Severity::Error,
             "unterminated conditional directive".to_owned(),
-            opening,
+            opening.within_file(file),
         );
     }
 
-    let skipped = expander
-        .conditionals
-        .skipped()
-        .iter()
-        .map(|range| range.within_file(file))
-        .collect();
-
-    Expansion {
-        tokens: expander.tokens,
-        macro_defs: expander.macro_defs,
-        diagnostics: expander.diagnostics,
-        skipped,
-    }
+    expander.skipped.extend(
+        conditionals
+            .skipped()
+            .iter()
+            .map(|range| range.within_file(file)),
+    );
 }
 
-struct Expander<'a> {
+pub(crate) struct Expander<'a> {
     env: MacroEnv,
-    cleaned_text: &'a str,
-    file: SourceId,
     config: &'a PreprocessorConfig,
     tokens: Vec<MacroToken>,
     macro_defs: Vec<MacroDefSite>,
+    includes: Vec<IncludeEdge>,
     diagnostics: Vec<Diagnostic<SourceId>>,
+    skipped: Vec<Span<SourceId>>,
     expanded_bytes: usize,
     byte_cap_reported: bool,
-    conditionals: Conditionals,
 }
 
 /// The arguments of a function-like macro invocation.
@@ -126,29 +164,17 @@ struct Arguments {
 }
 
 /// Returns true if `token` is the punctuator `text`.
-fn is_punct_token(token: Option<&PpToken>, text: &str, cleaned: &str) -> bool {
+pub(super) fn is_punct_token(token: Option<&PpToken>, text: &str, cleaned: &str) -> bool {
     token.is_some_and(|token| token.kind == PpTokenKind::Punct && token.text(cleaned) == text)
 }
 
 impl Expander<'_> {
-    /// Returns true when the current conditional group is active.
-    fn is_active(&self) -> bool {
-        self.conditionals.is_active()
-    }
-
-    /// Returns true if `token` is the punctuator `text`.
-    fn is_punct(&self, token: Option<&PpToken>, text: &str) -> bool {
-        is_punct_token(token, text, self.cleaned_text)
-    }
-
     /// Expands one token, pushing its replacement for rescan.
     ///
     /// Expansion = pre-expansion (prescan) + argument substitution + rescan.
     ///
     /// Reference: [WG14 N3220 (C23 draft) § 6.10.5 Macro replacement](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#subsection.6.10.5).
-    fn expand_token(&mut self, token: &MacroToken, stream: &mut TokenStream<'_>) {
-        let cleaned = self.cleaned_text;
-
+    fn expand_token(&mut self, token: &MacroToken, stream: &mut TokenStream<'_>, cleaned: &str) {
         if self.expanded_bytes <= self.config.max_expanded_bytes
             && token.token.kind == PpTokenKind::Ident
             && let name = token.text(cleaned)
@@ -157,7 +183,7 @@ impl Expander<'_> {
         {
             match &definition.kind {
                 MacroKind::Object => {
-                    self.expand_object_like(token, name, &definition.replacement, stream);
+                    self.expand_object_like(token, name, &definition.replacement, stream, cleaned);
                     return;
                 }
                 MacroKind::Function {
@@ -170,7 +196,7 @@ impl Expander<'_> {
                     if !next.is_some_and(|next| {
                         next.token.kind == PpTokenKind::Punct && next.text(cleaned) == "("
                     }) {
-                        self.push(token.clone());
+                        self.push(token.clone(), cleaned);
                         return;
                     }
 
@@ -181,19 +207,20 @@ impl Expander<'_> {
                         params,
                         *is_variadic,
                         stream,
+                        cleaned,
                     );
                     return;
                 }
             }
         }
 
-        self.push(token.clone());
+        self.push(token.clone(), cleaned);
     }
 
     /// Returns true if the expansion depth cap was reached.
     ///
     /// Reports a diagnostic and emits `token` when it was.
-    fn at_depth_limit(&mut self, token: &MacroToken) -> bool {
+    fn at_depth_limit(&mut self, token: &MacroToken, cleaned: &str) -> bool {
         if token.depth < self.config.max_expansion_depth {
             return false;
         }
@@ -201,9 +228,9 @@ impl Expander<'_> {
         self.report(
             Severity::Error,
             "macro expansion depth exceeded".to_owned(),
-            token.token.orig,
+            token.token.orig.within_file(token.token.file),
         );
-        self.push(token.clone());
+        self.push(token.clone(), cleaned);
         true
     }
 
@@ -216,16 +243,17 @@ impl Expander<'_> {
         name: &str,
         replacement: &[PpToken],
         stream: &mut TokenStream<'_>,
+        cleaned: &str,
     ) {
-        if self.at_depth_limit(instance_token) {
+        if self.at_depth_limit(instance_token, cleaned) {
             return;
         }
 
         let hide = extend_hide(instance_token.hide.as_ref(), name);
         let depth = instance_token.depth + 1;
-        let (mut out, errors) = substitute_object_like(self.cleaned_text, hide, depth, replacement);
-        for (message, range) in errors {
-            self.report(Severity::Error, message, range);
+        let (mut out, errors) = substitute_object_like(cleaned, hide, depth, replacement);
+        for (message, span) in errors {
+            self.report(Severity::Error, message, span);
         }
 
         if let Some(first) = out.first_mut() {
@@ -239,6 +267,7 @@ impl Expander<'_> {
     /// Expands a function-like macro invocation.
     ///
     /// Reference: <https://en.cppreference.com/c/preprocessor/replace#Function-like_macros>
+    #[expect(clippy::too_many_arguments, reason = "recursive expansion step")]
     fn expand_function_like(
         &mut self,
         instance_token: &MacroToken,
@@ -247,8 +276,9 @@ impl Expander<'_> {
         params: &[String],
         is_variadic: bool,
         stream: &mut TokenStream<'_>,
+        cleaned: &str,
     ) {
-        if self.at_depth_limit(instance_token) {
+        if self.at_depth_limit(instance_token, cleaned) {
             return;
         }
 
@@ -257,7 +287,7 @@ impl Expander<'_> {
             return;
         };
 
-        let Some(args) = self.collect_arguments(stream, lparen.token) else {
+        let Some(args) = self.collect_arguments(stream, lparen.token, cleaned) else {
             return;
         };
 
@@ -269,6 +299,7 @@ impl Expander<'_> {
             is_variadic,
             args,
             stream,
+            cleaned,
         );
     }
 
@@ -279,6 +310,7 @@ impl Expander<'_> {
         &mut self,
         stream: &mut TokenStream<'_>,
         lparen: PpToken,
+        cleaned: &str,
     ) -> Option<Arguments> {
         let mut lists = vec![Vec::new()];
         let mut commas = Vec::new();
@@ -289,14 +321,14 @@ impl Expander<'_> {
                 self.report(
                     Severity::Error,
                     "unterminated macro invocation".to_owned(),
-                    lparen.orig,
+                    lparen.orig.within_file(lparen.file),
                 );
                 return None;
             };
 
             // Comma and inner parentheses handling: WG14 N3220 § 6.10.5 Macro replacement, para 11
             if token.token.kind == PpTokenKind::Punct {
-                let text = token.text(self.cleaned_text);
+                let text = token.text(cleaned);
                 if text == "(" {
                     depth += 1;
                 } else if text == ")" {
@@ -319,38 +351,35 @@ impl Expander<'_> {
     }
 
     /// Expands an argument before substitution.
-    fn prescan(&mut self, argument: Vec<MacroToken>) -> Vec<MacroToken> {
+    fn prescan(&mut self, argument: Vec<MacroToken>, cleaned: &str) -> Vec<MacroToken> {
         let saved = std::mem::take(&mut self.tokens);
         let mut stream = TokenStream::new(&[]);
         stream.push_replacement(argument);
 
         while let Some(token) = stream.next() {
-            self.expand_token(&token, &mut stream);
+            self.expand_token(&token, &mut stream, cleaned);
         }
 
         std::mem::replace(&mut self.tokens, saved)
     }
 
     /// Pushes a token to the output.
-    fn push(&mut self, token: MacroToken) {
-        self.expanded_bytes += token.token.text(self.cleaned_text).len();
+    fn push(&mut self, token: MacroToken, cleaned: &str) {
+        self.expanded_bytes += token.token.text(cleaned).len();
         if self.expanded_bytes > self.config.max_expanded_bytes && !self.byte_cap_reported {
             self.byte_cap_reported = true;
             self.report(
                 Severity::Error,
                 "expanded text exceeds the byte limit".to_owned(),
-                token.token.orig,
+                token.token.orig.within_file(token.token.file),
             );
         }
         self.tokens.push(token);
     }
 
     /// Reports a diagnostic.
-    fn report(&mut self, severity: Severity, message: String, range: TextRange) {
-        self.diagnostics.push(Diagnostic::new(
-            range.within_file(self.file),
-            Cow::Owned(message),
-            severity,
-        ));
+    fn report(&mut self, severity: Severity, message: String, span: Span<SourceId>) {
+        self.diagnostics
+            .push(Diagnostic::new(span, Cow::Owned(message), severity));
     }
 }

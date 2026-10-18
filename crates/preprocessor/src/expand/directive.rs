@@ -1,21 +1,34 @@
-use dt_tools_diagnostic::Severity;
+use camino::{Utf8Path, Utf8PathBuf};
+use dt_tools_diagnostic::{Severity, Span};
 
-use super::{Expander, condition::evaluate};
+use super::{
+    Expander, condition::evaluate, conditional::Conditionals, expand_file, is_punct_token,
+};
 use crate::{
     directive::{Directive, DirectiveKind},
     env::{MacroDef, MacroKind},
+    files::{LoadedFiles, SourceId},
     lexer::PpTokenKind,
-    output::MacroDefSite,
+    output::{IncludeEdge, MacroDefSite},
     token::PpToken,
 };
 
-pub(crate) struct DirectiveHandler<'a, 'b, 'c> {
+pub(crate) struct DirectiveHandler<'a, 'b, 'c, R> {
     pub(crate) expander: &'a mut Expander<'b>,
+    pub(crate) conditionals: &'a mut Conditionals,
+    pub(crate) files: &'a mut LoadedFiles,
+    pub(crate) read_file: &'a mut R,
+    pub(crate) file: SourceId,
+    /// The number of includes that led to the current file.
+    pub(crate) depth: usize,
     pub(crate) directive: Directive<'c>,
     pub(crate) argument_pos: usize,
 }
 
-impl<'c> DirectiveHandler<'_, '_, 'c> {
+impl<'c, R> DirectiveHandler<'_, '_, 'c, R>
+where
+    R: FnMut(&Utf8Path) -> Option<String>,
+{
     pub(crate) fn peek_arg(&self) -> Option<&'c PpToken> {
         self.directive.argument.get(self.argument_pos)
     }
@@ -27,9 +40,14 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
     pub(crate) fn next_arg_or_err(&mut self, msg: &str) -> Option<&'c PpToken> {
         self.next_arg().or_else(|| {
             self.expander
-                .report(Severity::Error, msg.to_owned(), self.directive.text_range);
+                .report(Severity::Error, msg.to_owned(), self.span());
             None
         })
+    }
+
+    /// Returns the directive's span in the current file.
+    fn span(&self) -> Span<SourceId> {
+        self.directive.text_range.within_file(self.file)
     }
 
     /// Handles a directive.
@@ -39,19 +57,20 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
             return;
         }
 
-        if !self.expander.is_active() {
+        if !self.conditionals.is_active() {
             return;
         }
 
         match self.directive.kind {
             DirectiveKind::Define => self.define(),
             DirectiveKind::Undef => self.undef(),
+            DirectiveKind::Include => self.include(),
             DirectiveKind::Error => self.message(Severity::Error),
             DirectiveKind::Warning => self.message(Severity::Warn),
             DirectiveKind::Unsupported => self.expander.report(
                 Severity::Warn,
                 format!("directive `{}` is not supported yet", self.directive.name),
-                self.directive.text_range,
+                self.span(),
             ),
             _ => unreachable!("conditional directives are handled above"),
         }
@@ -70,8 +89,8 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
 
     /// Opens a conditional group.
     fn open(&mut self) {
-        let condition = self.expander.is_active() && self.condition();
-        self.expander.conditionals.open(
+        let condition = self.conditionals.is_active() && self.condition();
+        self.conditionals.open(
             self.directive.text_range,
             self.directive.text_range.end,
             condition,
@@ -80,26 +99,26 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
 
     /// Starts an `#elif` branch.
     fn elif(&mut self) {
-        if self.expander.conditionals.is_empty() {
+        if self.conditionals.is_empty() {
             self.expander.report(
                 Severity::Error,
                 format!("`#{}` without `#if`", self.directive.name),
-                self.directive.text_range,
+                self.span(),
             );
             return;
         }
 
-        if self.expander.conditionals.else_seen() {
+        if self.conditionals.else_seen() {
             self.expander.report(
                 Severity::Error,
                 format!("`#{}` after `#else`", self.directive.name),
-                self.directive.text_range,
+                self.span(),
             );
             return;
         }
 
-        let condition = self.expander.conditionals.should_evaluate_elif() && self.condition();
-        self.expander.conditionals.elif(
+        let condition = self.conditionals.should_evaluate_elif() && self.condition();
+        self.conditionals.elif(
             self.directive.text_range.start,
             self.directive.text_range.end,
             condition,
@@ -108,25 +127,25 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
 
     /// Starts an `#else` branch.
     fn else_branch(&mut self) {
-        if self.expander.conditionals.is_empty() {
+        if self.conditionals.is_empty() {
             self.expander.report(
                 Severity::Error,
                 "`#else` without `#if`".to_owned(),
-                self.directive.text_range,
+                self.span(),
             );
             return;
         }
 
-        if self.expander.conditionals.else_seen() {
+        if self.conditionals.else_seen() {
             self.expander.report(
                 Severity::Error,
                 "`#else` after `#else`".to_owned(),
-                self.directive.text_range,
+                self.span(),
             );
             return;
         }
 
-        self.expander.conditionals.else_branch(
+        self.conditionals.else_branch(
             self.directive.text_range.start,
             self.directive.text_range.end,
         );
@@ -134,15 +153,11 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
 
     /// Closes the current conditional group.
     fn endif(&mut self) {
-        if !self
-            .expander
-            .conditionals
-            .close(self.directive.text_range.start)
-        {
+        if !self.conditionals.close(self.directive.text_range.start) {
             self.expander.report(
                 Severity::Error,
                 "`#endif` without `#if`".to_owned(),
-                self.directive.text_range,
+                self.span(),
             );
         }
     }
@@ -159,14 +174,12 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
 
     /// Evaluates a condition.
     fn eval_condition(&mut self) -> bool {
-        let tokens = self.expander.expand_condition(self.directive.argument);
-        let (value, diagnostics) = evaluate(
-            &tokens,
-            self.expander.cleaned_text,
-            self.directive.text_range,
-        );
-        for (message, range) in diagnostics {
-            self.expander.report(Severity::Error, message, range);
+        let tokens = self
+            .expander
+            .expand_condition(self.directive.argument, &self.files.cleaned);
+        let (value, diagnostics) = evaluate(&tokens, &self.files.cleaned, self.span());
+        for (message, span) in diagnostics {
+            self.expander.report(Severity::Error, message, span);
         }
         value != 0
     }
@@ -177,7 +190,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
             self.expander.report(
                 Severity::Error,
                 "macro name missing".to_owned(),
-                self.directive.text_range,
+                self.span(),
             );
             return false;
         };
@@ -186,14 +199,14 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
             self.expander.report(
                 Severity::Error,
                 "macro name must be an identifier".to_owned(),
-                name.orig,
+                name.orig.within_file(name.file),
             );
             return false;
         }
 
         self.expander
             .env
-            .get(name.text(self.expander.cleaned_text))
+            .get(name.text(&self.files.cleaned))
             .is_some()
     }
 
@@ -202,7 +215,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
         let Some(name_token) = self.macro_name_token() else {
             return;
         };
-        let name = name_token.text(self.expander.cleaned_text).to_owned();
+        let name = name_token.text(&self.files.cleaned).to_owned();
 
         let Some(kind) = self.parse_params() else {
             return;
@@ -213,16 +226,12 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
         let previous = self.expander.env.get(&name).cloned();
         if let Some(previous) = previous
             && (previous.kind != kind
-                || !same_replacement(
-                    &previous.replacement,
-                    &replacement,
-                    self.expander.cleaned_text,
-                ))
+                || !same_replacement(&previous.replacement, &replacement, &self.files.cleaned))
         {
             self.expander.report(
                 Severity::Warn,
                 format!("macro `{name}` redefined"),
-                name_token.orig,
+                name_token.orig.within_file(name_token.file),
             );
         }
 
@@ -231,7 +240,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
             .define(name.clone(), MacroDef { kind, replacement });
         self.expander.macro_defs.push(MacroDefSite {
             name,
-            span: self.directive.text_range.within_file(self.expander.file),
+            span: self.span(),
         });
     }
 
@@ -242,7 +251,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
     /// Returns the macro kind.
     pub(crate) fn parse_params(&mut self) -> Option<MacroKind> {
         let is_function_like = self.peek_arg().is_some_and(|lparen| {
-            !lparen.has_space_before && self.expander.is_punct(Some(lparen), "(")
+            !lparen.has_space_before && is_punct_token(Some(lparen), "(", &self.files.cleaned)
         });
 
         if is_function_like {
@@ -254,7 +263,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
         let mut params = Vec::new();
         let mut is_variadic = false;
 
-        if self.expander.is_punct(self.peek_arg(), ")") {
+        if is_punct_token(self.peek_arg(), ")", &self.files.cleaned) {
             self.argument_pos += 1;
             return Some(MacroKind::Function {
                 params,
@@ -265,15 +274,15 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
         loop {
             let token = self.next_arg_or_err("unterminated macro parameter list")?;
 
-            if self.expander.is_punct(Some(token), "...") {
+            if is_punct_token(Some(token), "...", &self.files.cleaned) {
                 is_variadic = true;
             } else if token.kind == PpTokenKind::Ident {
-                let name = token.text(self.expander.cleaned_text);
+                let name = token.text(&self.files.cleaned);
                 if params.iter().any(|param| param == name) {
                     self.expander.report(
                         Severity::Error,
                         format!("duplicate macro parameter `{name}`"),
-                        token.orig,
+                        token.orig.within_file(token.file),
                     );
                     return None;
                 }
@@ -282,24 +291,24 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
                 self.expander.report(
                     Severity::Error,
                     "expected a macro parameter or `...`".to_owned(),
-                    token.orig,
+                    token.orig.within_file(token.file),
                 );
                 return None;
             }
 
             let separator = self.next_arg_or_err("unterminated macro parameter list")?;
 
-            if self.expander.is_punct(Some(separator), ")") {
+            if is_punct_token(Some(separator), ")", &self.files.cleaned) {
                 return Some(MacroKind::Function {
                     params,
                     is_variadic,
                 });
-            } else if self.expander.is_punct(Some(separator), ",") {
+            } else if is_punct_token(Some(separator), ",", &self.files.cleaned) {
                 if is_variadic {
                     self.expander.report(
                         Severity::Error,
                         "`...` must be the last parameter".to_owned(),
-                        separator.orig,
+                        separator.orig.within_file(separator.file),
                     );
                     return None;
                 }
@@ -307,7 +316,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
                 self.expander.report(
                     Severity::Error,
                     "expected `,` or `)` in macro parameter list".to_owned(),
-                    separator.orig,
+                    separator.orig.within_file(separator.file),
                 );
                 return None;
             }
@@ -323,12 +332,12 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
             self.expander.report(
                 Severity::Warn,
                 "extra tokens at end of #undef directive".to_owned(),
-                extra.orig,
+                extra.orig.within_file(extra.file),
             );
         }
         self.expander
             .env
-            .undef(name_token.text(self.expander.cleaned_text));
+            .undef(name_token.text(&self.files.cleaned));
     }
 
     /// Gets a macro name token.
@@ -338,7 +347,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
             self.expander.report(
                 Severity::Error,
                 "macro name must be an identifier".to_owned(),
-                name_token.orig,
+                name_token.orig.within_file(name_token.file),
             );
             return None;
         }
@@ -351,8 +360,7 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
             self.directive.argument.first(),
             self.directive.argument.last(),
         ) {
-            (Some(first), Some(last)) => self.expander.cleaned_text
-                [first.cleaned.start..last.cleaned.end]
+            (Some(first), Some(last)) => self.files.cleaned[first.cleaned.start..last.cleaned.end]
                 .trim()
                 .to_owned(),
             _ => match severity {
@@ -360,9 +368,158 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
                 Severity::Warn => "warning directive".to_owned(),
             },
         };
-        self.expander
-            .report(severity, message, self.directive.text_range);
+        self.expander.report(severity, message, self.span());
     }
+
+    /// Handles an `#include` directive.
+    fn include(&mut self) {
+        if self.depth >= self.expander.config.max_include_depth {
+            self.expander.report(
+                Severity::Error,
+                "`#include` nested too deeply".to_owned(),
+                self.span(),
+            );
+            return;
+        }
+
+        let Some(header) = self.header_name() else {
+            return;
+        };
+        let Some((path, contents)) = resolve_include(
+            &self.expander.config.include_dirs,
+            self.files.path(self.file),
+            &header,
+            self.read_file,
+        ) else {
+            self.expander.report(
+                Severity::Error,
+                format!("include file not found: `{}`", header.name),
+                self.span(),
+            );
+            return;
+        };
+
+        let loaded = self.files.add(&path, &contents);
+        self.expander.includes.push(IncludeEdge {
+            file: loaded.id,
+            span: self.span(),
+        });
+
+        for error in &loaded.errors {
+            self.expander.report(
+                Severity::Error,
+                error.error.to_string(),
+                error.orig_range.within_file(loaded.id),
+            );
+        }
+
+        expand_file(
+            &mut *self.expander,
+            &mut *self.files,
+            &mut *self.read_file,
+            loaded.id,
+            &loaded.tokens,
+            loaded.orig_len,
+            self.depth + 1,
+        );
+    }
+
+    /// Parses the header name after `#include`.
+    fn header_name(&mut self) -> Option<HeaderName> {
+        let tokens = self.directive.argument;
+        let Some(first) = tokens.first() else {
+            self.expander.report(
+                Severity::Error,
+                "expected a header name after `#include`".to_owned(),
+                self.span(),
+            );
+            return None;
+        };
+
+        if is_punct_token(Some(first), "<", &self.files.cleaned) {
+            let Some(rangle) = tokens
+                .iter()
+                .find(|token| is_punct_token(Some(token), ">", &self.files.cleaned))
+            else {
+                self.expander.report(
+                    Severity::Error,
+                    "unterminated header name".to_owned(),
+                    first.orig.within_file(first.file),
+                );
+                return None;
+            };
+            let name = self.files.cleaned[first.cleaned.end..rangle.cleaned.start].to_owned();
+
+            return Some(HeaderName {
+                name,
+                quoted: false,
+            });
+        }
+
+        if first.kind == PpTokenKind::String {
+            let text = first.text(&self.files.cleaned);
+            let Some(name) = text
+                .strip_prefix('"')
+                .and_then(|text| text.strip_suffix('"'))
+            else {
+                self.expander.report(
+                    Severity::Error,
+                    "unterminated header name".to_owned(),
+                    first.orig.within_file(first.file),
+                );
+                return None;
+            };
+
+            return Some(HeaderName {
+                name: name.to_owned(),
+                quoted: true,
+            });
+        }
+
+        self.expander.report(
+            Severity::Error,
+            "macro-expanded header names are not supported yet".to_owned(),
+            first.orig.within_file(first.file),
+        );
+        None
+    }
+}
+
+/// A header name written after `#include`.
+struct HeaderName {
+    /// The name without quotes or angle brackets.
+    name: String,
+    /// Whether the name was quoted, so the includer's directory is searched.
+    quoted: bool,
+}
+
+/// Returns the first readable candidate for `header`.
+fn resolve_include<R>(
+    include_dirs: &[Utf8PathBuf],
+    includer: &Utf8Path,
+    header: &HeaderName,
+    read_file: &mut R,
+) -> Option<(Utf8PathBuf, String)>
+where
+    R: FnMut(&Utf8Path) -> Option<String>,
+{
+    let name = Utf8Path::new(&header.name);
+    let mut candidates = Vec::new();
+
+    if name.is_absolute() {
+        candidates.push(name.to_owned());
+    } else {
+        if header.quoted
+            && let Some(dir) = includer.parent()
+        {
+            candidates.push(dir.join(name));
+        }
+        candidates.extend(include_dirs.iter().map(|dir| dir.join(name)));
+    }
+
+    candidates
+        .into_iter()
+        .find_map(|candidate| read_file(&candidate).map(|contents| (candidate, contents)))
 }
 
 /// Returns true if two replacement lists are identical.
