@@ -6,16 +6,13 @@ use dt_tools_parser::{
     ast::{self, AstNode},
     cst::RedToken,
     lexer::TokenKind,
-    parser::Entrypoint,
 };
 use num_traits::Num;
 
 use crate::{
-    db::BaseDb,
-    diag::{Diag, SourceMap},
+    diag::Diag,
     extra_num_traits::{Bits, Signedness},
-    lowering::resolve_macro_to_ast,
-    macros::{MacroCtx, env::TrackedMapEnvMut},
+    lowering::undefined_macro,
 };
 
 /// Parses an integer and emits errors.
@@ -66,62 +63,23 @@ pub fn interpret_escaped_char_tok(
     })
 }
 
-// TODO: in preprocessor conditional mode, undefined macros that are used as object-like macros evaluate to zero as defined here: https://gcc.gnu.org/onlinedocs/cpp/If.html
 #[expect(clippy::too_many_lines, reason = "It's pretty enough as is")]
-pub fn eval(
-    db: &dyn BaseDb,
-    env: &TrackedMapEnvMut,
-    ast: ast::Expr,
-    diag: &mut Diag<'_, '_>,
-) -> Result<i64, ()> {
+pub fn eval(ast: ast::Expr, diag: &mut Diag<'_, '_>) -> Result<i64, ()> {
     match ast {
         ast::Expr::PrefixExpr(prefix_expr) => {
-            let mut value = || eval(db, env, prefix_expr.expr().ok_or(())?, diag);
+            let mut value = || eval(prefix_expr.expr().ok_or(())?, diag);
             match prefix_expr.op().ok_or(())? {
                 TokenKind::Plus => value(),
                 TokenKind::Minus => Ok(-value()?),
-                TokenKind::Ident => {
-                    // `defined` operator
-                    let inner_expr = prefix_expr.expr().ok_or(())?;
-
-                    let inner_expr = match inner_expr.into_paren_expr() {
-                        Ok(paren_expr) => paren_expr.expr().ok_or(())?,
-                        Err(inner_expr) => inner_expr,
-                    };
-
-                    let macro_ast = inner_expr.into_macro_invocation().ok().ok_or(())?;
-                    let name: &str = &macro_ast.green_ident().ok_or(())?.text;
-                    Ok(i64::from(env.get_macro_def(db, name).is_some()))
-                }
                 TokenKind::BitwiseNot => Ok(!value()?),
                 TokenKind::LogicalNot => Ok(i64::from(value()? == 0)),
                 _ => Err(()),
             }
         }
-        ast::Expr::ParenExpr(paren_expr) => eval(db, env, paren_expr.expr().ok_or(())?, diag),
+        ast::Expr::ParenExpr(paren_expr) => eval(paren_expr.expr().ok_or(())?, diag),
         ast::Expr::MacroInvocation(macro_invocation) => {
-            // TODO: expansion_stack
-            let (expr_ast, expansion) = resolve_macro_to_ast::<ast::Expr>(
-                db,
-                env,
-                diag,
-                &MacroCtx::Explicit(&macro_invocation),
-                Entrypoint::PreprocessorConditional,
-            )?
-            .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
-
-            // TODO: prevent infinite recursion
-
-            let child_map = SourceMap::Macro {
-                parent: diag.map,
-                substitution: &expansion,
-            };
-            eval(
-                db,
-                env,
-                expr_ast,
-                &mut Diag::new(&mut *diag.sink, &child_map),
-            )
+            undefined_macro(diag, &macro_invocation);
+            Err(())
         }
         ast::Expr::LiteralExpr(literal_expr) => {
             if let Some(number) = literal_expr
@@ -171,8 +129,8 @@ pub fn eval(
                 .find_map(|child| ast::Expr::cast(child.as_node()?.clone()))
                 .ok_or(())?;
 
-            let lhs_value = eval(db, env, lhs, diag)?;
-            let rhs_value = || eval(db, env, rhs, diag);
+            let lhs_value = eval(lhs, diag)?;
+            let rhs_value = || eval(rhs, diag);
 
             Ok(match op.green.kind {
                 TokenKind::Plus => lhs_value + rhs_value()?,
@@ -197,7 +155,7 @@ pub fn eval(
                     let cond = lhs_value != 0;
                     if cond {
                         let mhs = mhs.ok_or(())?;
-                        eval(db, env, mhs, diag)?
+                        eval(mhs, diag)?
                     } else {
                         rhs_value()?
                     }
@@ -210,12 +168,11 @@ pub fn eval(
 
 #[cfg(test)]
 mod tests {
-    use dt_tools_analyzer::macros::MacroDefinition;
-    use dt_tools_parser::{TextRange, ast::AstNode, parser::Entrypoint};
+    use dt_tools_parser::{ast::AstNode, parser::Entrypoint};
 
-    use crate::{db::BaseDb, macros::env::TrackedMapEnvMut};
+    use crate::db::BaseDb;
 
-    fn check(input: &str, env: &TrackedMapEnvMut) -> Result<i64, ()> {
+    fn check(input: &str) -> Result<i64, ()> {
         let db = crate::db::BaseDatabase::default();
 
         let parse = Entrypoint::PreprocessorConditional.parse(input);
@@ -226,14 +183,9 @@ mod tests {
         let file = db
             .get_files()
             .add_virtual(&db, "/main.dts".into(), String::new());
-        let map = crate::diag::SourceMap::File(file);
+        let mut diag = crate::diag::Diag::file(&mut diagnostics, file);
 
-        let num = super::eval(
-            &db,
-            env,
-            ast,
-            &mut crate::diag::Diag::new(&mut diagnostics, &map),
-        );
+        let num = super::eval(ast, &mut diag);
 
         assert!(
             diagnostics.is_empty(),
@@ -245,90 +197,30 @@ mod tests {
 
     #[test]
     fn test_literal() {
-        let env = TrackedMapEnvMut::default();
-        assert_eq!(check("42", &env), Ok(42));
+        assert_eq!(check("42"), Ok(42));
     }
 
     #[test]
     fn test_paren() {
-        let env = TrackedMapEnvMut::default();
-        assert_eq!(check("(1 + 2) * 3", &env), Ok(9));
+        assert_eq!(check("(1 + 2) * 3"), Ok(9));
     }
 
     #[test]
     fn test_infix() {
-        let env = TrackedMapEnvMut::default();
-        assert_eq!(check("21 + 21", &env), Ok(42));
-        assert_eq!(check("21 * 2", &env), Ok(42));
-        assert_eq!(check("1 + 2 * 3", &env), Ok(7));
+        assert_eq!(check("21 + 21"), Ok(42));
+        assert_eq!(check("21 * 2"), Ok(42));
+        assert_eq!(check("1 + 2 * 3"), Ok(7));
     }
 
     #[test]
     fn test_prefix() {
-        let env = TrackedMapEnvMut::default();
-        assert_eq!(check("!42", &env), Ok(0));
-        assert_eq!(check("~42", &env), Ok(!42));
+        assert_eq!(check("!42"), Ok(0));
+        assert_eq!(check("~42"), Ok(!42));
     }
 
     #[test]
     fn test_ternary() {
-        let env = TrackedMapEnvMut::default();
-        assert_eq!(check("1 ? 2 : 3", &env), Ok(2));
-        assert_eq!(check("0 ? 2 : 3", &env), Ok(3));
-    }
-
-    #[test]
-    fn test_prefix_defined() {
-        let db = crate::db::BaseDatabase::default();
-        let file = db
-            .get_files()
-            .add_virtual(&db, "/main.dts".into(), String::new());
-        let span = TextRange::new(0, 0).within_file(file);
-
-        let mut env = TrackedMapEnvMut::default();
-        let def = MacroDefinition::parse("#define FOO").unwrap();
-        env.insert_macro(def, span);
-
-        assert_eq!(check("defined FOO", &env), Ok(1));
-        assert_eq!(check("defined BAR", &env), Ok(0));
-        assert_eq!(check("defined(FOO)", &env), Ok(1));
-        assert_eq!(check("defined(BAR)", &env), Ok(0));
-    }
-
-    #[test]
-    fn test_macro() {
-        let db = crate::db::BaseDatabase::default();
-        let file = db
-            .get_files()
-            .add_virtual(&db, "/main.dts".into(), String::new());
-        let span = TextRange::new(0, 0).within_file(file);
-
-        let mut env = TrackedMapEnvMut::default();
-
-        let def = MacroDefinition::parse("#define FOO BAR").unwrap();
-        env.insert_macro(def, span);
-
-        let def = MacroDefinition::parse("#define BAR 42").unwrap();
-        env.insert_macro(def, span);
-
-        assert_eq!(check("FOO", &env), Ok(42));
-    }
-
-    // TODO: shouldn't ever overflow stack?
-    #[test]
-    #[ignore = "overflows stack"]
-    fn test_macro_self_recursion() {
-        let db = crate::db::BaseDatabase::default();
-        let file = db
-            .get_files()
-            .add_virtual(&db, "/main.dts".into(), String::new());
-        let span = TextRange::new(0, 0).within_file(file);
-
-        let mut env = TrackedMapEnvMut::default();
-
-        let def = MacroDefinition::parse("#define FOO FOO").unwrap();
-        env.insert_macro(def, span);
-
-        assert_eq!(check("FOO", &env), Ok(42));
+        assert_eq!(check("1 ? 2 : 3"), Ok(2));
+        assert_eq!(check("0 ? 2 : 3"), Ok(3));
     }
 }

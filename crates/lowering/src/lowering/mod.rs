@@ -1,28 +1,14 @@
-//! CST -> MIR lowering.
-//!
-//! Preprocessor macros, conditionals and includes are all tied very much together, which means they must be evaluated in one pass. For simplicity, everything else is also evaluated in one pass.
-// TODO: handle recursive macros?
+//! Expanded CST -> MIR lowering.
 
-use std::borrow::Cow;
-
-use camino::{Utf8Path, Utf8PathBuf};
 use dt_tools_diagnostic::{Diagnostic, Severity, Span};
-use dt_tools_parser::{
-    ast::{self, AstNode, AstNodeOrToken, AstToken, HasMacroInvocation, HasName},
-    parser::Entrypoint,
-};
+use dt_tools_parser::ast::{self, AstNode, AstToken, HasMacroInvocation, HasName};
+use rustc_hash::FxHashMap;
 
 use crate::{
     db::BaseDb,
-    diag::{Diag, MacroSubstitutionProvenance, SourceMap},
-    emit_parse_errors,
+    diag::Diag,
+    expand::{expand_root, expanded_parse},
     file::File,
-    includes::IncludeDirs,
-    macros::{
-        MacroCtx,
-        env::{TrackedMapEnv, TrackedMapEnvMut},
-        substitute_macro_tok,
-    },
     mir::{Mir, MirPhandleTarget},
 };
 
@@ -31,23 +17,19 @@ mod dt_property;
 #[cfg(test)]
 mod dtc_tests;
 mod item;
-mod preprocessor;
 
-// TODO: how to communicate back prop values and cells? type-safe or generic?
-enum LowerFileCtx {
-    SourceFile,
-    DtNode { parent_node_path: String },
-    PropValues,
-    Cells,
+/// A label definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Label {
+    /// Path of the labeled node.
+    pub path: String,
+    /// The label's span.
+    pub span: Span<File>,
 }
 
-/// Result of lowering a single file and its includes.
+/// Result of lowering a root file and its includes.
 #[salsa::tracked]
 pub struct LoweredFile<'db> {
-    /// Macro and label environment after processing this file.
-    #[tracked]
-    pub env_after: TrackedMapEnv<'db>,
-
     /// List of diagnostics emitted by lowering.
     #[tracked]
     #[returns(ref)]
@@ -58,21 +40,18 @@ pub struct LoweredFile<'db> {
     #[returns(ref)]
     pub processed_files: Vec<File>,
 
-    /// List of includes.
-    #[tracked]
-    #[returns(ref)]
-    pub includes: Vec<(File, Span<File>)>,
-
     /// Mid-level intermediate representation.
     #[tracked]
     #[returns(ref)]
     pub mir: Mir,
 
-    /// Whether this file is part of a overlay (`/plugin/;`).
-    pub is_overlay: bool,
+    /// Labels by name. `None` marks a deleted label.
+    #[tracked]
+    #[returns(ref)]
+    pub labels: FxHashMap<String, Option<Label>>,
 }
 
-/// Lowers CST to [`Mir`], starting from a root file.
+/// Lowers the expanded CST to [`Mir`], starting from a root file.
 ///
 /// [`LoweredFile`] also contains a lot of additional metadata, in addition to the MIR.
 ///
@@ -83,187 +62,83 @@ pub struct LoweredFile<'db> {
 /// # Panics
 ///
 /// Will panic if [`IncludeDirs`] hasn't been defined.
-pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'_>> {
-    lower_file(db, root_file, None, false, String::new())
-}
+#[salsa::tracked(lru = 64)]
+pub fn lower_root_file<'db>(db: &'db dyn BaseDb, root_file: File) -> Option<LoweredFile<'db>> {
+    profiling::scope!("lsp::salsa::lower_root_file", root_file.path(db).as_str());
 
-#[allow(clippy::allow_attributes, reason = "expect doesn't work properly here")]
-#[allow(
-    clippy::needless_pass_by_value,
-    reason = "Salsa doesn't allow &str as a tracked function parameter"
-)]
-/// Lowers the CST of a single file to [`Mir`], recursing into its includes.
-#[salsa::tracked(lru = 128)]
-pub(crate) fn lower_file<'db>(
-    db: &'db dyn BaseDb,
-    file: File,
-    parent_env: Option<TrackedMapEnv<'db>>,
-    parent_is_overlay: bool,
-    parent_node_path: String,
-) -> Option<LoweredFile<'db>> {
-    profiling::scope!("lsp::salsa::lowering::lower_file", file.path(db).as_str());
-
-    let mut env = TrackedMapEnvMut::from_parent(parent_env);
-
-    // TODO: parse entrypoint?
-    let parse = super::parse_file(db, file)?;
+    let expanded = expand_root(db, root_file).as_ref()?;
+    let parse = expanded_parse(db, root_file)?;
     let file_ast = parse.parse(db).source_file();
 
     let mut diagnostics = Vec::new();
-    let base_map = SourceMap::File(file);
-    let mut diag = Diag::new(&mut diagnostics, &base_map);
-
-    // Path of the current file's parent directory.
-    let parent_dir_path = file.path(db).parent()?;
-    let include_dirs = IncludeDirs::get(db).include_dirs(db);
-
-    let mut processed_files = Vec::new();
-    let mut includes = Vec::new();
+    let mut labels = FxHashMap::default();
     let mut mir = Mir::default();
-    let mut ctx = IntraFileCtx {
-        db,
-        file,
-        env: &mut env,
-        mir: &mut mir,
-        parent_is_overlay,
-        parent_dir_path,
-        include_dirs,
-        processed_files: &mut processed_files,
-        includes: &mut includes,
-    };
 
-    // TODO: PERF: split into phases with includes and after includes for Salsa tracking
-    // TODO: PERF: flatten includes only at the root file boundary?
+    {
+        let mut diag = Diag::expanded(&mut diagnostics, db, expanded, root_file);
+        let mut ctx = LowerCtx {
+            mir: &mut mir,
+            labels: &mut labels,
+        };
 
-    // TODO: custom lowering function for non-SourceFile includes
-    for item in file_ast.items() {
-        item::lower_item(&mut ctx, &mut diag, &parent_node_path, item);
+        for item in file_ast.items() {
+            item::lower_item(&mut ctx, &mut diag, "", item);
+        }
     }
 
-    let is_overlay = ctx.is_overlay();
+    let processed_files = expanded
+        .sources
+        .iter()
+        .map(|source| db.get_files().get_file(db, &source.path))
+        .collect();
 
     Some(LoweredFile::new(
         db,
-        env.into_immut(db),
         diagnostics,
         processed_files,
-        includes,
         mir,
-        is_overlay,
+        labels,
     ))
 }
 
-/// Mutable context threaded through the tree traversal in a single [file](File).
-pub(crate) struct IntraFileCtx<'a, 'db> {
-    db: &'db dyn BaseDb,
-    file: File,
-    env: &'a mut TrackedMapEnvMut<'db>,
-    mir: &'a mut Mir,
-    parent_is_overlay: bool,
-    parent_dir_path: &'a Utf8Path,
-    include_dirs: &'a [Utf8PathBuf],
-    processed_files: &'a mut Vec<File>,
-    includes: &'a mut Vec<(File, Span<File>)>,
+/// Context threaded through the tree traversal.
+pub(crate) struct LowerCtx<'a> {
+    pub(crate) mir: &'a mut Mir,
+    pub(crate) labels: &'a mut FxHashMap<String, Option<Label>>,
 }
-impl IntraFileCtx<'_, '_> {
+impl LowerCtx<'_> {
     /// Returns true if this is currently in overlay mode.
     #[must_use]
     fn is_overlay(&self) -> bool {
-        self.parent_is_overlay || self.mir.sets_overlay()
+        self.mir.sets_overlay()
     }
 }
 
-/// Resolves and substitutes a macro and reparses the result.
-///
-/// Returns `Ok(None)` if the macro doesn't exist and the macro reference is implicit.
-pub(crate) fn resolve_macro_to_ast<'db, AstType: AstNodeOrToken>(
-    db: &'db dyn BaseDb,
-    env: &TrackedMapEnvMut<'db>,
-    diag: &mut Diag<'_, '_>,
-    macro_ctx: &MacroCtx,
-    entrypoint: Entrypoint,
-) -> Result<Option<(AstType, MacroSubstitutionProvenance)>, ()> {
-    let Some((expansion, substituted_text)) = substitute_macro_tok(db, env, diag, macro_ctx)?
-    else {
-        // Implicit macro not defined
-        return Ok(None);
-    };
+/// Emits a diagnostic for a macro invocation left in the expanded text.
+pub(crate) fn undefined_macro(diag: &mut Diag<'_, '_>, invocation: &ast::MacroInvocation) {
+    let name = invocation
+        .green_ident()
+        .map_or_else(|| "<unknown>".to_owned(), |token| token.text.to_string());
 
-    let parse = entrypoint.parse(&substituted_text);
-
-    {
-        let child_map = SourceMap::Macro {
-            parent: diag.map,
-            substitution: &expansion,
-        };
-        emit_parse_errors(&parse, &mut Diag::new(&mut *diag.sink, &child_map));
-    }
-
-    if !parse.lex_errors.is_empty() || !parse.errors.is_empty() {
-        diag.emit(
-            macro_ctx.text_range(),
-            format!("Failed to parse the result of this macro invocation ({substituted_text:?}) as {entrypoint:?}"),
-            Severity::Error,
-        );
-    }
-
-    let red_node = parse.red_node();
-    let Some(ast) = AstType::cast_node(red_node.clone())
-        .or_else(|| red_node.children().find_map(AstType::cast_either))
-    else {
-        let msg = format!(
-            "Internal compiler error: Couldn't find {} as child of parse's root node, found node kinds {:?} and token kinds {:?}",
-            std::any::type_name::<AstType>(),
-            parse
-                .red_node()
-                .child_nodes()
-                .map(|red| red.green.kind)
-                .collect::<Vec<_>>(),
-            parse
-                .red_node()
-                .child_tokens()
-                .map(|red| red.green.kind)
-                .collect::<Vec<_>>()
-        );
-        tracing::error!("{}", msg);
-        diag.emit(macro_ctx.text_range(), Cow::Owned(msg), Severity::Error);
-        return Err(());
-    };
-
-    Ok(Some((ast, expansion)))
+    diag.emit(
+        invocation.syntax().text_range(),
+        format!("Macro `{name}` is not defined"),
+        Severity::Error,
+    );
 }
 
 /// Lowers an [`ast::DtPhandle`] to a [`MirPhandleTarget`], if valid.
-fn lower_phandle<'db>(
-    db: &'db dyn BaseDb,
-    env: &mut TrackedMapEnvMut<'db>,
+fn lower_phandle(
     diag: &mut Diag<'_, '_>,
     phandle: &ast::DtPhandle,
 ) -> Result<MirPhandleTarget, ()> {
-    use dt_tools_parser::parser::Entrypoint;
-
     if let Some(macro_inv) = phandle.macro_invocation() {
-        // If the phandle has a macro invocation (e.g. `&MACRO(...)`), resolve it.
-        let (ast, expansion) = resolve_macro_to_ast(
-            db,
-            env,
-            diag,
-            &MacroCtx::Explicit(&macro_inv),
-            Entrypoint::ReferenceNoamp,
-        )?
-        .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
+        // Defined macros were already expanded.
+        undefined_macro(diag, &macro_inv);
+        return Err(());
+    }
 
-        let child_map = SourceMap::Macro {
-            parent: diag.map,
-            substitution: &expansion,
-        };
-        Ok(lower_phandle(
-            db,
-            env,
-            &mut Diag::new(&mut *diag.sink, &child_map),
-            &ast,
-        )?)
-    } else if phandle.is_path() {
+    if phandle.is_path() {
         // &{/path/to/node}
         // FIXME: very naive, just strips the prefix/suffix from the source text.
         // A proper implementation would use the CST structure.
@@ -276,29 +151,8 @@ fn lower_phandle<'db>(
 
         Ok(MirPhandleTarget::Path(inner.to_owned()))
     } else {
-        // No explicit macro invocation, but the name itself might still be a macro
-        // (e.g. `#define UART_1 soc/uart` and `&UART_1`).
         let name_ast = phandle.name().ok_or(())?;
-
-        // dtc wants extensions to be resolved from items above/before the extensions in
-        // non-overlay mode, but phandles are fine in any order.
-
-        Ok(resolve_macro_to_ast(
-            db,
-            env,
-            diag,
-            &MacroCtx::Implicit(&name_ast),
-            Entrypoint::ReferenceNoamp,
-        )?
-        .map(|(ast, expansion)| {
-            let child_map = SourceMap::Macro {
-                parent: diag.map,
-                substitution: &expansion,
-            };
-            lower_phandle(db, env, &mut Diag::new(&mut *diag.sink, &child_map), &ast)
-        })
-        .transpose()?
-        .unwrap_or(MirPhandleTarget::Label(name_ast.syntax().text().to_owned())))
+        Ok(MirPhandleTarget::Label(name_ast.syntax().text().to_owned()))
     }
 }
 
@@ -311,7 +165,7 @@ pub(crate) mod tests {
     use expect_test::{Expect, expect};
 
     use super::*;
-    use crate::{db::BaseDb, file::DisplaySpanLineColumn};
+    use crate::{db::BaseDb, file::DisplaySpanLineColumn, includes::IncludeDirs};
 
     pub(crate) fn fmt_diags(db: &dyn BaseDb, out: &mut String, diags: &[Diagnostic<File>]) {
         out.push_str("--- errors ---\n");

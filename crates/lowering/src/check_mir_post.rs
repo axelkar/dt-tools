@@ -2,9 +2,7 @@ use std::borrow::Cow;
 
 use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
 
-use crate::{
-    db::BaseDb, file::File, lowering::LoweredFile, macros::env::InternedKey, mir, tag_diagnostics,
-};
+use crate::{db::BaseDb, file::File, lowering::LoweredFile, mir, tag_diagnostics};
 
 #[salsa::tracked(returns(ref), lru = 64)]
 pub(super) fn check_mir_post<'db>(
@@ -62,11 +60,7 @@ fn check_phandle(
 ) -> Option<Diagnostic<File>> {
     match target {
         mir::MirPhandleTarget::Label(name) => {
-            if result
-                .env_after(db)
-                .get_label(db, InternedKey::new(db, name))
-                .is_none()
-            {
+            if !result.labels(db).get(name).is_some_and(Option::is_some) {
                 Some(Cow::Owned(format!("Label not found: {name}")))
             } else {
                 None

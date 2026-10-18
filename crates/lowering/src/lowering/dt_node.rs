@@ -7,18 +7,12 @@ use dt_tools_parser::{
         HasUnitAddress,
     },
     lexer::TokenKind,
-    parser::Entrypoint,
 };
 
-use super::{IntraFileCtx, lower_phandle};
+use super::{Label, LowerCtx, lower_phandle, undefined_macro};
 use crate::{
-    db::BaseDb,
-    diag::{Diag, SourceMap},
-    lowering::{
-        item::{lower_item, resolve_phandle},
-        resolve_macro_to_ast,
-    },
-    macros::{MacroCtx, env::TrackedMapEnvMut},
+    diag::Diag,
+    lowering::item::{lower_item, resolve_phandle},
     mir::{
         Mir, MirDefinition, MirDefinitionValue, MirNodeData, MirPhandleTarget, MirProvenance,
         UnresolvedExtension,
@@ -27,7 +21,7 @@ use crate::{
 
 /// Lowers an [`ast::DtNode`] and its subtree to flat [`MirDefinition`]s.
 pub(crate) fn lower_dt_node(
-    ctx: &mut IntraFileCtx<'_, '_>,
+    ctx: &mut LowerCtx<'_>,
     diag: &mut Diag<'_, '_>,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
@@ -54,7 +48,7 @@ pub(crate) fn lower_dt_node(
 
     // Handle extensions: &label { } or &{/path} { }
     if let Some(phandle) = dt_node.dt_phandle() {
-        let Ok(target) = lower_phandle(ctx.db, ctx.env, diag, &phandle) else {
+        let Ok(target) = lower_phandle(diag, &phandle) else {
             return;
         };
 
@@ -82,7 +76,7 @@ pub(crate) fn lower_dt_node(
             }
         }
     } else {
-        let name = if let Ok(name) = get_name_and_unit_addr(ctx.db, ctx.env, diag, dt_node) {
+        let name = if let Ok(name) = get_name_and_unit_addr(diag, dt_node) {
             Some(name)
         } else if dt_node
             .syntax()
@@ -129,23 +123,23 @@ pub(crate) fn lower_dt_node(
 
 /// Collects labels defined on an [`ast::DtNode`].
 pub(crate) fn collect_labels(
-    ctx: &mut IntraFileCtx<'_, '_>,
+    ctx: &mut LowerCtx<'_>,
     diag: &mut Diag<'_, '_>,
     dt_node: &ast::DtNode,
     node_path: &str,
 ) -> Vec<String> {
     let mut labels: Vec<String> = Vec::new();
     for label_ast in dt_node.labels() {
-        if let Ok(label_name) = resolve_name_or_macro(ctx.db, ctx.env, diag, &label_ast) {
+        if let Ok(label_name) = resolve_name_or_macro(diag, &label_ast) {
             // Check for duplicate labels (dtc: no duplicates globally).
-            if let Some((old_path, span)) = ctx.env.get_label(ctx.db, &label_name)
-                && old_path != node_path
+            if let Some(Some(old_label)) = ctx.labels.get(&label_name)
+                && old_label.path != node_path
             {
                 diag.push(Diagnostic {
                     span: diag
                         .resolve_full(label_ast.syntax().text_range())
                         .with_span_label(SpanLabel {
-                            span: *span,
+                            span: old_label.span,
                             msg: Cow::Owned(format!(
                                 "Previous definition of label `{label_name}` here"
                             )),
@@ -154,10 +148,14 @@ pub(crate) fn collect_labels(
                     severity: Severity::Warn,
                 });
             } else {
-                let label_span = diag.resolve(label_ast.syntax().text_range());
-                ctx.env
-                    .own_label_map
-                    .insert(label_name.clone(), Some((node_path.to_owned(), label_span)));
+                let span = diag.resolve(label_ast.syntax().text_range());
+                ctx.labels.insert(
+                    label_name.clone(),
+                    Some(Label {
+                        path: node_path.to_owned(),
+                        span,
+                    }),
+                );
                 labels.push(label_name);
             }
         }
@@ -167,24 +165,16 @@ pub(crate) fn collect_labels(
 
 /// [`lower_dt_node_body`] but with [`IntraFileCtx::mir`] replaced.
 pub(crate) fn lower_dt_node_body_replace_mir(
-    ctx: &mut IntraFileCtx<'_, '_>,
+    ctx: &mut LowerCtx<'_>,
     diag: &mut Diag<'_, '_>,
     body_mir: &mut Mir,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
-    let is_overlay = ctx.is_overlay();
     lower_dt_node_body(
-        &mut IntraFileCtx {
-            db: ctx.db,
-            file: ctx.file,
-            env: ctx.env,
+        &mut LowerCtx {
             mir: body_mir,
-            parent_is_overlay: is_overlay,
-            parent_dir_path: ctx.parent_dir_path,
-            include_dirs: ctx.include_dirs,
-            processed_files: ctx.processed_files,
-            includes: ctx.includes,
+            labels: &mut *ctx.labels,
         },
         diag,
         parent_node_path,
@@ -194,13 +184,11 @@ pub(crate) fn lower_dt_node_body_replace_mir(
 
 /// Lowers the body of an [`ast::DtNode`].
 pub(crate) fn lower_dt_node_body(
-    ctx: &mut IntraFileCtx<'_, '_>,
+    ctx: &mut LowerCtx<'_>,
     diag: &mut Diag<'_, '_>,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
-    // TODO: preprocessor conditionals in nodes
-
     for item in dt_node.items() {
         lower_item(ctx, diag, parent_node_path, item);
     }
@@ -217,49 +205,32 @@ pub(crate) fn build_path(parent: &str, name: &str) -> String {
     }
 }
 
-/// Resolves a macro-substitutable name into a concrete name.
-pub(crate) fn resolve_name_or_macro<'db, Ast: HasName + HasMacroInvocation>(
-    db: &'db dyn BaseDb,
-    env: &TrackedMapEnvMut<'db>,
+/// Resolves a name, diagnosing a macro invocation left in the expanded text.
+pub(crate) fn resolve_name_or_macro<Ast: HasName + HasMacroInvocation>(
     diag: &mut Diag<'_, '_>,
     ast: &Ast,
 ) -> Result<String, ()> {
-    let name_ast = ast.name();
-    let invoc = ast.macro_invocation();
-    let macro_ctx = if let Some(name_ast) = &name_ast {
-        MacroCtx::Implicit(name_ast)
-    } else if let Some(invoc) = &invoc {
-        MacroCtx::Explicit(invoc)
-    } else {
-        return Err(());
-    };
-
-    let Some((ast, expansion)) =
-        resolve_macro_to_ast::<ast::EntryName>(db, env, diag, &macro_ctx, Entrypoint::Name)?
-    else {
-        let name_ast = name_ast.expect("Should return None only with MacroCtx::Implicit");
+    if let Some(name_ast) = ast.name() {
         return Ok(name_ast.syntax().text().as_str().to_owned());
-    };
+    }
 
-    let child_map = SourceMap::Macro {
-        parent: diag.map,
-        substitution: &expansion,
-    };
-    resolve_name_or_macro(db, env, &mut Diag::new(&mut *diag.sink, &child_map), &ast)
+    if let Some(invoc) = ast.macro_invocation() {
+        undefined_macro(diag, &invoc);
+    }
+
+    Err(())
 }
 
 /// Resolves and concatenates together the name and unit address of a compatible AST node.
-pub(crate) fn get_name_and_unit_addr<'db, Ast: HasName + HasMacroInvocation + HasUnitAddress>(
-    db: &'db dyn BaseDb,
-    env: &mut TrackedMapEnvMut<'db>,
+pub(crate) fn get_name_and_unit_addr<Ast: HasName + HasMacroInvocation + HasUnitAddress>(
     diag: &mut Diag<'_, '_>,
     ast: &Ast,
 ) -> Result<String, ()> {
-    let without_unit_addr = resolve_name_or_macro(db, env, diag, ast);
+    let without_unit_addr = resolve_name_or_macro(diag, ast);
 
     let unit_addr = ast
         .unit_address()
-        .map(|ast| resolve_name_or_macro(db, env, diag, &ast))
+        .map(|ast| resolve_name_or_macro(diag, &ast))
         .transpose()?;
 
     without_unit_addr.map(|without_unit_addr| {

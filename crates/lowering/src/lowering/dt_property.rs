@@ -4,98 +4,33 @@ use dt_tools_analyzer::string::interpret_escaped_string;
 use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     TextRange,
-    ast::{self, AstNode, AstToken, HasMacroInvocation, HasName},
+    ast::{self, AstNode, AstToken},
     cst::RedToken,
-    lexer::TokenKind,
-    parser::Entrypoint,
 };
 use num_traits::{AsPrimitive, Num};
 
-use super::{IntraFileCtx, lower_phandle, resolve_macro_to_ast};
+use super::{LowerCtx, lower_phandle, undefined_macro};
 use crate::{
-    diag::{Diag, SourceMap},
-    emit_parse_errors,
+    diag::Diag,
     expr_eval::{self, interpret_escaped_char_tok, parse_int_tok},
     extra_num_traits::{Bits, Signedness},
     lowering::{
         dt_node::{build_path, get_name_and_unit_addr},
-        item::{handle_preprocessor_conditional, lower_item},
+        item::unsupported_preprocessor,
     },
-    macros::{MacroCtx, substitute_macro_tok},
     mir::{
         MirCell32, MirCellList, MirDefinition, MirDefinitionValue, MirPhandleTarget,
         MirPropertyData, MirProvenance, MirValue,
     },
 };
 
-fn try_lower_macro_expanded_items(
-    ctx: &mut IntraFileCtx<'_, '_>,
-    diag: &mut Diag<'_, '_>,
-    parent_node_path: &str,
-    prop: &ast::DtProperty,
-) -> Result<bool, ()> {
-    let is_not_bare = prop
-        .syntax()
-        .child_tokens()
-        .any(|tok| tok.green.kind == TokenKind::Equals);
-
-    if is_not_bare {
-        return Ok(false);
-    }
-
-    let name_ast = prop.name();
-    let invoc = prop.macro_invocation();
-    let macro_ctx = if let Some(invoc) = &invoc {
-        MacroCtx::Explicit(invoc)
-    } else if let Some(name) = &name_ast {
-        MacroCtx::Implicit(name)
-    } else {
-        return Ok(false);
-    };
-
-    let Some((expansion, substituted_text)) =
-        substitute_macro_tok(ctx.db, ctx.env, diag, &macro_ctx)?
-    else {
-        // Implicit macro not defined
-        return Ok(false);
-    };
-
-    // Append a `;` so the parser sees a complete DTS fragment.
-    let text_with_semicolon = format!("{substituted_text};");
-
-    let parse = Entrypoint::SourceFile.parse(&text_with_semicolon);
-    let source_file = parse.source_file();
-    let items: Vec<ast::Item> = source_file.items().collect();
-
-    if items.is_empty() {
-        return Ok(false);
-    }
-
-    let child_map = SourceMap::Macro {
-        parent: diag.map,
-        substitution: &expansion,
-    };
-    let mut child_diag = Diag::new(&mut *diag.sink, &child_map);
-    emit_parse_errors(&parse, &mut child_diag);
-
-    for item in items {
-        lower_item(ctx, &mut child_diag, parent_node_path, item);
-    }
-
-    Ok(true)
-}
-
 /// Lowers an [`ast::DtProperty`] to a [`MirDefinition`], if valid.
 pub(crate) fn lower_dt_property(
-    ctx: &mut IntraFileCtx<'_, '_>,
+    ctx: &mut LowerCtx<'_>,
     diag: &mut Diag<'_, '_>,
     parent_node_path: &str,
     prop: &ast::DtProperty,
 ) -> Result<(), ()> {
-    if try_lower_macro_expanded_items(ctx, diag, parent_node_path, prop)? {
-        return Ok(());
-    }
-
     if parent_node_path.is_empty() {
         diag.emit(
             prop.syntax().text_range(),
@@ -106,12 +41,11 @@ pub(crate) fn lower_dt_property(
     }
 
     let mut values = Vec::new();
-    let mut expansion_stack = Vec::new();
     for value_ast in prop.values() {
-        let _ = lower_prop_value(ctx, diag, &mut values, &value_ast, &mut expansion_stack);
+        let _ = lower_prop_value(diag, &mut values, &value_ast);
     }
 
-    let name = get_name_and_unit_addr(ctx.db, ctx.env, diag, prop)?;
+    let name = get_name_and_unit_addr(diag, prop)?;
     let path = build_path(parent_node_path, &name);
 
     let text_range = prop.syntax().text_range();
@@ -127,11 +61,9 @@ pub(crate) fn lower_dt_property(
 
 /// Lowers an [`ast::PropValue`] to a [`MirValue`], if valid.
 pub(crate) fn lower_prop_value(
-    ctx: &mut IntraFileCtx<'_, '_>,
     diag: &mut Diag<'_, '_>,
     output: &mut Vec<MirValue>,
     ast: &ast::PropValue,
-    expansion_stack: &mut Vec<String>,
 ) -> Result<(), ()> {
     match ast {
         ast::PropValue::String(tok) => {
@@ -139,55 +71,21 @@ pub(crate) fn lower_prop_value(
         }
         ast::PropValue::CellList(cell_list) => {
             let bits_size = BitsSize::from_token(cell_list.bits_number().as_ref(), diag)?;
-            let cells = lower_cell_list(ctx, diag, cell_list, bits_size);
+            let cells = lower_cell_list(diag, cell_list, bits_size);
             output.push(MirValue::CellList(cells));
         }
         ast::PropValue::Bytestring(tok) => {
             output.push(MirValue::Bytestring(lower_bytestring(diag, tok)?));
         }
         ast::PropValue::Phandle(phandle) => {
-            output.push(MirValue::Phandle(lower_phandle(
-                ctx.db, ctx.env, diag, phandle,
-            )?));
+            output.push(MirValue::Phandle(lower_phandle(diag, phandle)?));
         }
         ast::PropValue::Macro(macro_inv) => {
-            let name = macro_inv
-                .green_ident()
-                .map_or(String::new(), |t| t.text.to_string());
-            if expansion_stack.contains(&name) {
-                diag.emit(
-                    macro_inv.syntax().text_range(),
-                    format!("macro `{name}` expanded recursively"),
-                    Severity::Error,
-                );
-                return Err(());
-            }
-            let (ast, expansion) = resolve_macro_to_ast(
-                ctx.db,
-                ctx.env,
-                diag,
-                &MacroCtx::Explicit(macro_inv),
-                Entrypoint::PropValues,
-            )?
-            .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
-            expansion_stack.push(name);
-            let child_map = SourceMap::Macro {
-                parent: diag.map,
-                substitution: &expansion,
-            };
-            let result = lower_prop_value(
-                ctx,
-                &mut Diag::new(&mut *diag.sink, &child_map),
-                output,
-                &ast,
-                expansion_stack,
-            );
-            expansion_stack.pop();
-            result?;
+            undefined_macro(diag, macro_inv);
+            return Err(());
         }
         ast::PropValue::DtsDirective(dir) => {
-            //handle_dts_directive(ctx, parent_node_path, &dir, files);
-            // TODO: implement
+            // TODO: implement DTS directives in property values
             diag.emit(
                 dir.syntax().text_range(),
                 "Currently unimplemented in property values",
@@ -195,21 +93,10 @@ pub(crate) fn lower_prop_value(
             );
         }
         ast::PropValue::PreprocessorConditional(cond) => {
-            let Some(branch) = handle_preprocessor_conditional(ctx, diag, cond) else {
-                return Ok(());
-            };
-            for ast in branch.prop_values() {
-                let _ = lower_prop_value(ctx, diag, output, &ast, expansion_stack);
-            }
+            unsupported_preprocessor(diag, cond.syntax().text_range());
         }
         ast::PropValue::PreprocessorDirective(dir) => {
-            //handle_preprocessor_directive(ctx, parent_node_path, files, text_range, &dir);
-            // TODO: implement
-            diag.emit(
-                dir.syntax().text_range(),
-                "Currently unimplemented in property values",
-                Severity::Error,
-            );
+            unsupported_preprocessor(diag, dir.syntax().text_range());
         }
     }
     Ok(())
@@ -307,27 +194,22 @@ impl BitsSize {
 
 /// Lower a cell list into the correct [`MirCellList`] variant.
 fn lower_cell_list(
-    ctx: &mut IntraFileCtx<'_, '_>,
     diag: &mut Diag<'_, '_>,
     cell_list: &ast::DtCellList,
     bits_size: BitsSize,
 ) -> MirCellList {
     match bits_size {
-        BitsSize::Bits8 => MirCellList::Bits8(collect_cells(ctx, diag, cell_list)),
-        BitsSize::Bits16 => MirCellList::Bits16(collect_cells(ctx, diag, cell_list)),
-        BitsSize::Bits32 => MirCellList::Bits32(collect_cells(ctx, diag, cell_list)),
-        BitsSize::Bits64 => MirCellList::Bits64(collect_cells(ctx, diag, cell_list)),
+        BitsSize::Bits8 => MirCellList::Bits8(collect_cells(diag, cell_list)),
+        BitsSize::Bits16 => MirCellList::Bits16(collect_cells(diag, cell_list)),
+        BitsSize::Bits32 => MirCellList::Bits32(collect_cells(diag, cell_list)),
+        BitsSize::Bits64 => MirCellList::Bits64(collect_cells(diag, cell_list)),
     }
 }
 
-fn collect_cells<T: LowerCell>(
-    ctx: &mut IntraFileCtx<'_, '_>,
-    diag: &mut Diag<'_, '_>,
-    cell_list: &ast::DtCellList,
-) -> Vec<T> {
+fn collect_cells<T: LowerCell>(diag: &mut Diag<'_, '_>, cell_list: &ast::DtCellList) -> Vec<T> {
     let mut cells: Vec<T> = Vec::new();
     cell_list.cells().for_each(|c| {
-        let _ = lower_cell::<T>(ctx, diag, &mut cells, &c);
+        let _ = lower_cell::<T>(diag, &mut cells, &c);
     });
     cells
 }
@@ -367,7 +249,6 @@ trait LowerCell: Sized {
 
 /// Lower a single [`ast::Cell`] using the [`LowerCell`] trait for type-specific conversion.
 fn lower_cell<T: LowerCell>(
-    ctx: &mut IntraFileCtx<'_, '_>,
     diag: &mut Diag<'_, '_>,
     output: &mut Vec<T>,
     ast: &ast::Cell,
@@ -395,7 +276,7 @@ fn lower_cell<T: LowerCell>(
             }
         }
         ast::Cell::Phandle(phandle) => {
-            let target = lower_phandle(ctx.db, ctx.env, diag, phandle)?;
+            let target = lower_phandle(diag, phandle)?;
             output.push(T::from_phandle(
                 target,
                 phandle.syntax().text_range(),
@@ -404,7 +285,7 @@ fn lower_cell<T: LowerCell>(
         }
         ast::Cell::DtExpr(dt_expr) => {
             let expr = dt_expr.expr().ok_or(())?;
-            let num = expr_eval::eval(ctx.db, ctx.env, expr, diag)?;
+            let num = expr_eval::eval(expr, diag)?;
 
             if let Ok(v) = T::Number::try_from(num) {
                 output.push(T::from_number(v));
@@ -417,30 +298,11 @@ fn lower_cell<T: LowerCell>(
             }
         }
         ast::Cell::Macro(macro_inv) => {
-            // TODO: expansion_stack
-            let (ast, expansion) = resolve_macro_to_ast(
-                ctx.db,
-                ctx.env,
-                diag,
-                &MacroCtx::Explicit(macro_inv),
-                Entrypoint::Cells,
-            )?
-            .expect("resolve_macro_to_value should not return Ok(None) with an explicit macro");
-
-            let child_map = SourceMap::Macro {
-                parent: diag.map,
-                substitution: &expansion,
-            };
-            lower_cell::<T>(
-                ctx,
-                &mut Diag::new(&mut *diag.sink, &child_map),
-                output,
-                &ast,
-            )?;
+            undefined_macro(diag, macro_inv);
+            return Err(());
         }
         ast::Cell::DtsDirective(dir) => {
-            //handle_dts_directive(ctx, parent_node_path, &dir, files);
-            // TODO: implement
+            // TODO: implement DTS directives in cells
             diag.emit(
                 dir.syntax().text_range(),
                 "Currently unimplemented in cells",
@@ -448,21 +310,10 @@ fn lower_cell<T: LowerCell>(
             );
         }
         ast::Cell::PreprocessorConditional(cond) => {
-            let Some(branch) = handle_preprocessor_conditional(ctx, diag, cond) else {
-                return Ok(());
-            };
-            for ast in branch.cells() {
-                let _ = lower_cell::<T>(ctx, diag, output, &ast);
-            }
+            unsupported_preprocessor(diag, cond.syntax().text_range());
         }
         ast::Cell::PreprocessorDirective(dir) => {
-            //handle_preprocessor_directive(ctx, parent_node_path, files, text_range, &dir);
-            // TODO: implement
-            diag.emit(
-                dir.syntax().text_range(),
-                "Currently unimplemented in cells",
-                Severity::Error,
-            );
+            unsupported_preprocessor(diag, dir.syntax().text_range());
         }
     }
     Ok(())

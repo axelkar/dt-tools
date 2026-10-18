@@ -262,18 +262,15 @@ fn label_section(
 ) -> Option<(String, TextRange)> {
     let result = lower_root_file(db, root_file)?;
 
-    let mut env = result.env_after(db).to_mut();
-    env.flatten_ancestors(db);
-
-    let (name, (_, span)) = env
-        .own_label_map
+    let (name, label) = result
+        .labels(db)
         .iter()
-        .filter_map(|(key, opt)| Some((key, opt.as_ref()?)))
-        .find(|(_, (_, span))| {
-            span.file == file && span.text_range.byte_range().contains(&offset)
+        .filter_map(|(name, label)| Some((name, label.as_ref()?)))
+        .find(|(_, label)| {
+            label.span.file == file && label.span.text_range.byte_range().contains(&offset)
         })?;
 
-    Some((format!("Label `{name}`"), span.text_range))
+    Some((format!("Label `{name}`"), label.span.text_range))
 }
 
 /// Shows resolved includes from the preprocessor.

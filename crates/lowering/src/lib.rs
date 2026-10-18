@@ -17,7 +17,6 @@ mod extra_num_traits;
 pub mod file;
 pub mod includes;
 pub mod lowering;
-pub mod macros;
 pub mod mir;
 
 #[salsa::tracked]
