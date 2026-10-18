@@ -14,7 +14,7 @@ pub(crate) enum MacroKind {
         /// Parameter names in order.
         params: Vec<String>,
         /// Whether the macro takes `...`.
-        variadic: bool,
+        is_variadic: bool,
     },
 }
 

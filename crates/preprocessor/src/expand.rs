@@ -89,6 +89,16 @@ struct Expander<'a> {
     byte_cap_reported: bool,
 }
 
+/// The arguments of a function-like macro invocation.
+struct Arguments {
+    /// Argument token lists in order.
+    lists: Vec<Vec<MacroToken>>,
+    /// Commas between consecutive arguments, in source order.
+    ///
+    /// `commas[i]` separates `lists[i]` and `lists[i + 1]`.
+    commas: Vec<PpToken>,
+}
+
 impl Expander<'_> {
     /// Returns true if `token` is the punctuator `text`.
     fn is_punct(&self, token: Option<&PpToken>, text: &str) -> bool {
@@ -116,7 +126,10 @@ impl Expander<'_> {
                     self.expand_object_like(token, name, &definition.replacement, stream);
                     return;
                 }
-                MacroKind::Function { params, variadic } => {
+                MacroKind::Function {
+                    params,
+                    is_variadic,
+                } => {
                     let next = stream.peek();
 
                     // Only a macro invocation when followed by left parenthesis: WG14 N3220 § 6.10.5 Macro replacement, para 10
@@ -130,7 +143,7 @@ impl Expander<'_> {
                         name,
                         &definition.replacement,
                         params,
-                        *variadic,
+                        *is_variadic,
                         stream,
                     );
                     return;
@@ -201,7 +214,7 @@ impl Expander<'_> {
         name: &str,
         replacement: &[PpToken],
         params: &[String],
-        variadic: bool,
+        is_variadic: bool,
         stream: &mut TokenStream<'_>,
     ) {
         if self.at_depth_limit(instance_token) {
@@ -217,17 +230,15 @@ impl Expander<'_> {
             return;
         };
 
-        if variadic {
-            self.report(
-                Severity::Error,
-                "variadic macro expansion is not supported yet".to_owned(),
-                instance_token.token.orig,
-            );
-            self.push(instance_token.clone());
-            return;
-        }
-
-        self.substitute_function_like(instance_token, name, replacement, params, args, stream);
+        self.substitute_function_like(
+            instance_token,
+            name,
+            replacement,
+            params,
+            is_variadic,
+            args,
+            stream,
+        );
     }
 
     /// Collects a function-like macro invocation's arguments.
@@ -237,8 +248,9 @@ impl Expander<'_> {
         &mut self,
         stream: &mut TokenStream<'_>,
         lparen: PpToken,
-    ) -> Option<Vec<Vec<MacroToken>>> {
-        let mut args = vec![Vec::new()];
+    ) -> Option<Arguments> {
+        let mut lists = vec![Vec::new()];
+        let mut commas = Vec::new();
         let mut depth = 1;
 
         loop {
@@ -263,53 +275,81 @@ impl Expander<'_> {
                         break;
                     }
                 } else if depth == 1 && text == "," {
-                    args.push(Vec::new());
+                    commas.push(token.token);
+                    lists.push(Vec::new());
                     continue;
                 }
             }
 
-            // TODO: Vararg handling: WG14 N3220 § 6.10.5 Macro replacement, para 12
-
-            args.last_mut().expect("args is never empty").push(token);
+            lists.last_mut().expect("lists is never empty").push(token);
         }
 
-        Some(args)
+        Some(Arguments { lists, commas })
     }
 
     /// Substitutes a function-like macro invocation's arguments.
     ///
     /// Reference: [WG14 N3220 (C23 draft) § 6.10.5.1 Argument substitution](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#subsubsection.6.10.5.1).
+    #[expect(clippy::too_many_arguments, reason = "internal substitution step")]
     fn substitute_function_like(
         &mut self,
         invocation: &MacroToken,
         name: &str,
         replacement: &[PpToken],
         params: &[String],
-        mut args: Vec<Vec<MacroToken>>,
+        is_variadic: bool,
+        args: Arguments,
         stream: &mut TokenStream<'_>,
     ) {
+        let Arguments { mut lists, commas } = args;
         let fixed = params.len();
 
-        if fixed == 0 && args.len() == 1 && args[0].is_empty() {
-            args.clear();
+        if fixed == 0 && lists.len() == 1 && lists[0].is_empty() {
+            lists.clear();
         }
 
-        if args.len() != fixed {
+        if is_variadic {
+            if lists.len() < fixed {
+                self.report(
+                    Severity::Error,
+                    format!("macro `{name}` requires at least {fixed} arguments"),
+                    invocation.token.orig,
+                );
+                return;
+            }
+        } else if lists.len() != fixed {
             self.report(
                 Severity::Error,
                 format!(
                     "macro `{name}` requires {fixed} arguments, but {} were given",
-                    args.len()
+                    lists.len()
                 ),
                 invocation.token.orig,
             );
             return;
         }
 
-        let expanded_args: Vec<Vec<MacroToken>> = args
+        let expanded_args: Vec<Vec<MacroToken>> = lists
             .into_iter()
             .map(|argument| self.prescan(argument))
             .collect();
+
+        let varargs = if is_variadic {
+            let mut varargs = Vec::new();
+            for (offset, argument) in expanded_args[fixed..].iter().enumerate() {
+                if offset > 0 {
+                    varargs.push(MacroToken {
+                        token: commas[fixed + offset - 1],
+                        hide: None,
+                        depth: 0,
+                    });
+                }
+                varargs.extend(argument.iter().cloned());
+            }
+            varargs
+        } else {
+            Vec::new()
+        };
 
         let hide = extend_hide(invocation.hide.as_ref(), name);
         let depth = invocation.depth + 1;
@@ -322,6 +362,16 @@ impl Expander<'_> {
                 push_argument(
                     &mut out,
                     &expanded_args[index],
+                    token,
+                    &hide,
+                    depth,
+                    &mut first_output,
+                    invocation,
+                );
+            } else if is_variadic && text == "__VA_ARGS__" {
+                push_argument(
+                    &mut out,
+                    &varargs,
                     token,
                     &hide,
                     depth,

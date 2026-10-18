@@ -102,18 +102,21 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
         }
 
         let mut params = Vec::new();
-        let mut variadic = false;
+        let mut is_variadic = false;
 
         if self.expander.is_punct(self.peek_arg(), ")") {
             self.argument_pos += 1;
-            return Some(MacroKind::Function { params, variadic });
+            return Some(MacroKind::Function {
+                params,
+                is_variadic,
+            });
         }
 
         loop {
             let token = self.next_arg_or_err("unterminated macro parameter list")?;
 
             if self.expander.is_punct(Some(token), "...") {
-                variadic = true;
+                is_variadic = true;
             } else if token.kind == PpTokenKind::Ident {
                 let name = token.text(self.expander.cleaned_text);
                 if params.iter().any(|param| param == name) {
@@ -137,9 +140,12 @@ impl<'c> DirectiveHandler<'_, '_, 'c> {
             let separator = self.next_arg_or_err("unterminated macro parameter list")?;
 
             if self.expander.is_punct(Some(separator), ")") {
-                return Some(MacroKind::Function { params, variadic });
+                return Some(MacroKind::Function {
+                    params,
+                    is_variadic,
+                });
             } else if self.expander.is_punct(Some(separator), ",") {
-                if variadic {
+                if is_variadic {
                     self.expander.report(
                         Severity::Error,
                         "`...` must be the last parameter".to_owned(),

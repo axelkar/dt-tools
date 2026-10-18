@@ -188,6 +188,38 @@ mod tests {
     }
 
     #[test]
+    fn expands_variadic_macros() {
+        assert_eq!(
+            preprocess_str("#define F(...) __VA_ARGS__\nF(1, 2)\n").text,
+            "1, 2"
+        );
+        assert_eq!(
+            preprocess_str("#define F(a, ...) a __VA_ARGS__\nF(1, 2, 3)\n").text,
+            "1 2, 3"
+        );
+        assert_eq!(
+            preprocess_str("#define F(a, ...) a __VA_ARGS__\nF(1)\n").text,
+            "1"
+        );
+        assert_eq!(preprocess_str("#define F(...) __VA_ARGS__\nF()\n").text, "");
+    }
+
+    #[test]
+    fn prescans_variadic_arguments() {
+        assert_eq!(
+            preprocess_str("#define A 1\n#define F(...) __VA_ARGS__\nF(A, 2)\n").text,
+            "1, 2"
+        );
+    }
+
+    #[test]
+    fn reports_too_few_variadic_arguments() {
+        let result = preprocess_str("#define F(a, b, ...) a b __VA_ARGS__\nF(1)\n");
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].severity, Severity::Error);
+    }
+
+    #[test]
     fn reports_bad_macro_parameter_lists() {
         // Malformed lists are errors, and no macro is defined.
         for input in [

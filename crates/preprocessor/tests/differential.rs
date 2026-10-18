@@ -133,12 +133,17 @@ const MACRO_FRAGMENTS: &[&str] = &[
     "A/*c*/B\n",
     "#define F(x) x\n",
     "#define G(a, b) a b\n",
+    "#define V(...) __VA_ARGS__\n",
+    "#define W(a, ...) a __VA_ARGS__\n",
     "F(1)\n",
     "F(A)\n",
     "F (1)\n",
     "F(F(1))\n",
     "F((1, 2))\n",
     "G(1, 2)\n",
+    "V(1, 2)\n",
+    "V()\n",
+    "W(1, 2, 3)\n",
 ];
 
 /// Hand-picked inputs covering macro edge cases.
@@ -171,6 +176,13 @@ const MACRO_EDGE_CASES: &[&str] = &[
     "#define F(x) F(x)\nF(1)\n",
     "#define F G\n#define G(x) x\nF(1)\n",
     "#define P(x) &x\nP(gpio1)\n",
+    // Variadic macros.
+    "#define F(...) __VA_ARGS__\nF(1, 2)\n",
+    "#define F(a, ...) a __VA_ARGS__\nF(1, 2, 3)\n",
+    "#define F(a, ...) a __VA_ARGS__\nF(1)\n",
+    "#define F(a, ...) a __VA_ARGS__\nF()\n",
+    "#define F(...) __VA_ARGS__\nF()\n",
+    "#define A 1\n#define F(...) __VA_ARGS__\nF(A, 2)\n",
     // Malformed directives and invocations.
     "#define\n",
     "#undef\n",
