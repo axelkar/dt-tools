@@ -314,10 +314,22 @@ mod tests {
     }
 
     #[test]
-    fn reports_invalid_pastes() {
+    fn accepts_invalid_pastes_in_assembler_mode() {
+        // Assembler mode keeps the operands when their concatenation is not one token.
+        for (input, expected) in [
+            ("#define BAD(a, b) a ## b\nBAD(+, -)\n", "+ -"),
+            ("#define BAD(a, b) a ## b\nBAD(/, *)\n", "/ *"),
+        ] {
+            let result = preprocess_str(input);
+            assert!(result.diagnostics.is_empty(), "input: {input:?}");
+            assert_eq!(result.text, expected, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn reports_misplaced_pastes() {
+        // `##` at either end of a replacement list is an error in assembler mode too.
         for input in [
-            "#define BAD(a, b) a ## b\nBAD(+, -)\n",
-            "#define BAD(a, b) a ## b\nBAD(/, *)\n",
             "#define BAD(x) ## x\nBAD(1)\n",
             "#define BAD(x) x ##\nBAD(1)\n",
         ] {

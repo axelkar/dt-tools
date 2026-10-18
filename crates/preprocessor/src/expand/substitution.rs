@@ -343,12 +343,9 @@ impl<'a> SubstitutionBuilder<'a> {
         };
 
         match paste_pair(left.as_ref(), right.as_ref(), self.cleaned) {
-            Ok(pasted) => self.out.push(match pasted {
-                Some(token) => Substituted::Token(token),
-                None => Substituted::Placemarker,
-            }),
-            Err(message) => {
-                self.error(message, origin);
+            Paste::Token(token) => self.out.push(Substituted::Token(token)),
+            Paste::Placemarker => self.out.push(Substituted::Placemarker),
+            Paste::Invalid => {
                 if let Some(left) = left {
                     self.out.push(Substituted::Token(left));
                 }
@@ -516,34 +513,33 @@ pub(super) fn substitute_object_like(
     builder.finish()
 }
 
+/// The result of pasting two operands.
+enum Paste {
+    /// One token formed from the operands.
+    Token(MacroToken),
+    /// Both operands were empty.
+    Placemarker,
+    /// The concatenation is not one token, so the operands are kept separately.
+    Invalid,
+}
+
 /// Pastes two paste operands into one token.
-fn paste_pair(
-    left: Option<&MacroToken>,
-    right: Option<&MacroToken>,
-    cleaned: &str,
-) -> Result<Option<MacroToken>, String> {
+fn paste_pair(left: Option<&MacroToken>, right: Option<&MacroToken>, cleaned: &str) -> Paste {
     match (left, right) {
-        (None, None) => Ok(None),
-        (Some(token), None) | (None, Some(token)) => Ok(Some(token.clone())),
+        (None, None) => Paste::Placemarker,
+        (Some(token), None) | (None, Some(token)) => Paste::Token(token.clone()),
         (Some(left), Some(right)) => {
             let mut text = String::new();
             text.push_str(left.text(cleaned));
             text.push_str(right.text(cleaned));
 
-            let invalid = || {
-                format!(
-                    "pasting `{}` and `{}` does not produce a valid preprocessing token",
-                    left.text(cleaned),
-                    right.text(cleaned)
-                )
-            };
-
+            // Assembler mode keeps the operands when they do not form one token.
             let mut lexer = PpTokenKind::lexer(&text);
             let Some(Ok(kind)) = lexer.next() else {
-                return Err(invalid());
+                return Paste::Invalid;
             };
             if lexer.slice() != text || lexer.next().is_some() {
-                return Err(invalid());
+                return Paste::Invalid;
             }
 
             let hide = match (left.hide.as_ref(), right.hide.as_ref()) {
@@ -554,7 +550,7 @@ fn paste_pair(
                 (None, None) => None,
             };
 
-            Ok(Some(MacroToken {
+            Paste::Token(MacroToken {
                 token: PpToken {
                     file: left.token.file,
                     kind,
@@ -567,7 +563,7 @@ fn paste_pair(
                 text: Some(Arc::from(text)),
                 hide,
                 depth: left.depth.max(right.depth),
-            }))
+            })
         }
     }
 }
