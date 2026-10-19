@@ -367,10 +367,20 @@ mod tests {
 
     #[test]
     fn accepts_invalid_pastes_in_assembler_mode() {
-        // Assembler mode keeps the operands when their concatenation is not one token.
+        // Assembler mode keeps the operands adjacent when their concatenation is not one token.
+        // The emitter still separates tokens that would otherwise form a comment.
         for (input, expected) in [
-            ("#define BAD(a, b) a ## b\nBAD(+, -)\n", "+ -"),
+            ("#define BAD(a, b) a ## b\nBAD(+, -)\n", "+-"),
             ("#define BAD(a, b) a ## b\nBAD(/, *)\n", "/ *"),
+            (
+                r"#define PASTER(x, y) x ## y
+#define EVALUATOR(x, y) PASTER(x, y)
+#define NAME cp0
+#define NODE(name) EVALUATOR(NAME, EVALUATOR(-, name))
+NODE(bus)
+",
+                "cp0-bus",
+            ),
         ] {
             let result = preprocess_str(input);
             assert!(result.diagnostics.is_empty(), "input: {input:?}");

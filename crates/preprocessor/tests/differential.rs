@@ -857,6 +857,8 @@ const MACRO_EDGE_CASES: &[&str] = &[
     "#define CAT(a, b) a ## b\nCAT(x,)\n",
     "#define CAT(a, b) a ## b\nCAT(,)\n",
     "#define A 0 ## 0\nA\n",
+    // Invalid pastes keep their operands adjacent, preserving downstream adjacency.
+    "#define PASTER(x, y) x ## y\n#define EVALUATOR(x, y) PASTER(x, y)\n#define NAME cp0\n#define NODE(name) EVALUATOR(NAME, EVALUATOR(-, name))\nNODE(bus)\n",
     // GNU comma elision.
     "#define F(a, ...) a, ## __VA_ARGS__\nF(1)\n",
     "#define F(a, ...) a, ## __VA_ARGS__\nF(1, 2)\n",
@@ -1057,15 +1059,27 @@ fn responds_to_version(program: &str) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// Tokenizes without cleaning. cpp's output is already free of comments and line continuations,
-/// so it must not be cleaned again, and our cleaned text is compared to it as-is.
-fn raw_tokens(text: &str) -> Vec<(PpTokenKind, String)> {
+/// A token and whether whitespace separated it from the previous token.
+type SpacedToken = (PpTokenKind, String, bool);
+
+/// Tokenizes without cleaning, recording whether whitespace preceded each token.
+///
+/// cpp's output is already free of comments and line continuations, so it must not be cleaned
+/// again, and our cleaned text is compared to it as-is.
+fn raw_tokens(text: &str) -> Vec<SpacedToken> {
     let mut tokens = Vec::new();
     let mut lexer = PpTokenKind::lexer(text);
+    let mut previous_end = None;
+
     while let Some(result) = lexer.next() {
         let kind = result.expect("text must lex without errors");
-        tokens.push((kind, lexer.slice().to_owned()));
+        let span = lexer.span();
+        let has_space_before = previous_end.is_some_and(|end| end < span.start);
+        previous_end = Some(span.end);
+
+        tokens.push((kind, lexer.slice().to_owned(), has_space_before));
     }
+
     tokens
 }
 
@@ -1073,9 +1087,9 @@ fn raw_tokens(text: &str) -> Vec<(PpTokenKind, String)> {
 enum Consensus {
     /// Every preprocessor rejected the input.
     Rejected,
-    /// Every preprocessor produced the same tokens.
+    /// Every preprocessor produced the same tokens with the same adjacency.
     Tokens {
-        expected: Vec<(PpTokenKind, String)>,
+        expected: Vec<SpacedToken>,
         output: String,
     },
     /// The preprocessors disagree, so there is no oracle.
@@ -1135,7 +1149,7 @@ fn check_consensus(cpps: &[Cpp], input: &str, index: usize) {
             assert_eq!(
                 raw_tokens(&cleaned.cleaned_text),
                 expected,
-                "token sequence mismatch at index {index}\n--- input ---\n{input}\n--- cleaned ---\n{}\n--- cpp output ---\n{output}",
+                "token/adjacency mismatch at index {index}\n--- input ---\n{input}\n--- cleaned ---\n{}\n--- cpp output ---\n{output}",
                 cleaned.cleaned_text,
             );
         }
@@ -1172,7 +1186,7 @@ fn check_expanded_consensus(cpps: &[Cpp], input: &str, index: usize) {
             assert_eq!(
                 raw_tokens(&result.text),
                 expected,
-                "expanded token sequence mismatch at index {index}\n--- input ---\n{input}\n--- ours ---\n{}\n--- cpp output ---\n{output}",
+                "expanded token/adjacency mismatch at index {index}\n--- input ---\n{input}\n--- ours ---\n{}\n--- cpp output ---\n{output}",
                 result.text,
             );
         }

@@ -397,7 +397,11 @@ impl<'a> SubstitutionBuilder<'a> {
                 if let Some(left) = left {
                     self.out.push(Substituted::Token(left));
                 }
-                if let Some(right) = right {
+                if let Some(mut right) = right {
+                    // cpp keeps the operands of an invalid paste adjacent, so `cp0 ## -bus`
+                    // becomes `cp0-bus`. The emitter reinserts a space only where adjacency
+                    // would merge tokens or start a comment.
+                    right.has_space_before = false;
                     self.out.push(Substituted::Token(right));
                 }
             }
