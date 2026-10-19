@@ -414,6 +414,23 @@ mod tests {
         );
     }
 
+    /// C integer suffixes from dt-bindings headers are accepted.
+    #[test]
+    fn mir_number_suffix() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { prop = <18U 0x10UL 5LL>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:32
+                property /prop = <18 16 5>; /main.dts L3:5-L3:29
+            "#]],
+        );
+    }
+
     #[test]
     fn mir_bits() {
         check_mir(

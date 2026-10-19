@@ -27,8 +27,10 @@ impl<F: std::fmt::Debug + Clone> EarlyLintPass<F> for KernelCodingStyle {
                 for cell in cell_list.cells() {
                     if let ast::Cell::Number(dt_number) = cell {
                         let text = dt_number.text();
+                        // C integer suffixes are uppercase by convention and not hex digits.
+                        let digits = text.trim_end_matches(['u', 'U', 'l', 'L']);
                         // Hex values in properties, e.g. "reg", shall use lowercase hex.
-                        if text.contains(|c: char| c.is_ascii_uppercase()) {
+                        if digits.contains(|c: char| c.is_ascii_uppercase()) {
                             cx.add_lint_from_cst(
                                 LintId::KernelCodingStyle,
                                 "Hex values in properties must use lowercase hex",

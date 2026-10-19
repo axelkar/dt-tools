@@ -216,10 +216,10 @@ pub enum TokenKind {
 
     // I would have wanted to do [0-1_]*[0-1][0-1_]* but it isn't possible without backtracking.
     // Maybe I should write a callback
-    #[regex("[0-9][0-9_]*((u|i)(8|16|32|64|128))?")]
-    #[regex("0(b|B)[0-1_]+((u|i)(8|16|32|64|128))?")]
-    #[regex("0(o|O)[0-7_]+((u|i)(8|16|32|64|128))?")]
-    #[regex("0(x|X)[0-9a-fA-F_]+((u|i)(8|16|32|64|128))?")]
+    #[regex("[0-9][0-9_]*((u|i)(8|16|32|64|128)|[uU]([lL][lL]?)?|[lL][lL]?[uU]?)?")]
+    #[regex("0(b|B)[0-1_]+((u|i)(8|16|32|64|128)|[uU]([lL][lL]?)?|[lL][lL]?[uU]?)?")]
+    #[regex("0(o|O)[0-7_]+((u|i)(8|16|32|64|128)|[uU]([lL][lL]?)?|[lL][lL]?[uU]?)?")]
+    #[regex("0(x|X)[0-9a-fA-F_]+((u|i)(8|16|32|64|128)|[uU]([lL][lL]?)?|[lL][lL]?[uU]?)?")]
     Number,
 
     #[token("[", callback = lex_bytestring)]
@@ -815,12 +815,15 @@ mod tests {
         check_single("0o777", TokenKind::Number);
         check_single("0b00101010", TokenKind::Number);
 
-        // TODO: is this syntax in dtc? used out in the wild? in the spec?
-        //check("123U", TokenKind::Number);
-        //check("123L", TokenKind::Number);
-        //check("123UL", TokenKind::Number);
-        //check("123LL", TokenKind::Number);
-        //check("123ULL", TokenKind::Number);
+        // C integer suffixes used in dt-bindings headers.
+        check_single("123U", TokenKind::Number);
+        check_single("123L", TokenKind::Number);
+        check_single("123UL", TokenKind::Number);
+        check_single("123LL", TokenKind::Number);
+        check_single("123ULL", TokenKind::Number);
+        check_single("123u", TokenKind::Number);
+        check_single("123ull", TokenKind::Number);
+        check_single("0x1fU", TokenKind::Number);
     }
 
     #[test]

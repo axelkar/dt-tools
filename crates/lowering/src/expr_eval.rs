@@ -36,7 +36,9 @@ pub fn parse_int_tok<
         diag.emit(tok.text_range(), msg, Severity::Error);
     }
 
-    let src = tok.text().as_str();
+    // Ignore C integer suffixes like `U`, `UL`, and `ULL`.
+    let src = tok.text().as_str().trim_end_matches(['u', 'U', 'l', 'L']);
+
     if src.starts_with("0x") || src.starts_with("0X") {
         // Hexadecimal
         T::from_str_radix(&src[2..], 16)

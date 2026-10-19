@@ -25,6 +25,7 @@ pub enum ValueFromAstError {
 }
 
 pub(crate) fn parse_u32(src: &str) -> Result<u32, ValueFromAstError> {
+    let src = src.trim_end_matches(['u', 'U', 'l', 'L']);
     src.parse().or_else(|_| {
         src.strip_prefix("0x")
             .or_else(|| src.strip_prefix("0X"))
