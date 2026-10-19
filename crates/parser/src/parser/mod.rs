@@ -351,7 +351,7 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     // For the error builder
     fn emit_parse_error(&mut self, error: ParseError) {
-        self.events.push(Event::Error(error));
+        self.events.push(Event::Error(Box::new(error)));
     }
     fn current_token_error_range(&mut self) -> TextRange {
         if self.at_end() {

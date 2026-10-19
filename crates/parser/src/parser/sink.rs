@@ -137,7 +137,7 @@ impl<'t, 'input> Sink<'t, 'input> {
                         .push(GreenItem::Node(Arc::new(old_current_node)));
                 }
                 Event::Placeholder => {}
-                Event::Error(error) => self.errors.push(error),
+                Event::Error(error) => self.errors.push(*error),
             }
         }
 
