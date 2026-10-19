@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use crate::{
     db::BaseDb,
     diag::Diag,
-    expand::{expand_root, expanded_parse},
+    expand::{ExpandedText, expand_root, expanded_parse},
     file::File,
     mir::{Mir, MirPhandleTarget},
 };
@@ -23,17 +23,20 @@ mod item;
 pub struct Label {
     /// Path of the labeled node.
     pub path: String,
-    /// The label's span.
-    pub span: Span<File>,
+    /// The label's span in the expanded text.
+    pub span: Span<ExpandedText>,
 }
 
 /// Result of lowering a root file and its includes.
 #[salsa::tracked]
 pub struct LoweredFile<'db> {
-    /// List of diagnostics emitted by lowering.
+    /// Diagnostics emitted by lowering.
+    ///
+    /// Their spans are offsets into the root's expanded text, not file positions. Consumers
+    /// resolve them with the root's [`dt_tools_preprocessor::PreprocessedRoot`].
     #[tracked]
     #[returns(ref)]
-    pub diagnostics: Vec<Diagnostic<File>>,
+    pub diagnostics: Vec<Diagnostic<ExpandedText>>,
 
     /// List of files processed, for publishing diagnostics.
     #[tracked]
@@ -75,7 +78,7 @@ pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'
     let mut mir = Mir::default();
 
     {
-        let mut diag = Diag::expanded(&mut diagnostics, db, expanded, root_file);
+        let mut diag = Diag::new(&mut diagnostics);
         let mut ctx = LowerCtx {
             mir: &mut mir,
             labels: &mut labels,
@@ -115,7 +118,7 @@ impl LowerCtx<'_> {
 }
 
 /// Emits a diagnostic for a macro invocation left in the expanded text.
-pub(crate) fn undefined_macro(diag: &mut Diag<'_, '_>, invocation: &ast::MacroInvocation) {
+pub(crate) fn undefined_macro(diag: &mut Diag<'_>, invocation: &ast::MacroInvocation) {
     let name = invocation
         .green_ident()
         .map_or_else(|| "<unknown>".to_owned(), |token| token.text.to_string());
@@ -128,10 +131,7 @@ pub(crate) fn undefined_macro(diag: &mut Diag<'_, '_>, invocation: &ast::MacroIn
 }
 
 /// Lowers an [`ast::DtPhandle`] to a [`MirPhandleTarget`], if valid.
-fn lower_phandle(
-    diag: &mut Diag<'_, '_>,
-    phandle: &ast::DtPhandle,
-) -> Result<MirPhandleTarget, ()> {
+fn lower_phandle(diag: &mut Diag<'_>, phandle: &ast::DtPhandle) -> Result<MirPhandleTarget, ()> {
     if let Some(macro_inv) = phandle.macro_invocation() {
         // Defined macros were already expanded.
         undefined_macro(diag, &macro_inv);
@@ -222,8 +222,11 @@ pub(crate) mod tests {
 
         let result = lower_root_file(&db, root_file).expect("Should be a readable file");
         let mir = result.mir(&db);
+        let expanded = expand_root(&db, root_file)
+            .as_ref()
+            .expect("Should be a readable file");
 
-        let mut out = mir.display(&db);
+        let mut out = mir.display(&db, expanded);
         if !diags.is_empty() {
             out.push('\n');
             fmt_diags(&db, &mut out, diags);

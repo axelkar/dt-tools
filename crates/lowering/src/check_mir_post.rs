@@ -4,7 +4,7 @@ use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
 
 use crate::{
     db::BaseDb,
-    file::File,
+    expand::ExpandedText,
     lowering::{LoweredFile, dt_node::build_path},
     mir, tag_diagnostics,
 };
@@ -13,7 +13,7 @@ use crate::{
 pub(super) fn check_mir_post<'db>(
     db: &'db dyn BaseDb,
     result: LoweredFile<'db>,
-) -> Vec<Diagnostic<File>> {
+) -> Vec<Diagnostic<ExpandedText>> {
     let mut diagnostics = Vec::new();
 
     let mir = result.mir(db);
@@ -29,7 +29,7 @@ fn check_phandles(
     db: &dyn BaseDb,
     result: LoweredFile<'_>,
     mir: &mir::Mir,
-    diagnostics: &mut Vec<Diagnostic<File>>,
+    diagnostics: &mut Vec<Diagnostic<ExpandedText>>,
 ) {
     if mir.sets_overlay() {
         return;
@@ -62,7 +62,7 @@ fn check_phandle(
     result: LoweredFile<'_>,
     def: &mir::MirDefinition,
     target: &mir::MirPhandleTarget,
-) -> Option<Diagnostic<File>> {
+) -> Option<Diagnostic<ExpandedText>> {
     match target {
         mir::MirPhandleTarget::Label(name) => {
             if result.labels(db).get(name).is_some_and(Option::is_some) {
@@ -99,14 +99,14 @@ fn check_phandle(
         }
     }
     .map(|msg| Diagnostic {
-        span: def.provenance.clone().into(),
+        span: MultiSpan::from(def.provenance.0),
         msg,
         severity: Severity::Error,
     })
 }
 
 /// Validates the existence and order of /dts-v1/; and /plugin/;
-fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<File>>) {
+fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<ExpandedText>>) {
     let mut dts_v1: Option<mir::MirProvenance> = None;
     let mut errored_about_dts_v1 = false;
     let mut overlay_mode: Option<mir::MirProvenance> = None;
@@ -115,30 +115,28 @@ fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<File>>) {
         match def.value {
             mir::MirDefinitionValue::V1Directive => {
                 // Note: /dts-v1/; is allowed to be twice
-                dts_v1 = Some(def.provenance.clone());
+                dts_v1 = Some(def.provenance);
             }
             mir::MirDefinitionValue::PluginDirective => {
                 if dts_v1.is_none() {
                     diagnostics.push(Diagnostic {
-                        span: def.provenance.clone().into(),
+                        span: MultiSpan::from(def.provenance.0),
                         msg: "`/plugin/;` before `/dts-v1/`;".into(),
                         severity: Severity::Error,
                     });
                 } else if let Some(prev_def) = &overlay_mode {
-                    let mut multispan: MultiSpan<File> = def.provenance.clone().into();
-
-                    // TODO: how to turn MirProvenance to span labels? MirProvenance can have multiple spans.
-                    multispan.span_labels.push(SpanLabel {
-                        span: prev_def.primary_span(),
+                    let mut span = MultiSpan::from(def.provenance.0);
+                    span.span_labels.push(SpanLabel {
+                        span: prev_def.0,
                         msg: "Previous definition here".into(),
                     });
                     diagnostics.push(Diagnostic {
-                        span: multispan,
+                        span,
                         msg: "`/plugin/;` twice".into(),
                         severity: Severity::Error,
                     });
                 }
-                overlay_mode = Some(def.provenance.clone());
+                overlay_mode = Some(def.provenance);
             }
             mir::MirDefinitionValue::Node(_)
             | mir::MirDefinitionValue::Property(_)
@@ -147,7 +145,7 @@ fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<File>>) {
                 if dts_v1.is_none() && !errored_about_dts_v1 {
                     errored_about_dts_v1 = true;
                     diagnostics.push(Diagnostic {
-                        span: def.provenance.clone().into(),
+                        span: MultiSpan::from(def.provenance.0),
                         msg: "Definition before `/dts-v1/;`".into(),
                         severity: Severity::Error,
                     });

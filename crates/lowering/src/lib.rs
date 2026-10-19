@@ -2,15 +2,14 @@ use std::borrow::Cow;
 
 use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
 
-use crate::{
-    diag::Diag,
-    expand::{expand_root, expanded_syntax_diagnostics, preprocessor_diagnostics},
+use crate::expand::{
+    expand_root, expanded_syntax_diagnostics, preprocessor_diagnostics, resolve_diagnostic,
 };
 
 mod check_mir_post;
 pub mod codespan_reporting;
 pub mod db;
-pub mod diag;
+mod diag;
 pub mod expand;
 mod expr_eval;
 mod extra_num_traits;
@@ -66,18 +65,23 @@ pub(crate) fn tag_diagnostic<F>(diagnostic: &mut Diagnostic<F>, tag: &str) {
     }
 }
 
-pub fn emit_parse_errors(parse: &dt_tools_parser::parser::Parse, diag: &mut Diag<'_, '_>) -> bool {
+/// Converts a raw parse's errors to diagnostics for `file`.
+pub fn emit_parse_errors(
+    parse: &dt_tools_parser::parser::Parse,
+    sink: &mut Vec<Diagnostic<file::File>>,
+    file: file::File,
+) -> bool {
     if parse.lex_errors.is_empty() && parse.errors.is_empty() {
         return false;
     }
 
     let earliest_lex_error_range = parse.lex_errors.first().map(|e| e.text_range);
     for lex_error in &parse.lex_errors {
-        diag.emit(
-            lex_error.text_range,
-            format!("{} [lex error]", lex_error.inner),
-            Severity::Error,
-        );
+        sink.push(Diagnostic {
+            span: MultiSpan::from(lex_error.text_range.within_file(file)),
+            msg: format!("{} [lex error]", lex_error.inner).into(),
+            severity: Severity::Error,
+        });
     }
 
     for error in &parse.errors {
@@ -89,12 +93,12 @@ pub fn emit_parse_errors(parse: &dt_tools_parser::parser::Parse, diag: &mut Diag
 
         let mut diagnostic = Diagnostic {
             span: MultiSpan {
-                primary_spans: vec![diag.resolve(error.primary_text_range)],
+                primary_spans: vec![error.primary_text_range.within_file(file)],
                 span_labels: error
                     .span_labels
                     .iter()
                     .map(|(text_range, msg)| SpanLabel {
-                        span: diag.resolve(*text_range),
+                        span: (*text_range).within_file(file),
                         msg: msg.clone(),
                     })
                     .collect(),
@@ -103,7 +107,7 @@ pub fn emit_parse_errors(parse: &dt_tools_parser::parser::Parse, diag: &mut Diag
             severity: Severity::Error,
         };
         tag_diagnostic(&mut diagnostic, "dt-tools(syntax-error)");
-        diag.push(diagnostic);
+        sink.push(diagnostic);
     }
 
     false
@@ -133,17 +137,28 @@ pub fn compute_diagnostics(
         );
     }
 
-    if let Some(expanded) = expand_root(db, root_file).as_ref() {
+    let mut processed_files = if let Some(expanded) = expand_root(db, root_file).as_ref() {
         diagnostics.extend(preprocessor_diagnostics(db, expanded));
         diagnostics.extend(expanded_syntax_diagnostics(db, root_file));
-    }
 
-    let mut processed_files = if let Some(result) = lowering::lower_root_file(db, root_file) {
-        diagnostics.extend_from_slice(result.diagnostics(db));
+        if let Some(result) = lowering::lower_root_file(db, root_file) {
+            diagnostics.extend(
+                result
+                    .diagnostics(db)
+                    .iter()
+                    .map(|diagnostic| resolve_diagnostic(db, expanded, diagnostic)),
+            );
 
-        diagnostics.extend_from_slice(check_mir_post::check_mir_post(db, result));
+            diagnostics.extend(
+                check_mir_post::check_mir_post(db, result)
+                    .iter()
+                    .map(|diagnostic| resolve_diagnostic(db, expanded, diagnostic)),
+            );
 
-        result.processed_files(db).clone()
+            result.processed_files(db).clone()
+        } else {
+            Vec::new()
+        }
     } else {
         Vec::new()
     };

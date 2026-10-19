@@ -1,11 +1,11 @@
 use std::{borrow::Cow, collections::BTreeSet, fmt};
 
-use dt_tools_diagnostic::{MultiSpan, Span};
-use dt_tools_parser::TextRange;
+use dt_tools_diagnostic::Span;
+use dt_tools_preprocessor::PreprocessedRoot;
 
 use crate::{
-    diag::Diag,
-    file::{DisplaySpanLineColumn, File},
+    expand::{ExpandedText, resolve_range},
+    file::DisplaySpanLineColumn,
 };
 
 fn strip_base<'a>(this: &'a str, base: &str) -> Option<&'a str> {
@@ -47,8 +47,12 @@ impl Mir {
     }
 
     /// Format MIR for display.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a definition's provenance has no primary span.
     #[must_use]
-    pub fn display(&self, db: &dyn crate::db::BaseDb) -> String {
+    pub fn display(&self, db: &dyn crate::db::BaseDb, expanded: &PreprocessedRoot) -> String {
         use std::fmt::Write;
 
         let mut out = String::new();
@@ -96,7 +100,11 @@ impl Mir {
                 format!(" {}", def.path)
             };
 
-            let primary_span = def.provenance.primary_span();
+            let provenance = resolve_range(db, expanded, def.provenance.0.text_range);
+            let primary_span = *provenance
+                .primary_spans
+                .first()
+                .expect("provenance must have a primary span");
 
             let _ = writeln!(
                 out,
@@ -215,54 +223,9 @@ impl Mir {
     }
 }
 
-/// Source locations that contributed to a definition, with notes.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MirProvenance(pub MultiSpan<File>);
-
-impl MirProvenance {
-    /// Creates a `MirProvenance` from a single span with no labels.
-    #[must_use]
-    pub fn new(span: Span<File>) -> Self {
-        Self(MultiSpan::from(span))
-    }
-
-    /// Creates a `MirProvenance` from a [`Diag`] by resolving `range` through the full source map.
-    ///
-    /// Captures both the first primary span and all provenance labels.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the source map resolution yields no primary spans (should never happen;
-    /// `SourceMap::File` always produces at least one).
-    #[must_use]
-    pub fn from_diag(diag: &Diag<'_, '_>, range: TextRange) -> Self {
-        Self(diag.resolve_full(range))
-    }
-
-    /// Returns the first primary span of the [`MultiSpan`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if there are no primary spans.
-    #[must_use]
-    pub fn primary_span(&self) -> Span<File> {
-        *self
-            .0
-            .primary_spans
-            .first()
-            .expect("multispan should have at least one primary span")
-    }
-}
-impl From<MirProvenance> for MultiSpan<File> {
-    fn from(value: MirProvenance) -> Self {
-        value.0
-    }
-}
-impl From<MultiSpan<File>> for MirProvenance {
-    fn from(value: MultiSpan<File>) -> Self {
-        Self(value)
-    }
-}
+/// A source location in the expanded text that produced a definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MirProvenance(pub Span<ExpandedText>);
 
 /// Flat MIR definition with a path
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -474,7 +437,9 @@ mod tests {
     use expect_test::{Expect, expect};
 
     use super::*;
-    use crate::{db::BaseDb, includes::IncludeDirs, lowering::lower_root_file};
+    use crate::{
+        db::BaseDb, expand::expand_root, includes::IncludeDirs, lowering::lower_root_file,
+    };
 
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
     fn check_iter_live_defs_under(input: &str, path_base: &str, expect: Expect) {
@@ -487,13 +452,16 @@ mod tests {
 
         let result = lower_root_file(&db, root_file).expect("Should be a readable file");
         let mir = result.mir(&db);
+        let expanded = expand_root(&db, root_file)
+            .as_ref()
+            .expect("Should be a readable file");
 
         let new_mir = Mir {
             definitions: Mir::iter_live_defs_under(mir, path_base).cloned().collect(),
             unresolved_extensions: Vec::new(),
         };
 
-        expect.assert_eq(&new_mir.display(&db));
+        expect.assert_eq(&new_mir.display(&db, expanded));
     }
 
     #[test]

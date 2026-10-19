@@ -3,9 +3,14 @@
 use dt_tools_diagnostic::{
     Diagnostic, MultiSpan, Severity, Span, SpanLabel, text_range::TextRange,
 };
-use dt_tools_preprocessor::{PreprocessedRoot, PreprocessorConfig, SourceId, preprocess};
+pub use dt_tools_preprocessor::PreprocessedRoot;
+use dt_tools_preprocessor::{PreprocessorConfig, SourceId, preprocess};
 
 use crate::{Parse, db::BaseDb, file::File, includes::IncludeDirs};
+
+/// Identifies ranges in a root file's expanded text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExpandedText;
 
 /// Returns the preprocessed text and provenance of `root`.
 ///
@@ -79,6 +84,37 @@ pub fn resolve_range(
                 msg: label.msg.clone(),
             })
             .collect(),
+    }
+}
+
+/// Converts a diagnostic in expanded-text coordinates to file spans.
+pub fn resolve_diagnostic(
+    db: &dyn BaseDb,
+    expanded: &PreprocessedRoot,
+    diagnostic: &Diagnostic<ExpandedText>,
+) -> Diagnostic<File> {
+    let mut span = MultiSpan::empty();
+
+    for raw_span in &diagnostic.span.primary_spans {
+        let resolved = resolve_range(db, expanded, raw_span.text_range);
+        span.primary_spans.extend(resolved.primary_spans);
+        span.span_labels.extend(resolved.span_labels);
+    }
+
+    for label in &diagnostic.span.span_labels {
+        let resolved = resolve_range(db, expanded, label.span.text_range);
+        if let Some(file_span) = resolved.primary_spans.into_iter().next() {
+            span.span_labels.push(SpanLabel {
+                span: file_span,
+                msg: label.msg.clone(),
+            });
+        }
+    }
+
+    Diagnostic {
+        span,
+        msg: diagnostic.msg.clone(),
+        severity: diagnostic.severity,
     }
 }
 

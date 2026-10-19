@@ -13,7 +13,6 @@ use dt_tools_lowering::{
     codespan_reporting::print_diagnostics,
     compute_diagnostics,
     db::{BaseDatabase, BaseDb},
-    diag::Diag,
     emit_parse_errors,
     expand::{expand_root, expanded_syntax_diagnostics, preprocessor_diagnostics},
     includes::IncludeDirs,
@@ -162,7 +161,7 @@ fn cmd_parse(file: &Utf8Path) -> Result<()> {
     print!("{}", parse.green_node.print_tree());
 
     let mut diagnostics = Vec::new();
-    emit_parse_errors(parse, &mut Diag::file(&mut diagnostics, file));
+    emit_parse_errors(parse, &mut diagnostics, file);
 
     if print_diagnostics(diagnostics, &db)? {
         std::process::exit(1);
@@ -213,8 +212,16 @@ fn cmd_mir(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
 
     let (diagnostics, _processed_files) = compute_diagnostics(&db, root_file);
 
+    let expanded = expand_root(&db, root_file)
+        .as_ref()
+        .ok_or_eyre("File does not exist or is not readable")?;
+
     eprintln!("{} diagnostics and MIR", "  Computed".green().bold());
-    print!("{}{}", "MIR:\n".cyan(), result.mir(&db).display(&db));
+    print!(
+        "{}{}",
+        "MIR:\n".cyan(),
+        result.mir(&db).display(&db, expanded)
+    );
 
     println!("{}", "\nDiagnostics:".red());
     if print_diagnostics(diagnostics.clone(), &db)? {

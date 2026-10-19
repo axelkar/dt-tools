@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use dt_tools_diagnostic::{Diagnostic, Severity, SpanLabel};
+use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
 use dt_tools_parser::{
     ast::{
         self, AstNode, AstToken, HasDtPhandle, HasLabels, HasMacroInvocation, HasName,
@@ -12,6 +12,7 @@ use dt_tools_parser::{
 use super::{Label, LowerCtx, lower_phandle, undefined_macro};
 use crate::{
     diag::Diag,
+    expand::ExpandedText,
     lowering::item::{lower_item, resolve_phandle},
     mir::{
         Mir, MirDefinition, MirDefinitionValue, MirNodeData, MirPhandleTarget, MirProvenance,
@@ -22,11 +23,11 @@ use crate::{
 /// Lowers an [`ast::DtNode`] and its subtree to flat [`MirDefinition`]s.
 pub(crate) fn lower_dt_node(
     ctx: &mut LowerCtx<'_>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
-    let provenance = MirProvenance::from_diag(diag, dt_node.syntax().text_range());
+    let provenance = MirProvenance(dt_node.syntax().text_range().within_file(ExpandedText));
     let omit_if_no_ref = dt_node.omit_if_no_ref();
 
     let lower_resolved = |ctx: &mut _, diag: &mut _, provenance, node_path: &String| {
@@ -124,7 +125,7 @@ pub(crate) fn lower_dt_node(
 /// Collects labels defined on an [`ast::DtNode`].
 pub(crate) fn collect_labels(
     ctx: &mut LowerCtx<'_>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     dt_node: &ast::DtNode,
     node_path: &str,
 ) -> Vec<String> {
@@ -135,20 +136,19 @@ pub(crate) fn collect_labels(
             if let Some(Some(old_label)) = ctx.labels.get(&label_name)
                 && old_label.path != node_path
             {
+                let span = label_ast.syntax().text_range().within_file(ExpandedText);
                 diag.push(Diagnostic {
-                    span: diag
-                        .resolve_full(label_ast.syntax().text_range())
-                        .with_span_label(SpanLabel {
-                            span: old_label.span,
-                            msg: Cow::Owned(format!(
-                                "Previous definition of label `{label_name}` here"
-                            )),
-                        }),
+                    span: MultiSpan::from(span).with_span_label(SpanLabel {
+                        span: old_label.span,
+                        msg: Cow::Owned(format!(
+                            "Previous definition of label `{label_name}` here"
+                        )),
+                    }),
                     msg: Cow::Owned(format!("Duplicate label `{label_name}`")),
                     severity: Severity::Warn,
                 });
             } else {
-                let span = diag.resolve(label_ast.syntax().text_range());
+                let span = label_ast.syntax().text_range().within_file(ExpandedText);
                 ctx.labels.insert(
                     label_name.clone(),
                     Some(Label {
@@ -166,7 +166,7 @@ pub(crate) fn collect_labels(
 /// [`lower_dt_node_body`] but with [`IntraFileCtx::mir`] replaced.
 pub(crate) fn lower_dt_node_body_replace_mir(
     ctx: &mut LowerCtx<'_>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     body_mir: &mut Mir,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
@@ -185,7 +185,7 @@ pub(crate) fn lower_dt_node_body_replace_mir(
 /// Lowers the body of an [`ast::DtNode`].
 pub(crate) fn lower_dt_node_body(
     ctx: &mut LowerCtx<'_>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
@@ -207,7 +207,7 @@ pub(crate) fn build_path(parent: &str, name: &str) -> String {
 
 /// Resolves a name, diagnosing a macro invocation left in the expanded text.
 pub(crate) fn resolve_name_or_macro<Ast: HasName + HasMacroInvocation>(
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     ast: &Ast,
 ) -> Result<String, ()> {
     if let Some(name_ast) = ast.name() {
@@ -223,7 +223,7 @@ pub(crate) fn resolve_name_or_macro<Ast: HasName + HasMacroInvocation>(
 
 /// Resolves and concatenates together the name and unit address of a compatible AST node.
 pub(crate) fn get_name_and_unit_addr<Ast: HasName + HasMacroInvocation + HasUnitAddress>(
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     ast: &Ast,
 ) -> Result<String, ()> {
     let without_unit_addr = resolve_name_or_macro(diag, ast);

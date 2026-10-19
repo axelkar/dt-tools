@@ -3,7 +3,7 @@ use std::fmt::Write;
 use dt_tools_diagnostic::Span;
 use dt_tools_lowering::{
     db::BaseDb,
-    expand::{expand_root, source_file},
+    expand::{expand_root, resolve_range, source_file},
     file::File,
     lowering::lower_root_file,
     mir::{MirDefinition, MirDefinitionValue},
@@ -137,6 +137,7 @@ fn mir_definition_section(
 
     fn fmt_mir_def(
         db: &dyn BaseDb,
+        expanded: &dt_tools_lowering::expand::PreprocessedRoot,
         def: &MirDefinition,
         most_precise: &MirDefinition,
         already_defined: &mut bool,
@@ -174,11 +175,17 @@ fn mir_definition_section(
         };
 
         let is_here = def == most_precise;
-        fmt_span(db, &def.provenance.primary_span(), is_here, &mut s);
+        let span = resolve_range(db, expanded, def.provenance.0.text_range)
+            .primary_spans
+            .first()
+            .copied()
+            .expect("provenance must have a primary span");
+        fmt_span(db, &span, is_here, &mut s);
 
         s
     }
 
+    let expanded = expand_root(db, root_file).as_ref()?;
     let mir = lower_root_file(db, root_file)?.mir(db);
 
     // TODO: unresolved_extensions
@@ -186,17 +193,21 @@ fn mir_definition_section(
         .definitions
         .iter()
         .filter(|def| {
-            def.provenance.primary_span().file == file
-                && def
-                    .provenance
-                    .primary_span()
-                    .text_range
-                    .byte_range()
-                    .contains(&offset)
+            resolve_range(db, expanded, def.provenance.0.text_range)
+                .primary_spans
+                .first()
+                .is_some_and(|span| {
+                    span.file == file && span.text_range.byte_range().contains(&offset)
+                })
         })
         .collect_vec();
 
     let most_precise = *matching_defs.iter().max_by_key(|def| def.path.len())?;
+    let primary_span = resolve_range(db, expanded, most_precise.provenance.0.text_range)
+        .primary_spans
+        .first()
+        .copied()
+        .expect("provenance must have a primary span");
 
     // TODO: get e.g. binding documentation using `compatible`
 
@@ -206,11 +217,11 @@ fn mir_definition_section(
             "MIR: `{}`\n\n- {}",
             most_precise.path,
             mir.history(&most_precise.path)
-                .map(|def| fmt_mir_def(db, def, most_precise, &mut already_defined))
+                .map(|def| { fmt_mir_def(db, expanded, def, most_precise, &mut already_defined) })
                 .collect_vec()
                 .join("\n- ")
         ),
-        most_precise.provenance.primary_span().text_range,
+        primary_span.text_range,
     ))
 }
 
@@ -260,17 +271,23 @@ fn label_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
+    let expanded = expand_root(db, root_file).as_ref()?;
     let result = lower_root_file(db, root_file)?;
 
-    let (name, label) = result
+    let (name, span) = result
         .labels(db)
         .iter()
-        .filter_map(|(name, label)| Some((name, label.as_ref()?)))
-        .find(|(_, label)| {
-            label.span.file == file && label.span.text_range.byte_range().contains(&offset)
-        })?;
+        .filter_map(|(name, label)| {
+            let label = label.as_ref()?;
+            let span = resolve_range(db, expanded, label.span.text_range)
+                .primary_spans
+                .first()
+                .copied()?;
+            Some((name, span))
+        })
+        .find(|(_, span)| span.file == file && span.text_range.byte_range().contains(&offset))?;
 
-    Some((format!("Label `{name}`"), label.span.text_range))
+    Some((format!("Label `{name}`"), span.text_range))
 }
 
 /// Shows resolved includes from the preprocessor.

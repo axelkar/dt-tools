@@ -20,12 +20,12 @@ pub fn parse_int_tok<
     T: FromStr<Err = ParseIntError> + Num<FromStrRadixErr = ParseIntError> + Bits + Signedness,
 >(
     tok: &Arc<RedToken>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
 ) -> Result<T, ()> {
     /// Helper function that isn't monomorphized
     fn emit_err(
         err: &ParseIntError,
-        diag: &mut Diag<'_, '_>,
+        diag: &mut Diag<'_>,
         tok: &Arc<RedToken>,
         bits: u32,
         signedness: &'static str,
@@ -56,16 +56,13 @@ pub fn parse_int_tok<
 }
 
 /// Wraps [`interpret_escaped_char`], handling errors.
-pub fn interpret_escaped_char_tok(
-    tok: &Arc<RedToken>,
-    diag: &mut Diag<'_, '_>,
-) -> Result<char, ()> {
+pub fn interpret_escaped_char_tok(tok: &Arc<RedToken>, diag: &mut Diag<'_>) -> Result<char, ()> {
     interpret_escaped_char(tok.text()).map_err(|err| {
         diag.emit(tok.text_range(), err.to_string(), Severity::Error);
     })
 }
 
-pub fn eval(ast: ast::Expr, diag: &mut Diag<'_, '_>) -> Result<i64, ()> {
+pub fn eval(ast: ast::Expr, diag: &mut Diag<'_>) -> Result<i64, ()> {
     match ast {
         ast::Expr::PrefixExpr(prefix_expr) => {
             let mut value = || eval(prefix_expr.expr().ok_or(())?, diag);
@@ -171,20 +168,13 @@ pub fn eval(ast: ast::Expr, diag: &mut Diag<'_, '_>) -> Result<i64, ()> {
 mod tests {
     use dt_tools_parser::{ast::AstNode, parser::Entrypoint};
 
-    use crate::db::BaseDb;
-
     fn check(input: &str) -> Result<i64, ()> {
-        let db = crate::db::BaseDatabase::default();
-
         let parse = Entrypoint::PreprocessorConditional.parse(input);
         let ast = dt_tools_parser::ast::Expr::cast(parse.red_node().child_nodes().next().unwrap())
             .unwrap();
 
         let mut diagnostics = Vec::new();
-        let file = db
-            .get_files()
-            .add_virtual(&db, "/main.dts".into(), String::new());
-        let mut diag = crate::diag::Diag::file(&mut diagnostics, file);
+        let mut diag = crate::diag::Diag::new(&mut diagnostics);
 
         let num = super::eval(ast, &mut diag);
 

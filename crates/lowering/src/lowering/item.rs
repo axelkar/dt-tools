@@ -10,6 +10,7 @@ use dt_tools_parser::{
 use super::{LowerCtx, lower_phandle};
 use crate::{
     diag::Diag,
+    expand::ExpandedText,
     lowering::{
         dt_node::{build_path, get_name_and_unit_addr, lower_dt_node},
         dt_property::lower_dt_property,
@@ -20,7 +21,7 @@ use crate::{
 /// Lowers an [`ast::Item`] to [`MirDefinition`]s.
 pub(crate) fn lower_item(
     ctx: &mut LowerCtx<'_>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     parent_node_path: &str,
     item: ast::Item,
 ) {
@@ -55,7 +56,7 @@ pub(crate) fn lower_item(
 }
 
 /// Reports preprocessor syntax that only raw `/include/` content can contain.
-pub(crate) fn unsupported_preprocessor(diag: &mut Diag<'_, '_>, range: TextRange) {
+pub(crate) fn unsupported_preprocessor(diag: &mut Diag<'_>, range: TextRange) {
     diag.emit(
         range,
         "Preprocessor directives in `/include/` files are not processed",
@@ -66,7 +67,7 @@ pub(crate) fn unsupported_preprocessor(diag: &mut Diag<'_, '_>, range: TextRange
 /// Handles an [`ast::DtsDirective`] like `/delete-node/` or `/delete-property/`.
 pub(crate) fn handle_dts_directive(
     ctx: &mut LowerCtx<'_>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     parent_node_path: &str,
     dir: &ast::DtsDirective,
 ) {
@@ -83,13 +84,13 @@ pub(crate) fn handle_dts_directive(
         ctx.mir.definitions.push(MirDefinition {
             path: parent_node_path.to_owned(),
             value: MirDefinitionValue::V1Directive,
-            provenance: MirProvenance::from_diag(diag, dir.syntax().text_range()),
+            provenance: MirProvenance(dir.syntax().text_range().within_file(ExpandedText)),
         });
     } else if kind == Some(TokenKind::PluginDirective) {
         ctx.mir.definitions.push(MirDefinition {
             path: parent_node_path.to_owned(),
             value: MirDefinitionValue::PluginDirective,
-            provenance: MirProvenance::from_diag(diag, dir.syntax().text_range()),
+            provenance: MirProvenance(dir.syntax().text_range().within_file(ExpandedText)),
         });
     } else {
         emit_delete_directive(ctx, diag, parent_node_path, dir);
@@ -99,7 +100,7 @@ pub(crate) fn handle_dts_directive(
 /// Optionally emit [`MirDefinitionValue::DeletedNode`] or [`MirDefinitionValue::DeletedProperty`] from an [`ast::DtsDirective`].
 pub(crate) fn emit_delete_directive(
     ctx: &mut LowerCtx<'_>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     parent_node_path: &str,
     dir: &ast::DtsDirective,
 ) {
@@ -107,7 +108,7 @@ pub(crate) fn emit_delete_directive(
     let Some(args) = dir.arguments() else { return };
 
     let text_range = dir.syntax().text_range();
-    let provenance = MirProvenance::from_diag(diag, text_range);
+    let provenance = MirProvenance(text_range.within_file(ExpandedText));
 
     if kind == Some(TokenKind::DeleteNodeDirective) {
         let target_path = if let Ok(name) = get_name_and_unit_addr(diag, &args) {
@@ -161,7 +162,7 @@ pub(crate) fn emit_delete_directive(
 /// Returns `Err(())` if it can't be resolved. If in an overlay, an error will not be emitted.
 pub(crate) fn resolve_phandle(
     ctx: &mut LowerCtx<'_>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     target: &MirPhandleTarget,
     phandle: &ast::DtPhandle,
 ) -> Result<String, ()> {

@@ -12,6 +12,7 @@ use expect_test::expect;
 
 use crate::{
     db::BaseDb,
+    expand::expand_root,
     includes::IncludeDirs,
     lowering::{lower_root_file, tests::fmt_diags},
 };
@@ -88,7 +89,10 @@ fn cross_check_dtc_success(contents: &str) -> Result<(), ()> {
         (Ok(()), Err(dtc_output)) => {
             let result = lower_root_file(&db, root_file).expect("Should be a readable file");
             let mir = result.mir(&db);
-            let out = mir.display(&db);
+            let expanded = expand_root(&db, root_file)
+                .as_ref()
+                .expect("Should be a readable file");
+            let out = mir.display(&db, expanded);
 
             panic!(
                 "we should fail like dtc.\n\n--- input ---\n{contents}\n\n--- MIR ---\n{out}\n--- dtc errors ---\n{dtc_output}"

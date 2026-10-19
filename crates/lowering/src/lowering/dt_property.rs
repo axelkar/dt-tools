@@ -12,6 +12,7 @@ use num_traits::{AsPrimitive, Num};
 use super::{LowerCtx, lower_phandle, undefined_macro};
 use crate::{
     diag::Diag,
+    expand::ExpandedText,
     expr_eval::{self, interpret_escaped_char_tok, parse_int_tok},
     extra_num_traits::{Bits, Signedness},
     lowering::{
@@ -27,7 +28,7 @@ use crate::{
 /// Lowers an [`ast::DtProperty`] to a [`MirDefinition`], if valid.
 pub(crate) fn lower_dt_property(
     ctx: &mut LowerCtx<'_>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     parent_node_path: &str,
     prop: &ast::DtProperty,
 ) -> Result<(), ()> {
@@ -49,7 +50,7 @@ pub(crate) fn lower_dt_property(
     let path = build_path(parent_node_path, &name);
 
     let text_range = prop.syntax().text_range();
-    let provenance = MirProvenance::from_diag(diag, text_range);
+    let provenance = MirProvenance(text_range.within_file(ExpandedText));
 
     ctx.mir.definitions.push(MirDefinition {
         path,
@@ -61,7 +62,7 @@ pub(crate) fn lower_dt_property(
 
 /// Lowers an [`ast::PropValue`] to a [`MirValue`], if valid.
 pub(crate) fn lower_prop_value(
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     output: &mut Vec<MirValue>,
     ast: &ast::PropValue,
 ) -> Result<(), ()> {
@@ -105,7 +106,7 @@ pub(crate) fn lower_prop_value(
 /// Wraps [`interpret_escaped_string`], handling errors.
 pub fn interpret_escaped_string_tok(
     tok: &Arc<RedToken>,
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
 ) -> Result<String, ()> {
     match interpret_escaped_string(tok.text()) {
         Ok(path) => Ok(path),
@@ -120,7 +121,7 @@ pub fn interpret_escaped_string_tok(
     }
 }
 
-fn lower_bytestring(diag: &mut Diag<'_, '_>, tok: &Arc<RedToken>) -> Result<Vec<u8>, ()> {
+fn lower_bytestring(diag: &mut Diag<'_>, tok: &Arc<RedToken>) -> Result<Vec<u8>, ()> {
     let mut bytes = Vec::new();
     let mut first_nibble = None;
     for ch in tok.text().chars() {
@@ -167,7 +168,7 @@ impl BitsSize {
     /// Returns `Err(())` on unrecoverable parse errors (invalid number, unsupported bits).
     fn from_token(
         bits_number_tok: Option<&Arc<RedToken>>,
-        diag: &mut Diag<'_, '_>,
+        diag: &mut Diag<'_>,
     ) -> Result<Self, ()> {
         let Some(bits_number_tok) = bits_number_tok else {
             return Ok(Self::default());
@@ -194,7 +195,7 @@ impl BitsSize {
 
 /// Lower a cell list into the correct [`MirCellList`] variant.
 fn lower_cell_list(
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     cell_list: &ast::DtCellList,
     bits_size: BitsSize,
 ) -> MirCellList {
@@ -206,7 +207,7 @@ fn lower_cell_list(
     }
 }
 
-fn collect_cells<T: LowerCell>(diag: &mut Diag<'_, '_>, cell_list: &ast::DtCellList) -> Vec<T> {
+fn collect_cells<T: LowerCell>(diag: &mut Diag<'_>, cell_list: &ast::DtCellList) -> Vec<T> {
     let mut cells: Vec<T> = Vec::new();
     cell_list.cells().for_each(|c| {
         let _ = lower_cell::<T>(diag, &mut cells, &c);
@@ -243,13 +244,13 @@ trait LowerCell: Sized {
     fn from_phandle(
         target: MirPhandleTarget,
         phandle_range: TextRange,
-        diag: &mut Diag<'_, '_>,
+        diag: &mut Diag<'_>,
     ) -> Result<Self, ()>;
 }
 
 /// Lower a single [`ast::Cell`] using the [`LowerCell`] trait for type-specific conversion.
 fn lower_cell<T: LowerCell>(
-    diag: &mut Diag<'_, '_>,
+    diag: &mut Diag<'_>,
     output: &mut Vec<T>,
     ast: &ast::Cell,
 ) -> Result<(), ()> {
@@ -320,7 +321,7 @@ fn lower_cell<T: LowerCell>(
 }
 
 /// Helper function that isn't monomorphized
-fn emit_overflow(num: i64, range: TextRange, bits: u32, diag: &mut Diag<'_, '_>) {
+fn emit_overflow(num: i64, range: TextRange, bits: u32, diag: &mut Diag<'_>) {
     let cmp = if num < 0 { "small" } else { "large" };
     diag.emit(
         range,
@@ -333,7 +334,7 @@ fn emit_overflow(num: i64, range: TextRange, bits: u32, diag: &mut Diag<'_, '_>)
 }
 
 /// Helper function that isn't monomorphized
-fn emit_phandle_rejected(phandle_range: TextRange, bits: u32, diag: &mut Diag<'_, '_>) {
+fn emit_phandle_rejected(phandle_range: TextRange, bits: u32, diag: &mut Diag<'_>) {
     diag.emit(
         phandle_range,
         format!(
@@ -356,7 +357,7 @@ macro_rules! impl_lower_cell_int {
             fn from_phandle(
                 _target: MirPhandleTarget,
                 phandle_range: TextRange,
-                diag: &mut Diag<'_, '_>,
+                diag: &mut Diag<'_>,
             ) -> Result<Self, ()> {
                 emit_phandle_rejected(phandle_range, <$T>::BITS, diag);
                 Err(())
@@ -380,7 +381,7 @@ impl LowerCell for MirCell32 {
     fn from_phandle(
         target: MirPhandleTarget,
         _phandle_range: TextRange,
-        _diag: &mut Diag<'_, '_>,
+        _diag: &mut Diag<'_>,
     ) -> Result<Self, ()> {
         Ok(MirCell32::Phandle(target))
     }
