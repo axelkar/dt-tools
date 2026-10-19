@@ -12,6 +12,8 @@ use crate::{
 pub(crate) struct Sink<'t, 'input> {
     /// The incoming tokens for trivia handling.
     tokens: &'t [Token<'input>],
+    /// The text the tokens were lexed from.
+    input: &'input str,
     /// The incoming events.
     events: Vec<Event>,
     /// Source token index.
@@ -32,11 +34,13 @@ pub(crate) struct Sink<'t, 'input> {
 impl<'t, 'input> Sink<'t, 'input> {
     pub(super) fn new(
         tokens: &'t [Token<'input>],
+        input: &'input str,
         events: Vec<Event>,
         root_kind: NodeKind,
     ) -> Self {
         Self {
             tokens,
+            input,
             events,
             cursor: 0,
             stack: Vec::new(),
@@ -101,21 +105,21 @@ impl<'t, 'input> Sink<'t, 'input> {
                     self.eat_trivia();
                     self.token();
                 }
-                Event::AddCombinedToken {
-                    kind,
-                    n_raw_tokens,
-                    text,
-                } => {
+                Event::AddCombinedToken { kind, n_raw_tokens } => {
                     self.eat_trivia();
                     #[cfg(feature = "grammar-tracing")]
                     tracing::debug!(cursor = self.cursor, ?kind, "add combined token");
+
+                    let first = &self.tokens[self.cursor];
+                    let last = &self.tokens[self.cursor + n_raw_tokens - 1];
+                    let text = &self.input[first.text_range.start..last.text_range.end];
                     self.current_node.width += text.len();
 
                     self.current_node
                         .children
                         .push(GreenItem::Token(Arc::new(GreenToken {
                             kind,
-                            text: TokenText::Dynamic(text),
+                            text: TokenText::Dynamic(text.to_owned()),
                         })));
 
                     self.cursor += n_raw_tokens;

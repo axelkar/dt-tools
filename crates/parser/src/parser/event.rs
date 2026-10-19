@@ -17,10 +17,6 @@ pub(crate) enum Event {
         kind: TokenKind,
         /// The number of raw tokens to be replaced.
         n_raw_tokens: usize,
-        /// The combined text of the tokens.
-        ///
-        /// This is stored here and not computed for performance.
-        text: String,
     },
     FinishNode,
     Placeholder,

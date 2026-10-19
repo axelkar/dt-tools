@@ -177,7 +177,7 @@ impl Entrypoint {
             m.complete(p, NodeKind::ParseError);
         }
 
-        let sink = sink::Sink::new(&tokens, parser.events, root_kind);
+        let sink = sink::Sink::new(&tokens, input, parser.events, root_kind);
 
         sink.finish()
     }
@@ -414,21 +414,17 @@ impl<'t, 'input> Parser<'t, 'input> {
         self.source.skip_trivia();
 
         let mut n_raw_tokens = 0;
-        let mut text = String::new();
 
         while self.peek_immediate().is_some_and(|k| set.contains(&k)) {
-            let token = self
-                .source
+            self.source
                 .next_token()
                 .expect("Tried to bump at end of input");
             n_raw_tokens += 1;
-            text.push_str(token.text);
         }
 
         self.events.push(Event::AddCombinedToken {
             kind: TokenKind::Name,
             n_raw_tokens,
-            text,
         });
 
         // Not cleared at any other point
@@ -694,7 +690,8 @@ Tree:
 
     #[test]
     fn builder_api_lex_error() {
-        let tokens: Vec<_> = Lexer::new("\"abc").collect();
+        let input = "\"abc";
+        let tokens: Vec<_> = Lexer::new(input).collect();
         let mut parser = Parser::new(Source::new(&tokens));
 
         while !parser.at_end() {
@@ -703,7 +700,7 @@ Tree:
 
         assert_eq!(parser.events.len(), 1);
 
-        let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
+        let output = Sink::new(&tokens, input, parser.events, NodeKind::SourceFile).finish();
 
         check_parse_output(
             output,
@@ -719,7 +716,8 @@ Tree:
 
     #[test]
     fn builder_api() {
-        let tokens: Vec<_> = Lexer::new("ident").collect();
+        let input = "ident";
+        let tokens: Vec<_> = Lexer::new(input).collect();
         let mut parser = Parser::new(Source::new(&tokens));
 
         let m_node = parser.start();
@@ -735,7 +733,7 @@ Tree:
         m_prop.complete(&mut parser, NodeKind::DtProperty);
 
         // FIXME: with Sink code
-        let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
+        let output = Sink::new(&tokens, input, parser.events, NodeKind::SourceFile).finish();
         check_parse_output(
             output,
             expect![[r#"
@@ -753,7 +751,8 @@ Tree:
 
     #[test]
     fn builder_api_precede() {
-        let tokens: Vec<_> = Lexer::new("hello world").collect();
+        let input = "hello world";
+        let tokens: Vec<_> = Lexer::new(input).collect();
         let mut parser = Parser::new(Source::new(&tokens));
 
         let m_node = parser.start();
@@ -775,7 +774,7 @@ Tree:
         m_node.complete(&mut parser, NodeKind::DtNode);
 
         // FIXME: with Sink code
-        let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
+        let output = Sink::new(&tokens, input, parser.events, NodeKind::SourceFile).finish();
         check_parse_output(
             output,
             expect![[r#"
@@ -808,13 +807,14 @@ Tree:
 
     #[test]
     fn builder_api_prev_next() {
-        let tokens: Vec<_> = Lexer::new("{\n  // foo").collect();
+        let input = "{\n  // foo";
+        let tokens: Vec<_> = Lexer::new(input).collect();
         let mut parser = Parser::new(Source::new(&tokens));
 
         parser.eat(TokenKind::LCurly);
         parser.expect(TokenKind::RCurly);
 
-        let output = Sink::new(&tokens, parser.events, NodeKind::SourceFile).finish();
+        let output = Sink::new(&tokens, input, parser.events, NodeKind::SourceFile).finish();
 
         // FIXME: this is NOT an example for prev_next currently. expect comma, semicolon or both!!
         // oh and the code that does it will be defined in the grammar instead of the parser later
