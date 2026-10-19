@@ -2,6 +2,8 @@
 
 use std::{borrow::Cow, mem, sync::Arc};
 
+use smallvec::SmallVec;
+
 use super::{Parse, ParseError, WrappedLexError, event::Event};
 // TODO: && and || as joined https://nnethercote.github.io/2022/10/05/quirks-of-rusts-token-representation.html
 use crate::{
@@ -72,33 +74,39 @@ impl<'t, 'input> Sink<'t, 'input> {
 
                     #[cfg(feature = "grammar-tracing")]
                     tracing::debug!(?kind, "start node");
-                    let mut kinds = vec![kind];
 
-                    let mut idx = idx;
-                    let mut forward_parent = forward_parent;
-
-                    // Walk through the forward parent of the forward parent, and the forward parent
-                    // of that, and of that, etc. until we reach a StartNode event without a forward
-                    // parent.
-                    while let Some(fp) = forward_parent {
-                        idx += fp;
-
-                        forward_parent =
-                            match mem::replace(&mut self.events[idx], Event::Placeholder) {
-                                Event::StartNode {
-                                    kind,
-                                    forward_parent,
-                                } => {
-                                    kinds.push(kind);
-                                    forward_parent
-                                }
-                                Event::Placeholder => None,
-                                _ => unreachable!(),
-                            };
-                    }
-
-                    for kind in kinds.into_iter().rev() {
+                    if forward_parent.is_none() {
                         self.start_node(kind);
+                    } else {
+                        let mut kinds = SmallVec::<[NodeKind; 2]>::new();
+                        kinds.push(kind);
+
+                        let mut idx = idx;
+                        let mut forward_parent = forward_parent;
+
+                        // Walk through the forward parent of the forward parent, and the forward
+                        // parent of that, and of that, etc. until we reach a StartNode event
+                        // without a forward parent.
+                        while let Some(fp) = forward_parent {
+                            idx += fp;
+
+                            forward_parent =
+                                match mem::replace(&mut self.events[idx], Event::Placeholder) {
+                                    Event::StartNode {
+                                        kind,
+                                        forward_parent,
+                                    } => {
+                                        kinds.push(kind);
+                                        forward_parent
+                                    }
+                                    Event::Placeholder => None,
+                                    _ => unreachable!(),
+                                };
+                        }
+
+                        for kind in kinds.into_iter().rev() {
+                            self.start_node(kind);
+                        }
                     }
                 }
                 Event::AddToken => {
