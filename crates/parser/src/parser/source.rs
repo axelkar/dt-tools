@@ -62,11 +62,6 @@ pub(super) struct Source<'t, 'input> {
     /// From which index the next immediate token will be read from.
     pub(super) cursor: usize,
     pub(super) steps: u32,
-    // for debugger:
-    #[cfg(debug_assertions)]
-    pub(super) byte_offset: usize,
-    #[cfg(debug_assertions)]
-    pub(super) following_src: String,
 }
 
 impl<'t, 'input> Source<'t, 'input> {
@@ -76,27 +71,6 @@ impl<'t, 'input> Source<'t, 'input> {
             prev_next_cursor: 0,
             cursor: 0,
             steps: 0,
-            #[cfg(debug_assertions)]
-            byte_offset: 0,
-            #[cfg(debug_assertions)]
-            following_src: String::new(),
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    fn update_debug(&mut self) {
-        if let Some(token) = self.tokens.get(self.cursor) {
-            self.byte_offset = token.text_range.start;
-            self.following_src = String::new();
-            for token in self.tokens.iter().skip(self.cursor).take(15) {
-                self.following_src.push_str(token.text);
-            }
-            if self.following_src.len() > 25 {
-                let boundary = (0..4)
-                    .find(|num| self.following_src.is_char_boundary(25 - num))
-                    .expect("should have a boundary max 4 bytes down");
-                self.following_src.truncate(boundary);
-            }
         }
     }
 
@@ -111,9 +85,6 @@ impl<'t, 'input> Source<'t, 'input> {
         self.cursor += 1;
         self.steps = 0;
         self.prev_next_cursor = self.cursor;
-
-        #[cfg(debug_assertions)]
-        self.update_debug();
 
         #[cfg(feature = "visualize")]
         super::visualizer::Event::NextToken {
@@ -187,9 +158,6 @@ impl<'t, 'input> Source<'t, 'input> {
             cursor: self.cursor,
         }
         .visualize();
-
-        #[cfg(debug_assertions)]
-        self.update_debug();
     }
 
     /// Peeks ahead at the current token's kind.

@@ -52,6 +52,7 @@ impl<'t, 'input> Sink<'t, 'input> {
 
     /// Turns the parser's output to a concrete syntax tree.
     pub(super) fn finish(mut self) -> Parse<'input> {
+        profiling::scope!("parser::Sink::finish");
         for idx in 0..self.events.len() {
             #[cfg(feature = "grammar-tracing")]
             let _span = tracing::span!(tracing::Level::TRACE, "loop", pos = idx).entered();
