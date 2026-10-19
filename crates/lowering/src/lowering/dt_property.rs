@@ -485,6 +485,54 @@ mod tests {
         );
     }
 
+    /// A label-relative path resolves in cells and values.
+    #[test]
+    fn mir_label_path_phandle() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { LBL: node { sub { }; }; };
+/ { prop = <&{LBL/sub}>; value = &{LBL/sub}; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:31
+                node /node labels=[LBL] /main.dts L3:5-L3:28
+                node /node/sub /main.dts L3:17-L3:25
+                node / /main.dts L4:1-L4:48
+                property /prop = <&{LBL/sub}>; /main.dts L4:5-L4:25
+                property /value = &{LBL/sub}; /main.dts L4:26-L4:45
+            "#]],
+        );
+    }
+
+    /// A label-relative path reports a missing label and a missing node.
+    #[test]
+    fn mir_label_path_phandle_errors() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { LBL: node { sub { }; }; };
+/ { a = <&{NOPE/sub}>; b = <&{LBL/nope}>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:31
+                node /node labels=[LBL] /main.dts L3:5-L3:28
+                node /node/sub /main.dts L3:17-L3:25
+                node / /main.dts L4:1-L4:45
+                property /a = <&{NOPE/sub}>; /main.dts L4:5-L4:23
+                property /b = <&{LBL/nope}>; /main.dts L4:24-L4:42
+
+                --- errors ---
+                Error L4:24-L4:42: Node at path not found: /node/nope [dt_tools_lowering::check_mir_post]
+                Error L4:5-L4:23: Label not found: NOPE [dt_tools_lowering::check_mir_post]
+            "#]],
+        );
+    }
+
     #[test]
     fn mir_num_out_of_bounds() {
         check_mir(

@@ -2,7 +2,12 @@ use std::borrow::Cow;
 
 use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
 
-use crate::{db::BaseDb, file::File, lowering::LoweredFile, mir, tag_diagnostics};
+use crate::{
+    db::BaseDb,
+    file::File,
+    lowering::{LoweredFile, dt_node::build_path},
+    mir, tag_diagnostics,
+};
 
 #[salsa::tracked(returns(ref), lru = 64)]
 pub(super) fn check_mir_post<'db>(
@@ -64,6 +69,25 @@ fn check_phandle(
                 None
             } else {
                 Some(Cow::Owned(format!("Label not found: {name}")))
+            }
+        }
+        mir::MirPhandleTarget::LabelPath { label, path } => {
+            let base = result
+                .labels(db)
+                .get(label)
+                .and_then(Option::as_ref)
+                .map(|label| label.path.clone());
+
+            match base {
+                None => Some(Cow::Owned(format!("Label not found: {label}"))),
+                Some(base) => {
+                    let resolved = build_path(&base, path);
+                    if mir.contains_node(&resolved) {
+                        None
+                    } else {
+                        Some(Cow::Owned(format!("Node at path not found: {resolved}")))
+                    }
+                }
             }
         }
         mir::MirPhandleTarget::Path(path) => {

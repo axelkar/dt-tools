@@ -114,7 +114,22 @@ impl TokenMatcher for MacroSubstitutableName {
 /// Parses a reference without the leading ampersand and a node.
 pub(super) fn reference_noamp(p: &mut Parser) {
     if p.eat(TokenKind::LCurly) {
-        // path reference
+        // An absolute path starts with `/`, a relative path starts with a label.
+        let absolute = p.eat(TokenKind::Slash);
+
+        if absolute && p.eat(TokenKind::RCurly) {
+            // Root path reference `&{/}`.
+            return;
+        }
+
+        if absolute {
+            path_segment(p);
+        } else {
+            // A relative path's first segment is a label.
+            if !p.eat(Name) {
+                p.error().msg_expected().bump_wrap_err().emit();
+            }
+        }
 
         while !p.at(TokenKind::RCurly)
             && !p.at_end()
@@ -123,17 +138,22 @@ pub(super) fn reference_noamp(p: &mut Parser) {
         {
             // TODO: better recovery
             p.expect(TokenKind::Slash);
-            if p.eat(Name) {
-                p.eat(UnitAddress);
-            } else {
-                p.error().msg_expected().bump_wrap_err().emit();
-            }
+            path_segment(p);
         }
         p.expect(TokenKind::RCurly);
     } else if p.silent_at_macro_invocation_with_args() {
         // macro-substitutable name
         macro_invocation(p);
     } else if p.eat(LabelName) {
+    } else {
+        p.error().msg_expected().bump_wrap_err().emit();
+    }
+}
+
+/// Parses a node name and its optional unit address in a path reference.
+fn path_segment(p: &mut Parser) {
+    if p.eat(Name) {
+        p.eat(UnitAddress);
     } else {
         p.error().msg_expected().bump_wrap_err().emit();
     }
@@ -931,6 +951,44 @@ Tree:
                   Slash@38..39 "/"
                   Name@39..45 "usb2-0"
                   RCurly@45..46 "}"
+            "#]],
+        );
+    }
+
+    /// A path reference can point at the root.
+    #[test]
+    fn reference_root_path() {
+        check_ep(
+            Entrypoint::ReferenceNoamp,
+            "{/}",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                DtPhandle@0..3
+                  LCurly@0..1 "{"
+                  Slash@1..2 "/"
+                  RCurly@2..3 "}"
+            "#]],
+        );
+    }
+
+    /// A path reference can start with a label instead of `/`.
+    #[test]
+    fn reference_label_path() {
+        check_ep(
+            Entrypoint::ReferenceNoamp,
+            "{foo/bar}",
+            expect![[r#"
+                Errors: []
+
+                Tree:
+                DtPhandle@0..9
+                  LCurly@0..1 "{"
+                  Name@1..4 "foo"
+                  Slash@4..5 "/"
+                  Name@5..8 "bar"
+                  RCurly@8..9 "}"
             "#]],
         );
     }

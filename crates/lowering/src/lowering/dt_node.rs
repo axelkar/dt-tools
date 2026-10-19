@@ -287,6 +287,47 @@ mod tests {
         );
     }
 
+    /// `&{/}` extends the root node.
+    #[test]
+    fn mir_extension_root_path() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { foo {}; };
+&{/} { prop = <1>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:15
+                node /foo /main.dts L3:5-L3:12
+                node / /main.dts L4:1-L4:22
+                property /prop = <1>; /main.dts L4:8-L4:19
+            "#]],
+        );
+    }
+
+    /// `&{label/path}` extends a node below the labeled node.
+    #[test]
+    fn mir_extension_label_path() {
+        check_mir(
+            r#"
+/dts-v1/;
+/ { LBL: node { sub { }; }; };
+&{LBL/sub} { prop = <1>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L3:1-L3:31
+                node /node labels=[LBL] /main.dts L3:5-L3:28
+                node /node/sub /main.dts L3:17-L3:25
+                node /node/sub /main.dts L4:1-L4:28
+                property /node/sub/prop = <1>; /main.dts L4:14-L4:25
+            "#]],
+        );
+    }
+
     #[test]
     fn mir_extension_unresolved() {
         check_mir(

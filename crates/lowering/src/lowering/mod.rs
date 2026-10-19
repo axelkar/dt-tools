@@ -139,7 +139,7 @@ fn lower_phandle(
     }
 
     if phandle.is_path() {
-        // &{/path/to/node}
+        // &{/path/to/node}, &{/}, or &{label/path}.
         // FIXME: very naive, just strips the prefix/suffix from the source text.
         // A proper implementation would use the CST structure.
         let raw = phandle.syntax().green.text();
@@ -149,7 +149,17 @@ fn lower_phandle(
             .strip_suffix('}')
             .ok_or(())?;
 
-        Ok(MirPhandleTarget::Path(inner.to_owned()))
+        if inner == "/" || inner.starts_with('/') {
+            Ok(MirPhandleTarget::Path(inner.to_owned()))
+        } else {
+            Ok(match inner.split_once('/') {
+                Some((label, path)) => MirPhandleTarget::LabelPath {
+                    label: label.to_owned(),
+                    path: path.to_owned(),
+                },
+                None => MirPhandleTarget::Label(inner.to_owned()),
+            })
+        }
     } else {
         let name_ast = phandle.name().ok_or(())?;
         Ok(MirPhandleTarget::Label(name_ast.syntax().text().to_owned()))

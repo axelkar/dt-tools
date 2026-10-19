@@ -188,6 +188,42 @@ pub(crate) fn resolve_phandle(
                 Err(())
             }
         }
+        MirPhandleTarget::LabelPath { label, path } => {
+            let Some(base) = ctx
+                .labels
+                .get(label)
+                .and_then(Option::as_ref)
+                .map(|label| label.path.clone())
+            else {
+                if ctx.is_overlay() {
+                    // TODO: handle unresolved delete-node!
+                } else {
+                    diag.emit(
+                        phandle.syntax().text_range(),
+                        Cow::Owned(format!("Label not found: {label}")),
+                        Severity::Error,
+                    );
+                }
+                return Err(());
+            };
+
+            let target = build_path(&base, path);
+
+            if ctx.mir.contains_node(&target) {
+                Ok(target)
+            } else {
+                if ctx.is_overlay() {
+                    // TODO: handle unresolved delete-node!
+                } else {
+                    diag.emit(
+                        phandle.syntax().text_range(),
+                        Cow::Owned(format!("Node at path not found: {target}")),
+                        Severity::Error,
+                    );
+                }
+                Err(())
+            }
+        }
         MirPhandleTarget::Path(path) => {
             if ctx.mir.contains_node(path) {
                 Ok(path.clone())

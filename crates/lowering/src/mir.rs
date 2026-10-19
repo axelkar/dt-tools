@@ -434,6 +434,13 @@ impl From<u32> for MirCell32 {
 pub enum MirPhandleTarget {
     /// Label reference like `&UART_1`.
     Label(String),
+    /// Label-relative path reference like `&{soc/uart}`.
+    LabelPath {
+        /// The label at the start of the path.
+        label: String,
+        /// The path below the labeled node, without a leading slash.
+        path: String,
+    },
     /// Absolute path reference like `&{/soc/uart}`.
     Path(String),
 }
@@ -441,6 +448,7 @@ impl fmt::Display for MirPhandleTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Label(s) => write!(f, "&{s}"),
+            Self::LabelPath { label, path } => write!(f, "&{{{label}/{path}}}"),
             Self::Path(s) => write!(f, "&{{{s}}}"),
         }
     }
