@@ -48,6 +48,13 @@ echo "== single file preprocessing: ${board#"$linux/"}"
   -n clang "$clang_cmd $(quote "$board")"
 
 echo
+echo "== single file: pipelines"
+"${hyperfine[@]}" \
+  -n "preprocess + dtc" "$(quote "$pipeline") dtc $(quote "$board")" \
+  -n "preprocess + mir" "$(quote "$pipeline") mir $(quote "$board")" \
+  -n "mir" "$mir_cmd $(quote "$board")"
+
+echo
 echo "== corpus: preprocessing"
 fd_cmd="fd -e dts . $(quote "$corpus") -x"
 "${hyperfine[@]}" \
