@@ -26,6 +26,7 @@ displaydoc.workspace = true
 expect-test.workspace = true
 constcat = "0.6.1"
 profiling = "1.0.18"
+smol_str = "0.3"
 
 [dev-dependencies]
 notify = "8.0.0"

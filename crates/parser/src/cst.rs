@@ -12,6 +12,8 @@
 
 use std::{fmt, sync::Arc};
 
+use smol_str::SmolStr;
+
 use crate::{TextRange, lexer::TokenKind};
 
 /// The kind of a CST node
@@ -160,30 +162,24 @@ impl GreenNode {
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum TokenText {
     Static(&'static str),
-    Dynamic(String),
+    Dynamic(SmolStr),
 }
 impl TokenText {
     /// Creates a `String` by cloning the current value's reference.
     #[must_use]
     pub fn to_owned(&self) -> String {
-        match self {
-            Self::Static(str) => (*str).to_owned(),
-            Self::Dynamic(str) => str.clone(),
-        }
+        self.as_str().to_owned()
     }
     /// Extracts the owned `String`.
     #[must_use]
     pub fn into_owned(self) -> String {
-        match self {
-            Self::Static(str) => str.to_owned(),
-            Self::Dynamic(str) => str,
-        }
+        self.as_str().to_owned()
     }
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             Self::Static(str) => str,
-            Self::Dynamic(str) => str,
+            Self::Dynamic(str) => str.as_str(),
         }
     }
 }
@@ -191,7 +187,7 @@ impl std::fmt::Display for TokenText {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Static(str) => std::fmt::Display::fmt(str, f),
-            Self::Dynamic(str) => std::fmt::Display::fmt(str, f),
+            Self::Dynamic(str) => std::fmt::Display::fmt(str.as_str(), f),
         }
     }
 }
@@ -199,7 +195,7 @@ impl std::fmt::Debug for TokenText {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Static(str) => std::fmt::Debug::fmt(str, f),
-            Self::Dynamic(str) => std::fmt::Debug::fmt(str, f),
+            Self::Dynamic(str) => std::fmt::Debug::fmt(str.as_str(), f),
         }
     }
 }
@@ -208,10 +204,7 @@ impl std::ops::Deref for TokenText {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        match self {
-            Self::Static(str) => str,
-            Self::Dynamic(str) => str.as_str(),
-        }
+        self.as_str()
     }
 }
 

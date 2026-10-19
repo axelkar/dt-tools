@@ -3,6 +3,7 @@
 use std::{borrow::Cow, mem, sync::Arc};
 
 use smallvec::SmallVec;
+use smol_str::SmolStr;
 
 use super::{Parse, ParseError, WrappedLexError, event::Event};
 // TODO: && and || as joined https://nnethercote.github.io/2022/10/05/quirks-of-rusts-token-representation.html
@@ -127,7 +128,7 @@ impl<'t, 'input> Sink<'t, 'input> {
                         .children
                         .push(GreenItem::Token(GreenToken {
                             kind,
-                            text: TokenText::Dynamic(text.to_owned()),
+                            text: TokenText::Dynamic(SmolStr::new(text)),
                         }));
 
                     self.cursor += n_raw_tokens;
@@ -205,7 +206,7 @@ impl<'t, 'input> Sink<'t, 'input> {
                         );
                         TokenText::Static(static_text)
                     }
-                    None => TokenText::Dynamic((*text).to_owned()),
+                    None => TokenText::Dynamic(SmolStr::new(*text)),
                 },
             }));
         self.cursor += 1;
