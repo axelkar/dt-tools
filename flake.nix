@@ -98,6 +98,11 @@
 
               # For testing
               dtc
+
+              # For the preprocessing differential suite and benchmarks
+              gcc
+              clang
+              hyperfine
             ];
 
             env.DT_TOOLS_LINUX_BINDINGS = linuxBindings pkgs;
