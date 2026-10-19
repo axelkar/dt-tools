@@ -3,6 +3,17 @@ use crate::{
     lexer::{Token, TokenKind},
 };
 
+/// The cached result of [`Source::peek_kind`].
+#[derive(Debug, Clone, Copy)]
+enum CachedPeek {
+    /// No peek has been performed since the cursor moved.
+    Missing,
+    /// The cursor is at the end of input.
+    End,
+    /// The cursor points at a token of this kind.
+    Kind(TokenKind),
+}
+
 #[derive(Debug)]
 pub(super) struct Source<'t, 'input> {
     pub(super) tokens: &'t [Token<'input>],
@@ -62,6 +73,8 @@ pub(super) struct Source<'t, 'input> {
     /// From which index the next immediate token will be read from.
     pub(super) cursor: usize,
     pub(super) steps: u32,
+    /// Cached result of [`Source::peek_kind`], invalidated whenever the cursor moves.
+    cached_peek: CachedPeek,
 }
 
 impl<'t, 'input> Source<'t, 'input> {
@@ -71,6 +84,7 @@ impl<'t, 'input> Source<'t, 'input> {
             prev_next_cursor: 0,
             cursor: 0,
             steps: 0,
+            cached_peek: CachedPeek::Missing,
         }
     }
 
@@ -79,10 +93,14 @@ impl<'t, 'input> Source<'t, 'input> {
     }
 
     pub(super) fn next_token(&mut self) -> Option<&'t Token<'input>> {
-        self.skip_trivia();
+        // A cached peek means the cursor is already on a non-trivia token.
+        if matches!(self.cached_peek, CachedPeek::Missing) {
+            self.skip_trivia();
+        }
 
         let token = self.tokens.get(self.cursor)?;
         self.cursor += 1;
+        self.cached_peek = CachedPeek::Missing;
         self.steps = 0;
         self.prev_next_cursor = self.cursor;
 
@@ -136,12 +154,32 @@ impl<'t, 'input> Source<'t, 'input> {
     ///
     /// Returns None at end of input
     pub(super) fn peek_kind(&mut self) -> Option<TokenKind> {
+        match self.cached_peek {
+            CachedPeek::Kind(kind) => {
+                // Preserve the step accounting of a real peek.
+                self.steps += 2;
+                return Some(kind);
+            }
+            CachedPeek::End => {
+                self.steps += 2;
+                return None;
+            }
+            CachedPeek::Missing => {}
+        }
+
         self.skip_trivia();
-        self.peek_kind_immediate()
+        let kind = self.peek_kind_immediate();
+        self.cached_peek = match kind {
+            Some(kind) => CachedPeek::Kind(kind),
+            None => CachedPeek::End,
+        };
+        kind
     }
 
     pub(super) fn skip_trivia(&mut self) {
         profiling::scope!("parser::Source::skip_trivia");
+
+        self.cached_peek = CachedPeek::Missing;
 
         while self
             .tokens
