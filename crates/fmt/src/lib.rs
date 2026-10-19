@@ -21,7 +21,7 @@ pub fn format(root: &mut GreenNode) {
     }
 }
 
-fn format_token(_ctx: FormatterContext, _token: &mut Arc<GreenToken>) {}
+fn format_token(_ctx: FormatterContext, _token: &mut GreenToken) {}
 
 fn format_node(mut ctx: FormatterContext, node: &mut Arc<GreenNode>) {
     if node.kind == NodeKind::DtNode {

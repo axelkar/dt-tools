@@ -16,22 +16,22 @@
 //! #     kind: NodeKind::DtNode,
 //! #     width: 6,
 //! #     children: vec! [
-//! #         GreenItem::Token(Arc::new(GreenToken {
+//! #         GreenItem::Token(GreenToken {
 //! #             kind: TokenKind::Name,
 //! #             text: dt_tools_parser::cst::TokenText::Static("foo"),
-//! #         })),
-//! #         GreenItem::Token(Arc::new(GreenToken {
+//! #         }),
+//! #         GreenItem::Token(GreenToken {
 //! #             kind: TokenKind::LCurly,
 //! #             text: dt_tools_parser::cst::TokenText::Static("{"),
-//! #         })),
-//! #         GreenItem::Token(Arc::new(GreenToken {
+//! #         }),
+//! #         GreenItem::Token(GreenToken {
 //! #             kind: TokenKind::LCurly,
 //! #             text: dt_tools_parser::cst::TokenText::Static("}"),
-//! #         })),
-//! #         GreenItem::Token(Arc::new(GreenToken {
+//! #         }),
+//! #         GreenItem::Token(GreenToken {
 //! #             kind: TokenKind::LCurly,
 //! #             text: dt_tools_parser::cst::TokenText::Static(";"),
-//! #         })),
+//! #         }),
 //! #     ]
 //! # });
 //! # red_node = RedNode::new(green_node);
@@ -220,7 +220,7 @@ pub trait HasName: AstNode {
         self.syntax().child_tokens().find_map(Name::cast)
     }
     // TODO: make compatible users use this because there are no atomic operations or allocationa
-    fn green_name(&self) -> Option<&Arc<GreenToken>> {
+    fn green_name(&self) -> Option<&GreenToken> {
         self.syntax()
             .green
             .child_tokens()
@@ -547,7 +547,7 @@ impl MacroInvocation {
     ///
     /// The difference between this and [`Self::ident`] is that this returns a reference.
     #[must_use]
-    pub fn green_ident(&self) -> Option<&Arc<GreenToken>> {
+    pub fn green_ident(&self) -> Option<&GreenToken> {
         self.syntax
             .green
             .child_tokens()

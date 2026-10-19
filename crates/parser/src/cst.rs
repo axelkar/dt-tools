@@ -133,7 +133,7 @@ impl GreenNode {
     }
 
     /// Returns an iterator over immediate child tokens.
-    pub fn child_tokens(&self) -> impl Iterator<Item = &Arc<GreenToken>> + '_ {
+    pub fn child_tokens(&self) -> impl Iterator<Item = &GreenToken> + '_ {
         self.children.iter().filter_map(GreenItem::as_token)
     }
 
@@ -242,7 +242,7 @@ impl GreenToken {
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct RedToken {
     pub parent: Arc<RedNode>,
-    pub green: Arc<GreenToken>,
+    pub green: GreenToken,
     /// Offset in the source file
     pub text_offset: usize,
 }
@@ -387,7 +387,7 @@ impl RedNode {
 
                 RedItem::Token(Arc::new(RedToken {
                     parent: Arc::clone(&self),
-                    green: Arc::clone(token),
+                    green: token.clone(),
                     text_offset,
                 }))
             }
@@ -418,7 +418,7 @@ impl RedNode {
 
                     RedItem::Token(Arc::new(RedToken {
                         parent: Arc::clone(self),
-                        green: Arc::clone(token),
+                        green: token.clone(),
                         text_offset,
                     }))
                 }
@@ -493,7 +493,7 @@ impl<Node, Token> TreeItem<Node, Token> {
 /// An item as returned by the parser. It cannot traverse its parents.
 ///
 /// See the [crate documentation](crate) for more info.
-pub type GreenItem = TreeItem<Arc<GreenNode>, Arc<GreenToken>>;
+pub type GreenItem = TreeItem<Arc<GreenNode>, GreenToken>;
 
 /// A red item on top of a green item. It can traverse its parents.
 ///

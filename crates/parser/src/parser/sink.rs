@@ -125,10 +125,10 @@ impl<'t, 'input> Sink<'t, 'input> {
 
                     self.current_node
                         .children
-                        .push(GreenItem::Token(Arc::new(GreenToken {
+                        .push(GreenItem::Token(GreenToken {
                             kind,
                             text: TokenText::Dynamic(text.to_owned()),
-                        })));
+                        }));
 
                     self.cursor += n_raw_tokens;
                 }
@@ -195,7 +195,7 @@ impl<'t, 'input> Sink<'t, 'input> {
 
         self.current_node
             .children
-            .push(GreenItem::Token(Arc::new(GreenToken {
+            .push(GreenItem::Token(GreenToken {
                 kind,
                 text: match kind.static_text() {
                     Some(static_text) => {
@@ -207,7 +207,7 @@ impl<'t, 'input> Sink<'t, 'input> {
                     }
                     None => TokenText::Dynamic((*text).to_owned()),
                 },
-            })));
+            }));
         self.cursor += 1;
     }
 
