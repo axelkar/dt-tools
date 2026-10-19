@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
 use dt_tools_parser::{
+    TextRange,
     ast::{
         self, AstNode, AstToken, HasDtPhandle, HasLabels, HasMacroInvocation, HasName,
         HasUnitAddress,
@@ -15,8 +16,7 @@ use crate::{
     expand::ExpandedText,
     lowering::item::{lower_item, resolve_phandle},
     mir::{
-        Mir, MirDefinition, MirDefinitionValue, MirNodeData, MirPhandleTarget, MirProvenance,
-        UnresolvedExtension,
+        Mir, MirDefinition, MirDefinitionValue, MirNodeData, MirPhandleTarget, UnresolvedExtension,
     },
 };
 
@@ -27,7 +27,9 @@ pub(crate) fn lower_dt_node(
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
-    let provenance = MirProvenance(dt_node.syntax().text_range().within_file(ExpandedText));
+    let provenance = dt_node.syntax().text_range().within_file(ExpandedText);
+    let name_range = definition_name_range(dt_node);
+    let name_span = name_range.within_file(ExpandedText);
     let omit_if_no_ref = dt_node.omit_if_no_ref();
 
     let lower_resolved = |ctx: &mut _, diag: &mut _, provenance, node_path: &String| {
@@ -41,6 +43,7 @@ pub(crate) fn lower_dt_node(
                 omit_if_no_ref,
             }),
             provenance,
+            name_span,
         });
 
         // Process the node body: subnodes and properties.
@@ -72,6 +75,7 @@ pub(crate) fn lower_dt_node(
                         label,
                         body: body_mir.definitions,
                         provenance,
+                        phandle_span: phandle.syntax().text_range().within_file(ExpandedText),
                     });
                 }
             }
@@ -94,7 +98,7 @@ pub(crate) fn lower_dt_node(
 
             if parent_node_path.is_empty() && !root_node {
                 diag.emit(
-                    dt_node.syntax().text_range(),
+                    name_range,
                     "Subnode must be defined inside a node",
                     Severity::Error,
                 );
@@ -103,7 +107,7 @@ pub(crate) fn lower_dt_node(
 
             if root_node && !parent_node_path.is_empty() {
                 diag.emit(
-                    dt_node.syntax().text_range(),
+                    name_range,
                     "Root node (`/`) must be defined outside other nodes",
                     Severity::Error,
                 );
@@ -192,6 +196,28 @@ pub(crate) fn lower_dt_node_body(
     for item in dt_node.items() {
         lower_item(ctx, diag, parent_node_path, item);
     }
+}
+
+/// Returns the span of a node's name and unit address, or its extension target.
+fn definition_name_range(dt_node: &ast::DtNode) -> TextRange {
+    if let Some(phandle) = dt_node.dt_phandle() {
+        return phandle.syntax().text_range();
+    }
+
+    let Some(name) = dt_node.name() else {
+        // The root node's name is a slash token.
+        return dt_node
+            .syntax()
+            .child_tokens()
+            .find(|token| token.green.kind == TokenKind::Slash)
+            .map_or_else(|| dt_node.syntax().text_range(), |token| token.text_range());
+    };
+
+    let mut range = name.syntax().text_range();
+    if let Some(unit_address) = dt_node.unit_address() {
+        range = range.to(unit_address.syntax().text_range());
+    }
+    range
 }
 
 /// Builds a node/property path. Handles the root node `/` and avoids `//`.
@@ -419,8 +445,8 @@ bar {};
                 node / /main.dts L3:1-L3:7
 
                 --- errors ---
-                Error L6:1-L6:8: Subnode must be defined inside a node
-                Error L8:1-L8:8: Subnode must be defined inside a node
+                Error L6:1-L6:4: Subnode must be defined inside a node
+                Error L8:1-L8:4: Subnode must be defined inside a node
             "#]],
         );
     }
@@ -443,7 +469,7 @@ bar {};
                 node /foo /main.dts L4:5-L6:7
 
                 --- errors ---
-                Error L5:9-L5:15: Root node (`/`) must be defined outside other nodes
+                Error L5:9: Root node (`/`) must be defined outside other nodes
             "#]],
         );
     }

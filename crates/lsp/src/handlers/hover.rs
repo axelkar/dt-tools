@@ -175,7 +175,7 @@ fn mir_definition_section(
         };
 
         let is_here = def == most_precise;
-        let span = resolve_range(db, expanded, def.provenance.0.text_range)
+        let span = resolve_range(db, expanded, def.provenance.text_range)
             .primary_spans
             .first()
             .copied()
@@ -193,7 +193,7 @@ fn mir_definition_section(
         .definitions
         .iter()
         .filter(|def| {
-            resolve_range(db, expanded, def.provenance.0.text_range)
+            resolve_range(db, expanded, def.provenance.text_range)
                 .primary_spans
                 .first()
                 .is_some_and(|span| {
@@ -203,7 +203,7 @@ fn mir_definition_section(
         .collect_vec();
 
     let most_precise = *matching_defs.iter().max_by_key(|def| def.path.len())?;
-    let primary_span = resolve_range(db, expanded, most_precise.provenance.0.text_range)
+    let primary_span = resolve_range(db, expanded, most_precise.provenance.text_range)
         .primary_spans
         .first()
         .copied()

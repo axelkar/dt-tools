@@ -4,7 +4,7 @@ use dt_tools_analyzer::string::interpret_escaped_string;
 use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     TextRange,
-    ast::{self, AstNode, AstToken},
+    ast::{self, AstNode, AstToken, HasName},
     cst::RedToken,
 };
 use num_traits::{AsPrimitive, Num};
@@ -21,7 +21,7 @@ use crate::{
     },
     mir::{
         MirCell32, MirCellList, MirDefinition, MirDefinitionValue, MirPhandleTarget,
-        MirPropertyData, MirProvenance, MirValue,
+        MirPropertyData, MirValue,
     },
 };
 
@@ -50,12 +50,16 @@ pub(crate) fn lower_dt_property(
     let path = build_path(parent_node_path, &name);
 
     let text_range = prop.syntax().text_range();
-    let provenance = MirProvenance(text_range.within_file(ExpandedText));
+    let provenance = text_range.within_file(ExpandedText);
+    let name_span = prop.name().map_or(provenance, |name| {
+        name.syntax().text_range().within_file(ExpandedText)
+    });
 
     ctx.mir.definitions.push(MirDefinition {
         path,
         value: MirDefinitionValue::Property(MirPropertyData { values }),
         provenance,
+        name_span,
     });
     Ok(())
 }
@@ -462,7 +466,7 @@ mod tests {
                 property /foo = &BOGUS; /main.dts L3:5-L3:18
 
                 --- errors ---
-                Error L3:5-L3:18: Label not found: BOGUS [dt_tools_lowering::check_mir_post]
+                Error L3:5-L3:8: Label not found: BOGUS [dt_tools_lowering::check_mir_post]
             "#]],
         );
     }
@@ -481,7 +485,7 @@ mod tests {
                 property /foo = &{/bar}; /main.dts L3:5-L3:19
 
                 --- errors ---
-                Error L3:5-L3:19: Node at path not found: /bar [dt_tools_lowering::check_mir_post]
+                Error L3:5-L3:8: Node at path not found: /bar [dt_tools_lowering::check_mir_post]
             "#]],
         );
     }
@@ -528,8 +532,8 @@ mod tests {
                 property /b = <&{LBL/nope}>; /main.dts L4:24-L4:42
 
                 --- errors ---
-                Error L4:24-L4:42: Node at path not found: /node/nope [dt_tools_lowering::check_mir_post]
-                Error L4:5-L4:23: Label not found: NOPE [dt_tools_lowering::check_mir_post]
+                Error L4:24: Node at path not found: /node/nope [dt_tools_lowering::check_mir_post]
+                Error L4:5: Label not found: NOPE [dt_tools_lowering::check_mir_post]
             "#]],
         );
     }

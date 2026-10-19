@@ -15,7 +15,7 @@ use crate::{
         dt_node::{build_path, get_name_and_unit_addr, lower_dt_node},
         dt_property::lower_dt_property,
     },
-    mir::{MirDefinition, MirDefinitionValue, MirPhandleTarget, MirProvenance},
+    mir::{MirDefinition, MirDefinitionValue, MirPhandleTarget},
 };
 
 /// Lowers an [`ast::Item`] to [`MirDefinition`]s.
@@ -81,16 +81,20 @@ pub(crate) fn handle_dts_directive(
             Severity::Error,
         );
     } else if kind == Some(TokenKind::V1Directive) {
+        let span = dir.syntax().text_range().within_file(ExpandedText);
         ctx.mir.definitions.push(MirDefinition {
             path: parent_node_path.to_owned(),
             value: MirDefinitionValue::V1Directive,
-            provenance: MirProvenance(dir.syntax().text_range().within_file(ExpandedText)),
+            provenance: span,
+            name_span: span,
         });
     } else if kind == Some(TokenKind::PluginDirective) {
+        let span = dir.syntax().text_range().within_file(ExpandedText);
         ctx.mir.definitions.push(MirDefinition {
             path: parent_node_path.to_owned(),
             value: MirDefinitionValue::PluginDirective,
-            provenance: MirProvenance(dir.syntax().text_range().within_file(ExpandedText)),
+            provenance: span,
+            name_span: span,
         });
     } else {
         emit_delete_directive(ctx, diag, parent_node_path, dir);
@@ -108,7 +112,7 @@ pub(crate) fn emit_delete_directive(
     let Some(args) = dir.arguments() else { return };
 
     let text_range = dir.syntax().text_range();
-    let provenance = MirProvenance(text_range.within_file(ExpandedText));
+    let provenance = text_range.within_file(ExpandedText);
 
     if kind == Some(TokenKind::DeleteNodeDirective) {
         let target_path = if let Ok(name) = get_name_and_unit_addr(diag, &args) {
@@ -143,6 +147,7 @@ pub(crate) fn emit_delete_directive(
             path: target_path,
             value: MirDefinitionValue::DeletedNode,
             provenance,
+            name_span: provenance,
         });
     } else if kind == Some(TokenKind::DeletePropertyDirective)
         && let Some(name_tok) = args.name()
@@ -153,6 +158,7 @@ pub(crate) fn emit_delete_directive(
             path: target_path,
             value: MirDefinitionValue::DeletedProperty,
             provenance,
+            name_span: provenance,
         });
     }
 }

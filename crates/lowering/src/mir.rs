@@ -100,7 +100,7 @@ impl Mir {
                 format!(" {}", def.path)
             };
 
-            let provenance = resolve_range(db, expanded, def.provenance.0.text_range);
+            let provenance = resolve_range(db, expanded, def.provenance.text_range);
             let primary_span = *provenance
                 .primary_spans
                 .first()
@@ -223,17 +223,16 @@ impl Mir {
     }
 }
 
-/// A source location in the expanded text that produced a definition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MirProvenance(pub Span<ExpandedText>);
-
 /// Flat MIR definition with a path
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MirDefinition {
     /// Absolute path, containing the leading slash. E.g. `"/soc"`, `"/soc/uart@ff000000"`, `"/soc/uart@ff000000/compatible"`.
     pub path: String,
     pub value: MirDefinitionValue,
-    pub provenance: MirProvenance,
+    /// The source location that produced the definition.
+    pub provenance: Span<ExpandedText>,
+    /// The span of the definition's name or directive in the expanded text.
+    pub name_span: Span<ExpandedText>,
 }
 
 /// What kind of definition this is.
@@ -425,7 +424,10 @@ pub struct UnresolvedExtension {
     pub label: String,
     /// Definitions from the extension body (paths relative to target).
     pub body: Vec<MirDefinition>,
-    pub provenance: MirProvenance,
+    /// The source location that produced the definition.
+    pub provenance: Span<ExpandedText>,
+    /// The span of the definition's phandle.
+    pub phandle_span: Span<ExpandedText>,
 }
 
 #[cfg(test)]

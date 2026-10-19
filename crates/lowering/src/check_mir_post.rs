@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
+use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, Span, SpanLabel};
 
 use crate::{
     db::BaseDb,
@@ -99,7 +99,7 @@ fn check_phandle(
         }
     }
     .map(|msg| Diagnostic {
-        span: MultiSpan::from(def.provenance.0),
+        span: MultiSpan::from(def.name_span),
         msg,
         severity: Severity::Error,
     })
@@ -107,27 +107,27 @@ fn check_phandle(
 
 /// Validates the existence and order of /dts-v1/; and /plugin/;
 fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<ExpandedText>>) {
-    let mut dts_v1: Option<mir::MirProvenance> = None;
+    let mut seen_dts_v1 = false;
     let mut errored_about_dts_v1 = false;
-    let mut overlay_mode: Option<mir::MirProvenance> = None;
+    let mut previous_plugin: Option<Span<ExpandedText>> = None;
 
     for def in &mir.definitions {
         match def.value {
             mir::MirDefinitionValue::V1Directive => {
                 // Note: /dts-v1/; is allowed to be twice
-                dts_v1 = Some(def.provenance);
+                seen_dts_v1 = true;
             }
             mir::MirDefinitionValue::PluginDirective => {
-                if dts_v1.is_none() {
+                if !seen_dts_v1 {
                     diagnostics.push(Diagnostic {
-                        span: MultiSpan::from(def.provenance.0),
+                        span: MultiSpan::from(def.name_span),
                         msg: "`/plugin/;` before `/dts-v1/`;".into(),
                         severity: Severity::Error,
                     });
-                } else if let Some(prev_def) = &overlay_mode {
-                    let mut span = MultiSpan::from(def.provenance.0);
+                } else if let Some(previous) = previous_plugin {
+                    let mut span = MultiSpan::from(def.name_span);
                     span.span_labels.push(SpanLabel {
-                        span: prev_def.0,
+                        span: previous,
                         msg: "Previous definition here".into(),
                     });
                     diagnostics.push(Diagnostic {
@@ -136,21 +136,60 @@ fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<ExpandedTex
                         severity: Severity::Error,
                     });
                 }
-                overlay_mode = Some(def.provenance);
+                previous_plugin = Some(def.name_span);
             }
             mir::MirDefinitionValue::Node(_)
             | mir::MirDefinitionValue::Property(_)
             | mir::MirDefinitionValue::DeletedNode
             | mir::MirDefinitionValue::DeletedProperty => {
-                if dts_v1.is_none() && !errored_about_dts_v1 {
+                if !seen_dts_v1 && !errored_about_dts_v1 {
                     errored_about_dts_v1 = true;
                     diagnostics.push(Diagnostic {
-                        span: MultiSpan::from(def.provenance.0),
+                        span: MultiSpan::from(def.name_span),
                         msg: "Definition before `/dts-v1/;`".into(),
                         severity: Severity::Error,
                     });
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{db::BaseDb, includes::IncludeDirs};
+
+    /// The order diagnostic points at the definition name, not its whole body.
+    #[test]
+    fn definition_before_dts_v1_points_at_the_name() {
+        let db = crate::db::BaseDatabase::default();
+        IncludeDirs::new(&db, vec![]);
+
+        let root_file = db.get_files().add_virtual(
+            &db,
+            "/main.dts".into(),
+            "#define ROOT / { b = <1>; };\nROOT\n/dts-v1/;\n".to_owned(),
+        );
+
+        let (diagnostics, _) = crate::compute_diagnostics(&db, root_file);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.msg.contains("Definition before"))
+            .expect("order diagnostic");
+
+        assert_eq!(diagnostic.span.primary_spans.len(), 1, "{diagnostic:#?}");
+        assert_eq!(
+            diagnostic.span.primary_spans[0].text_range.length(),
+            1,
+            "{diagnostic:#?}"
+        );
+        assert!(
+            diagnostic
+                .span
+                .span_labels
+                .iter()
+                .any(|label| label.msg.contains("in this expansion of `ROOT`")),
+            "{diagnostic:#?}"
+        );
     }
 }
