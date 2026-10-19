@@ -495,4 +495,58 @@ pub(crate) mod tests {
             "#]],
         );
     }
+
+    /// Skipped conditional branches produce neither MIR nor diagnostics.
+    #[test]
+    fn mir_inactive_branch() {
+        check_mir(
+            r#"
+/dts-v1/;
+#if 0
+broken { prop = <1>;
+#endif
+/ {};
+"#,
+            &[],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                node / /main.dts L6:1-L6:6
+            "#]],
+        );
+    }
+
+    /// Lowering diagnostics keep the macro provenance labels.
+    #[test]
+    fn lowering_diagnostic_has_macro_labels() {
+        let db = crate::db::BaseDatabase::default();
+        IncludeDirs::new(&db, vec![]);
+        let root_file = db.get_files().add_virtual(
+            &db,
+            "/main.dts".into(),
+            "#define BIG (1 << 40)\n/ { prop = <BIG>; };\n".to_owned(),
+        );
+
+        let (diagnostics, _) = crate::compute_diagnostics(&db, root_file);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.msg.contains("too large"))
+            .expect("overflow diagnostic");
+
+        assert!(
+            diagnostic
+                .span
+                .span_labels
+                .iter()
+                .any(|label| label.msg.contains("in this expansion of `BIG`")),
+            "{diagnostic:#?}"
+        );
+        assert!(
+            diagnostic
+                .span
+                .span_labels
+                .iter()
+                .any(|label| label.msg.contains("`BIG` defined here")),
+            "{diagnostic:#?}"
+        );
+    }
 }

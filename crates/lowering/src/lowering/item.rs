@@ -440,4 +440,45 @@ mod tests {
             "#]],
         );
     }
+
+    /// A label defined in an include is visible after the include.
+    #[test]
+    fn mir_include_label() {
+        check_mir(
+            r#"
+/dts-v1/;
+#include "inc.dtsi"
+/ { prop = <&LBL>; };
+"#,
+            &[("/inc.dtsi", r#"/ { LBL: node {}; };"#)],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                node / /inc.dtsi L1:1-L1:21
+                node /node labels=[LBL] /inc.dtsi L1:5-L1:18
+                node / /main.dts L4:1-L4:22
+                property /prop = <&LBL>; /main.dts L4:5-L4:19
+            "#]],
+        );
+    }
+
+    /// Raw `/include/` content is not preprocessed, so directives in it are diagnosed.
+    #[test]
+    fn mir_include_raw_directive() {
+        check_mir(
+            r#"
+/dts-v1/;
+/include/ "inc.dtsi"
+"#,
+            &[("/inc.dtsi", "#define X 1\n/ { prop = <X>; };\n")],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                node / /inc.dtsi L2:1-L2:19
+                property /prop = <>; /inc.dtsi L2:5-L2:16
+
+                --- errors ---
+                Error L1:1-L1:12: Preprocessor directives in `/include/` files are not processed
+                Error L2:13: Macro `X` is not defined
+            "#]],
+        );
+    }
 }
