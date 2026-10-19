@@ -113,6 +113,26 @@ pub fn emit_parse_errors(
     false
 }
 
+/// Returns the lint diagnostics for `file`.
+#[salsa::tracked(returns(ref), lru = 256)]
+pub fn lint_file(db: &dyn db::BaseDb, file: file::File) -> Vec<Diagnostic<file::File>> {
+    profiling::scope!("lowering::lint_file", file.path(db).as_str());
+
+    let Some(parse) = parse_file(db, file) else {
+        return Vec::new();
+    };
+
+    let parse = parse.parse(db);
+
+    dt_tools_lint::default_lint(&parse.source_file(), file.contents(db), file)
+        .into_iter()
+        .map(|mut lint| {
+            tag_diagnostic(&mut lint.diagnostic, &format!("dt-tools(lint {})", lint.id));
+            lint.diagnostic
+        })
+        .collect()
+}
+
 #[salsa::tracked(returns(ref), lru = 64)]
 pub fn compute_diagnostics(
     db: &dyn db::BaseDb,
@@ -167,16 +187,7 @@ pub fn compute_diagnostics(
     processed_files.dedup();
 
     for file in &processed_files {
-        if let Some(parse) = parse_file(db, *file) {
-            let parse = parse.parse(db);
-
-            for mut lint in
-                dt_tools_lint::default_lint(&parse.source_file(), file.contents(db), *file)
-            {
-                tag_diagnostic(&mut lint.diagnostic, &format!("dt-tools(lint {})", lint.id));
-                diagnostics.push(lint.diagnostic);
-            }
-        }
+        diagnostics.extend_from_slice(lint_file(db, *file));
     }
 
     diagnostics.dedup();

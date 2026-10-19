@@ -161,6 +161,8 @@ pub fn preprocessor_diagnostics(
 
 /// Returns the syntax diagnostics of `root`'s expanded text with file spans.
 pub fn expanded_syntax_diagnostics(db: &dyn BaseDb, root: File) -> Vec<Diagnostic<File>> {
+    profiling::scope!("lowering::expand::expanded_syntax_diagnostics");
+
     let Some(expanded) = expand_root(db, root).as_ref() else {
         return Vec::new();
     };

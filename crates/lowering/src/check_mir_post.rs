@@ -14,6 +14,8 @@ pub(super) fn check_mir_post<'db>(
     db: &'db dyn BaseDb,
     result: LoweredFile<'db>,
 ) -> Vec<Diagnostic<ExpandedText>> {
+    profiling::scope!("lowering::check_mir_post");
+
     let mut diagnostics = Vec::new();
 
     let mir = result.mir(db);
@@ -31,11 +33,14 @@ fn check_phandles(
     mir: &mir::Mir,
     diagnostics: &mut Vec<Diagnostic<ExpandedText>>,
 ) {
+    profiling::scope!("lowering::check_mir_post::check_phandles");
+
     if mir.sets_overlay() {
         return;
     }
     // Labels are resolved at the end because forward references are valid.
     for def in mir.iter_live_defs_under("") {
+        profiling::scope!("lowering::check_mir_post::check_phandles::in_loop");
         if let mir::MirDefinitionValue::Property(mir_property_data) = &def.value {
             for value in &mir_property_data.values {
                 match value {
@@ -63,6 +68,11 @@ fn check_phandle(
     def: &mir::MirDefinition,
     target: &mir::MirPhandleTarget,
 ) -> Option<Diagnostic<ExpandedText>> {
+    profiling::scope!(
+        "lowering::check_mir_post::check_phandle",
+        format!("{target:?}").as_str()
+    );
+
     match target {
         mir::MirPhandleTarget::Label(name) => {
             if result.labels(db).get(name).is_some_and(Option::is_some) {
@@ -107,6 +117,8 @@ fn check_phandle(
 
 /// Validates the existence and order of /dts-v1/; and /plugin/;
 fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<ExpandedText>>) {
+    profiling::scope!("lowering::check_mir_post::check_directives");
+
     let mut seen_dts_v1 = false;
     let mut errored_about_dts_v1 = false;
     let mut previous_plugin: Option<Span<ExpandedText>> = None;
