@@ -534,10 +534,15 @@ impl<M: TokenMatcher, const SILENT: bool> Check<'_, '_, '_, M, SILENT> {
 
     /// Tests and consumes.
     pub fn eat(&mut self) -> bool {
-        if self.at() {
+        profiling::scope!("parser::Check::eat");
+
+        if self.matcher.matches(self.p) {
             self.matcher.consume(self.p);
             true
         } else {
+            if !SILENT {
+                self.matcher.push_expected(self.p);
+            }
             false
         }
     }
