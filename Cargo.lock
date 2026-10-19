@@ -610,6 +610,7 @@ dependencies = [
  "dt-tools-parser",
  "expect-test",
  "logos",
+ "memchr",
  "profiling",
  "rustc-hash",
  "strum",

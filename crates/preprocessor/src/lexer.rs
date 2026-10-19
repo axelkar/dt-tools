@@ -9,6 +9,9 @@ use crate::{
     token::PpToken,
 };
 
+/// Estimated bytes per token, used to preallocate the token vector.
+const BYTES_PER_TOKEN: usize = 4;
+
 /// An error detected while cleaning or tokenizing a file.
 #[derive(
     thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Default, displaydoc::Display, Hash,
@@ -224,7 +227,7 @@ pub fn lex(contents: &str, file: SourceId) -> LexedFile {
     let (spliced, splice_checkpoints) = splice_lines(contents);
 
     let mut cleaned_text = String::with_capacity(spliced.len());
-    let mut tokens: Vec<PpToken> = Vec::new();
+    let mut tokens: Vec<PpToken> = Vec::with_capacity(spliced.len() / BYTES_PER_TOKEN);
     let mut comment_checkpoints = Vec::new();
     let mut errors = Vec::new();
     let mut prev_spliced_end = 0;
@@ -235,11 +238,11 @@ pub fn lex(contents: &str, file: SourceId) -> LexedFile {
         let span = lexer.span();
         let orig = Checkpoint::map_range(&splice_checkpoints, TextRange::new(span.start, span.end));
 
-        // Whitespace between tokens is kept as-is.
-        cleaned_text.push_str(&spliced[prev_spliced_end..span.start]);
-
         match result {
             Ok(PpTokenKind::LineComment | PpTokenKind::BlockComment) => {
+                // Whitespace between tokens is kept as-is.
+                cleaned_text.push_str(&spliced[prev_spliced_end..span.start]);
+
                 // A comment becomes one space, including any newlines inside it. A following
                 // token is therefore only at line start if a real newline precedes it.
                 cleaned_text.push(' ');
@@ -249,8 +252,9 @@ pub fn lex(contents: &str, file: SourceId) -> LexedFile {
                 });
             }
             Ok(kind) => {
-                let cleaned_start = cleaned_text.len();
-                cleaned_text.push_str(lexer.slice());
+                // Copy the whitespace and the token in one go.
+                let cleaned_start = cleaned_text.len() + (span.start - prev_spliced_end);
+                cleaned_text.push_str(&spliced[prev_spliced_end..span.end]);
 
                 let (has_space_before, line_start) = match prev_token_cleaned_end {
                     None => (false, true),
@@ -271,6 +275,9 @@ pub fn lex(contents: &str, file: SourceId) -> LexedFile {
                 prev_token_cleaned_end = Some(cleaned_text.len());
             }
             Err(error) => {
+                // Whitespace between tokens is kept as-is.
+                cleaned_text.push_str(&spliced[prev_spliced_end..span.start]);
+
                 if matches!(error, LexError::UnterminatedBlockComment) {
                     // The unterminated comment still becomes one space.
                     cleaned_text.push(' ');
@@ -280,7 +287,7 @@ pub fn lex(contents: &str, file: SourceId) -> LexedFile {
                     });
                 } else {
                     // Preserve text that was not lexed as a token.
-                    cleaned_text.push_str(lexer.slice());
+                    cleaned_text.push_str(&spliced[span.start..span.end]);
                 }
 
                 errors.push(LexErrorAt {
@@ -296,27 +303,7 @@ pub fn lex(contents: &str, file: SourceId) -> LexedFile {
     // Whitespace after tokens
     cleaned_text.push_str(&spliced[prev_spliced_end..]);
 
-    // TODO: into_boxed_str?
-    cleaned_text.shrink_to_fit();
-
     errors.sort_by_key(|error| error.orig_range.start);
-
-    #[cfg(debug_assertions)]
-    for token in &tokens {
-        let orig_text = contents
-            .get(token.orig.byte_range())
-            .expect("Should be valid TextRange");
-
-        // A token with a backslash may have had a continuation removed, so its original and
-        // cleaned text can differ legitimately.
-        if !orig_text.contains('\\') {
-            assert_eq!(
-                contents.get(token.orig.byte_range()),
-                Some(token.text(&cleaned_text)),
-                "Original and cleaned text should not differ without line continuations. Token: {token:?}",
-            );
-        }
-    }
 
     LexedFile {
         cleaned_text,

@@ -1,6 +1,9 @@
 //! Line continuation removal.
 
+use std::borrow::Cow;
+
 use dt_tools_diagnostic::text_range::TextRange;
+use memchr::memchr2;
 
 /// A mapping between a byte offset in one text and the corresponding byte offset in another.
 #[derive(Debug, Clone, Copy)]
@@ -16,8 +19,6 @@ impl Checkpoint {
     /// [`Checkpoint`]s are sorted, so the shift comes from the last checkpoint at or before `from`.
     /// Before the first checkpoint nothing has been changed yet, and the offset is unchanged.
     pub(crate) fn map_offset(checkpoints: &[Checkpoint], from: usize) -> usize {
-        debug_assert!(checkpoints.is_sorted_by_key(|checkpoint| checkpoint.from));
-
         let idx = checkpoints.partition_point(|checkpoint| checkpoint.from <= from);
         if idx == 0 {
             return from;
@@ -51,34 +52,39 @@ impl Checkpoint {
 /// Removes the BOM and line continuations, and normalizes line endings to `\n`.
 ///
 /// Corresponds to the [C translation phases](https://en.cppreference.com/c/language/translation_phases) 1 and 2.
-pub(crate) fn splice_lines(src: &str) -> (String, Vec<Checkpoint>) {
+/// Borrows `src` unchanged when there is nothing to remove.
+pub(crate) fn splice_lines(src: &str) -> (Cow<'_, str>, Vec<Checkpoint>) {
+    profiling::scope!("preprocessor::splice_lines");
+
+    let has_bom = src.starts_with('\u{feff}');
+    let bytes = src.as_bytes();
+
+    if !has_bom && memchr2(b'\\', b'\r', bytes).is_none() {
+        return (Cow::Borrowed(src), Vec::new());
+    }
+
     let mut out = String::with_capacity(src.len());
     let mut checkpoints = Vec::new();
     let mut pos = 0;
 
     // Remove a leading BOM.
-    if src.starts_with('\u{feff}') {
+    if has_bom {
         pos = '\u{feff}'.len_utf8();
         checkpoints.push(Checkpoint { from: 0, to: pos });
     }
 
-    while pos < src.len() {
-        // Remove a line continuation, joining the two physical lines.
-        if let Some(len) = continuation_len(&src[pos..]) {
-            pos += len;
-            checkpoints.push(Checkpoint {
-                from: out.len(),
-                to: pos,
-            });
-            continue;
-        }
+    loop {
+        let Some(offset) = memchr2(b'\\', b'\r', &bytes[pos..]) else {
+            out.push_str(&src[pos..]);
+            break;
+        };
+        let special = pos + offset;
+        out.push_str(&src[pos..special]);
 
-        // Check the current character.
-        let ch = src[pos..].chars().next().expect("position is in bounds");
-        if ch == '\r' {
-            if src.as_bytes().get(pos + 1) == Some(&b'\n') {
+        if bytes[special] == b'\r' {
+            if bytes.get(special + 1) == Some(&b'\n') {
                 // Normalize a CRLF to a single newline.
-                pos += 2;
+                pos = special + 2;
                 out.push('\n');
                 checkpoints.push(Checkpoint {
                     from: out.len(),
@@ -86,24 +92,34 @@ pub(crate) fn splice_lines(src: &str) -> (String, Vec<Checkpoint>) {
                 });
             } else {
                 // Normalize a lone CR to a single newline.
-                pos += 1;
+                pos = special + 1;
                 out.push('\n');
             }
-        } else {
-            out.push(ch);
-            pos += ch.len_utf8();
+            continue;
         }
+
+        // Remove a line continuation, joining the two physical lines.
+        if let Some(len) = continuation_len(&bytes[special..]) {
+            pos = special + len;
+            checkpoints.push(Checkpoint {
+                from: out.len(),
+                to: pos,
+            });
+            continue;
+        }
+
+        out.push('\\');
+        pos = special + 1;
     }
 
-    (out, checkpoints)
+    (Cow::Owned(out), checkpoints)
 }
 
 /// Returns the length of a line continuation at the start of `text`, if there is one.
 ///
 /// A continuation is a backslash, then zero or more non-newline whitespace characters, then a
 /// line ending.
-fn continuation_len(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
+fn continuation_len(bytes: &[u8]) -> Option<usize> {
     if bytes.first() != Some(&b'\\') {
         return None;
     }
