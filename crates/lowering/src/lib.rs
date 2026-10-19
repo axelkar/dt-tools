@@ -40,7 +40,7 @@ pub fn rope(db: &dyn db::BaseDb, file: file::File) -> Option<ropey::Rope> {
 /// Returns `None` if the file doesn't exist.
 #[salsa::tracked(no_eq, lru = 64)]
 pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
-    profiling::scope!("lsp::salsa::parse_file", file.path(db).as_str());
+    profiling::scope!("lowering::parse_file", file.path(db).as_str());
 
     if !file.is_readable_file(db) {
         return None;
@@ -115,7 +115,7 @@ pub fn compute_diagnostics(
     root_file: file::File,
 ) -> (Vec<Diagnostic<file::File>>, Vec<file::File>) {
     profiling::scope!(
-        "lsp::salsa::compute_file_diagnostics",
+        "lowering::compute_file_diagnostics",
         root_file.path(db).as_str()
     );
 

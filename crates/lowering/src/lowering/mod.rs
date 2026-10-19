@@ -64,7 +64,7 @@ pub struct LoweredFile<'db> {
 /// Will panic if [`IncludeDirs`] hasn't been defined.
 #[salsa::tracked(lru = 64)]
 pub fn lower_root_file<'db>(db: &'db dyn BaseDb, root_file: File) -> Option<LoweredFile<'db>> {
-    profiling::scope!("lsp::salsa::lower_root_file", root_file.path(db).as_str());
+    profiling::scope!("lowering::lower_root_file", root_file.path(db).as_str());
 
     let expanded = expand_root(db, root_file).as_ref()?;
     let parse = expanded_parse(db, root_file)?;

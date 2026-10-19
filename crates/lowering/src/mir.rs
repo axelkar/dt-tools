@@ -39,7 +39,7 @@ pub struct Mir {
 impl Mir {
     /// Merge another `Mir` into this one (e.g., from an included file).
     pub fn merge(&mut self, other: &Self) {
-        profiling::scope!("lsp::salsa::Mir::merge");
+        profiling::scope!("lowering::Mir::merge");
 
         self.definitions.extend(other.definitions.iter().cloned());
         self.unresolved_extensions

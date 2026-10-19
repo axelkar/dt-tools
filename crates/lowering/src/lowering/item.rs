@@ -24,6 +24,17 @@ pub(crate) fn lower_item(
     parent_node_path: &str,
     item: ast::Item,
 ) {
+    profiling::scope!(
+        "lowering::lower_item",
+        match &item {
+            ast::Item::DtNode(_) => "DtNode",
+            ast::Item::DtProperty(_) => "DtProperty",
+            ast::Item::DtsDirective(_) => "DtsDirective",
+            ast::Item::PreprocessorConditional(_) => "PreprocessorConditional",
+            ast::Item::PreprocessorDirective(_) => "PreprocessorDirective",
+        }
+    );
+
     match item {
         ast::Item::DtNode(dt_node) => {
             lower_dt_node(ctx, diag, parent_node_path, &dt_node);

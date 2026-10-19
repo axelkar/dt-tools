@@ -12,7 +12,7 @@ use crate::{Parse, db::BaseDb, file::File, includes::IncludeDirs};
 /// Returns `None` if the file doesn't exist.
 #[salsa::tracked(returns(ref), lru = 32)]
 pub fn expand_root(db: &dyn BaseDb, root: File) -> Option<PreprocessedRoot> {
-    profiling::scope!("lsp::salsa::expand_root", root.path(db).as_str());
+    profiling::scope!("lowering::expand_root", root.path(db).as_str());
 
     if !root.is_readable_file(db) {
         return None;
