@@ -327,7 +327,7 @@ mod tests {
     use camino::Utf8PathBuf;
     use dt_tools_lowering::{
         db::{BaseDatabase, BaseDb},
-        includes::IncludeDirs,
+        settings::PreprocessSettings,
     };
 
     use super::{include_section, macro_section};
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn shows_preprocessor_macros_and_includes() {
         let db = BaseDatabase::default();
-        IncludeDirs::new(&db, Vec::new());
+        PreprocessSettings::new(&db, Vec::new(), vec![]);
         let contents = "#define FOO 1\n#include \"a.dtsi\"\n/ { x = <FOO>; };\n";
         let root =
             db.get_files()

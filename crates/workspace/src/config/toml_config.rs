@@ -12,6 +12,7 @@ pub const CONFIG_FILENAME: &str = ".dt-tools.toml";
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TomlConfig {
     pub include_dirs: Option<Vec<Utf8PathBuf>>,
+    pub defines: Option<Vec<String>>,
 }
 
 impl TomlConfig {
@@ -68,6 +69,7 @@ mod tests {
                     .join("this_is_a_test")
             ])
         );
+        assert_eq!(config.defines, Some(vec!["FOO".into(), "BAR=2".into()]));
 
         // try load nonexistent
         assert!(

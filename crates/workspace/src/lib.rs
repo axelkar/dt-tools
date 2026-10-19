@@ -81,6 +81,8 @@ pub fn linux_default_config(workspace_dir: &Utf8Path) -> TomlConfig {
             workspace_dir.join("include"), // devicetrees often use `#define` macros from header files
             workspace_dir.join("scripts/dtc/include-prefixes"),
         ]),
+        // The kernel runs the C preprocessor with `-D__DTS__`.
+        defines: Some(vec!["__DTS__".to_owned()]),
     }
 }
 
@@ -98,6 +100,13 @@ mod tests {
                 _ => panic!("not a TomlConfig"),
             }
         }
+    }
+
+    /// Linux workspaces define `__DTS__` like the kernel's C preprocessor invocation.
+    #[test]
+    fn linux_defaults() {
+        let config = linux_default_config(Utf8Path::new("/linux"));
+        assert_eq!(config.defines, Some(vec!["__DTS__".to_owned()]));
     }
 
     #[test]

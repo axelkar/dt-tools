@@ -440,13 +440,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        db::BaseDb, expand::expand_root, includes::IncludeDirs, lowering::lower_root_file,
+        db::BaseDb, expand::expand_root, lowering::lower_root_file, settings::PreprocessSettings,
     };
 
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
     fn check_iter_live_defs_under(input: &str, path_base: &str, expect: Expect) {
         let db = crate::db::BaseDatabase::default();
-        IncludeDirs::new(&db, vec![]);
+        PreprocessSettings::new(&db, vec![], vec![]);
 
         let root_file = db
             .get_files()

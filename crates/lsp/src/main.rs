@@ -7,7 +7,7 @@ use ::salsa::Setter;
 use camino::{Utf8Path, Utf8PathBuf};
 use dt_tools_lowering::{
     db::{BaseDatabase, BaseDb},
-    includes::IncludeDirs,
+    settings::PreprocessSettings,
 };
 use dt_tools_workspace::{
     WorkspacePathFindResult,
@@ -176,15 +176,21 @@ impl Session {
         // - include (for #define's in header files)
         // - scripts/dtc/include-prefixes
 
-        let new_include_dirs = dt_tools_workspace
+        let (new_include_dirs, new_defines) = dt_tools_workspace
             .as_ref()
-            .map(|dt_tools_workspace| dt_tools_workspace.1.config.include_dirs.clone())
+            .map(|workspace| {
+                (
+                    workspace.1.config.include_dirs.clone(),
+                    workspace.1.config.defines.clone(),
+                )
+            })
             .unwrap_or_default();
 
-        if let Some(include_dirs) = IncludeDirs::try_get(db) {
-            include_dirs.set_include_dirs(db).to(new_include_dirs);
+        if let Some(settings) = PreprocessSettings::try_get(db) {
+            settings.set_include_dirs(db).to(new_include_dirs);
+            settings.set_defines(db).to(new_defines);
         } else {
-            IncludeDirs::new(db, new_include_dirs);
+            PreprocessSettings::new(db, new_include_dirs, new_defines);
         }
 
         *self.dt_tools_workspace.lock() = dt_tools_workspace;

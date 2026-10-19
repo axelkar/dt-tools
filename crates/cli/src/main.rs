@@ -15,9 +15,9 @@ use dt_tools_lowering::{
     db::{BaseDatabase, BaseDb},
     emit_parse_errors,
     expand::{expand_root, expanded_syntax_diagnostics, preprocessor_diagnostics},
-    includes::IncludeDirs,
     lowering::lower_root_file,
     parse_file,
+    settings::PreprocessSettings,
 };
 use dt_tools_workspace::{
     Workspace, WorkspacePathFindResult,
@@ -169,14 +169,22 @@ fn cmd_parse(file: &Utf8Path) -> Result<()> {
     Ok(())
 }
 
+/// Installs the workspace preprocessing settings into `db`.
+fn init_preprocess_settings(db: &BaseDatabase, workspace: &Workspace) {
+    PreprocessSettings::new(
+        db,
+        workspace.config.include_dirs.clone(),
+        workspace.config.defines.clone(),
+    );
+}
+
 fn cmd_expand(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
     let abs_path = file
         .canonicalize_utf8()
         .wrap_err_with(|| format!("File {file} doesn't exist"))?;
     let db = BaseDatabase::default();
 
-    let include_dirs: Vec<Utf8PathBuf> = workspace.config.include_dirs.clone();
-    IncludeDirs::new(&db, include_dirs);
+    init_preprocess_settings(&db, workspace);
 
     let root_file = db.get_files().get_file(&db, &abs_path);
     let expanded = expand_root(&db, root_file)
@@ -203,8 +211,7 @@ fn cmd_mir(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
         .wrap_err_with(|| format!("File {file} doesn't exist"))?;
     let db = BaseDatabase::default();
 
-    let include_dirs: Vec<Utf8PathBuf> = workspace.config.include_dirs.clone();
-    IncludeDirs::new(&db, include_dirs);
+    init_preprocess_settings(&db, workspace);
 
     let root_file = db.get_files().get_file(&db, &abs_path);
     let result =
@@ -243,8 +250,7 @@ fn cmd_check_many(
     // One Salsa database for all files
     let db = BaseDatabase::default();
 
-    let include_dirs: Vec<Utf8PathBuf> = workspace.config.include_dirs.clone();
-    IncludeDirs::new(&db, include_dirs);
+    init_preprocess_settings(&db, workspace);
 
     let start = Instant::now();
 

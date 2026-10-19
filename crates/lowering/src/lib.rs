@@ -14,9 +14,9 @@ pub mod expand;
 mod expr_eval;
 mod extra_num_traits;
 pub mod file;
-pub mod includes;
 pub mod lowering;
 pub mod mir;
+pub mod settings;
 
 #[salsa::tracked]
 pub struct Parse<'db> {

@@ -4,9 +4,9 @@ use dt_tools_diagnostic::{
     Diagnostic, MultiSpan, Severity, Span, SpanLabel, text_range::TextRange,
 };
 pub use dt_tools_preprocessor::PreprocessedRoot;
-use dt_tools_preprocessor::{PreprocessorConfig, SourceId, preprocess};
+use dt_tools_preprocessor::{Define, PreprocessorConfig, SourceId, preprocess};
 
-use crate::{Parse, db::BaseDb, file::File, includes::IncludeDirs};
+use crate::{Parse, db::BaseDb, file::File, settings::PreprocessSettings};
 
 /// Identifies ranges in a root file's expanded text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -24,8 +24,17 @@ pub fn expand_root(db: &dyn BaseDb, root: File) -> Option<PreprocessedRoot> {
     }
 
     let files = db.get_files();
+    let settings = PreprocessSettings::get(db);
     let config = PreprocessorConfig {
-        include_dirs: IncludeDirs::get(db).include_dirs(db).clone(),
+        include_dirs: settings.include_dirs(db).clone(),
+        defines: settings
+            .defines(db)
+            .iter()
+            .map(|(name, value)| Define {
+                name: name.clone(),
+                value: value.clone(),
+            })
+            .collect(),
         ..PreprocessorConfig::default()
     };
 
@@ -223,8 +232,8 @@ mod tests {
     use crate::{
         db::{BaseDatabase, BaseDb},
         file::File,
-        includes::IncludeDirs,
         parse_file,
+        settings::PreprocessSettings,
     };
 
     fn virtual_file(db: &BaseDatabase, path: &str, contents: &str) -> File {
@@ -235,7 +244,7 @@ mod tests {
     #[test]
     fn expanded_parse_skips_inactive_branches() {
         let db = BaseDatabase::default();
-        IncludeDirs::new(&db, Vec::new());
+        PreprocessSettings::new(&db, Vec::new(), vec![]);
         let file = virtual_file(
             &db,
             "/main.dts",
@@ -257,7 +266,7 @@ mod tests {
     #[test]
     fn expands_includes_before_parsing() {
         let db = BaseDatabase::default();
-        IncludeDirs::new(&db, Vec::new());
+        PreprocessSettings::new(&db, Vec::new(), vec![]);
         let main = virtual_file(&db, "/main.dts", "#include \"a.dtsi\"\n/ { x = <1>; };\n");
         virtual_file(&db, "/a.dtsi", "/ { y = <2>; };\n");
 
@@ -274,10 +283,29 @@ mod tests {
         assert!(parse.errors.is_empty(), "{:?}", parse.errors);
     }
 
+    /// Command-line defines are visible before the root is expanded.
+    #[test]
+    fn expands_command_line_defines() {
+        let db = BaseDatabase::default();
+        PreprocessSettings::new(&db, Vec::new(), vec![("FLAG".to_owned(), "42".to_owned())]);
+        let file = virtual_file(&db, "/main.dts", "/ { x = <FLAG>; };\n");
+
+        let expanded = expand_root(&db, file).as_ref().expect("readable");
+        assert!(expanded.text.contains("<42>"), "{:?}", expanded.text);
+        assert!(
+            expanded
+                .sources
+                .iter()
+                .any(dt_tools_preprocessor::SourceFile::is_command_line),
+            "{:?}",
+            expanded.sources
+        );
+    }
+
     #[test]
     fn reports_expanded_syntax_errors_with_file_spans() {
         let db = BaseDatabase::default();
-        IncludeDirs::new(&db, Vec::new());
+        PreprocessSettings::new(&db, Vec::new(), vec![]);
         let main = virtual_file(&db, "/main.dts", "/ { x = <1>;\n");
 
         let diagnostics = expanded_syntax_diagnostics(&db, main);
@@ -289,7 +317,7 @@ mod tests {
     #[test]
     fn labels_macro_invocations() {
         let db = BaseDatabase::default();
-        IncludeDirs::new(&db, Vec::new());
+        PreprocessSettings::new(&db, Vec::new(), vec![]);
         let main = virtual_file(&db, "/main.dts", "#define BAD 1 +\n/ { x = <BAD>; };\n");
 
         let diagnostics = expanded_syntax_diagnostics(&db, main);
@@ -308,7 +336,7 @@ mod tests {
     #[test]
     fn converts_preprocessor_diagnostics_to_files() {
         let db = BaseDatabase::default();
-        IncludeDirs::new(&db, Vec::new());
+        PreprocessSettings::new(&db, Vec::new(), vec![]);
         let main = virtual_file(&db, "/main.dts", "#include \"missing.dtsi\"\n/ { };\n");
 
         let expanded = expand_root(&db, main).as_ref().expect("readable");

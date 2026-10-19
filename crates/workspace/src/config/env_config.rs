@@ -5,6 +5,7 @@ use serde::Deserialize;
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct EnvConfig {
     pub include_dirs: Option<Vec<Utf8PathBuf>>,
+    pub defines: Option<Vec<String>>,
 }
 
 impl EnvConfig {
@@ -21,13 +22,14 @@ mod tests {
     #[test]
     fn parse() {
         assert_eq!(
-            envy::from_iter::<_, EnvConfig>([(
-                "INCLUDE_DIRS".to_owned(),
-                "linux,linux-old".to_owned()
-            )])
+            envy::from_iter::<_, EnvConfig>([
+                ("INCLUDE_DIRS".to_owned(), "linux,linux-old".to_owned()),
+                ("DEFINES".to_owned(), "FOO,BAR=2".to_owned()),
+            ])
             .unwrap(),
             EnvConfig {
-                include_dirs: Some(vec!["linux".into(), "linux-old".into()])
+                include_dirs: Some(vec!["linux".into(), "linux-old".into()]),
+                defines: Some(vec!["FOO".into(), "BAR=2".into()]),
             }
         );
     }

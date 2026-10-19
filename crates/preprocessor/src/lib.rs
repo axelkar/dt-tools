@@ -106,7 +106,7 @@ mod tests {
     use camino::Utf8Path;
     use dt_tools_diagnostic::{Severity, text_range::TextRange};
 
-    use super::{PreprocessedRoot, PreprocessorConfig, preprocess};
+    use super::{Define, PreprocessedRoot, PreprocessorConfig, preprocess};
 
     #[test]
     fn preprocesses_the_root_without_expansion() {
@@ -130,6 +130,35 @@ mod tests {
         assert!(result.text.is_empty());
         assert_eq!(result.diagnostics.len(), 1);
         assert_eq!(result.sources.len(), 1);
+    }
+
+    /// Predefined macros are visible before the root file and can be undefined.
+    #[test]
+    fn applies_predefined_macros() {
+        let config = PreprocessorConfig {
+            defines: vec![
+                Define {
+                    name: "FLAG".to_owned(),
+                    value: String::new(),
+                },
+                Define {
+                    name: "VALUE".to_owned(),
+                    value: "42".to_owned(),
+                },
+            ],
+            ..PreprocessorConfig::default()
+        };
+        let run = |input: &str| {
+            preprocess(Utf8Path::new("test.dts"), &config, |_| {
+                Some(input.to_owned())
+            })
+        };
+
+        let result = run("#ifdef FLAG\n#ifdef VALUE\nVALUE\n#endif\n#endif\n");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.text, "42");
+
+        assert_eq!(run("#undef VALUE\nVALUE\n").text, "VALUE");
     }
 
     fn preprocess_str(input: &str) -> PreprocessedRoot {

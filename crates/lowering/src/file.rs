@@ -6,7 +6,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use dt_tools_diagnostic::Span;
 use salsa::Durability;
 
-use crate::{db::BaseDb, includes::IncludeDirs};
+use crate::{db::BaseDb, settings::PreprocessSettings};
 
 // FIXME: rename `is_readable_file` to something more fitting
 pub type FxDashMap<K, V> =
@@ -43,10 +43,10 @@ impl File {
         Some((line, column))
     }
 
-    /// Returns the path with the first [include directory](IncludeDirs) prefix removed.
+    /// Returns the path with the first [include directory](PreprocessSettings) prefix removed.
     pub fn shorter_path<'db>(&self, db: &'db dyn BaseDb) -> &'db Utf8Path {
         let path = self.path(db);
-        let include_dirs = IncludeDirs::get(db).include_dirs(db);
+        let include_dirs = PreprocessSettings::get(db).include_dirs(db);
 
         include_dirs
             .iter()
@@ -139,7 +139,7 @@ impl std::panic::RefUnwindSafe for Files {}
 mod tests {
     use camino::Utf8Path;
 
-    use crate::{db::BaseDb, includes::IncludeDirs};
+    use crate::{db::BaseDb, settings::PreprocessSettings};
 
     #[test]
     fn read_file() {
@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn shorter_path() {
         let db = crate::db::BaseDatabase::default();
-        IncludeDirs::new(&db, vec!["/foo/bar".into()]);
+        PreprocessSettings::new(&db, vec!["/foo/bar".into()], vec![]);
 
         let file = db
             .get_files()

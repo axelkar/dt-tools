@@ -64,7 +64,7 @@ pub struct LoweredFile<'db> {
 ///
 /// # Panics
 ///
-/// Will panic if [`IncludeDirs`] hasn't been defined.
+/// Will panic if [`PreprocessSettings`] hasn't been defined.
 #[salsa::tracked(lru = 64)]
 pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'_>> {
     profiling::scope!("lowering::lower_root_file", root_file.path(db).as_str());
@@ -92,6 +92,7 @@ pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'
     let processed_files = expanded
         .sources
         .iter()
+        .filter(|source| !source.is_command_line())
         .map(|source| db.get_files().get_file(db, &source.path))
         .collect();
 
@@ -175,7 +176,7 @@ pub(crate) mod tests {
     use expect_test::{Expect, expect};
 
     use super::*;
-    use crate::{db::BaseDb, file::DisplaySpanLineColumn, includes::IncludeDirs};
+    use crate::{db::BaseDb, file::DisplaySpanLineColumn, settings::PreprocessSettings};
 
     pub(crate) fn fmt_diags(db: &dyn BaseDb, out: &mut String, diags: &[Diagnostic<File>]) {
         out.push_str("--- errors ---\n");
@@ -207,7 +208,7 @@ pub(crate) mod tests {
         expect: Expect,
     ) {
         let db = crate::db::BaseDatabase::default();
-        IncludeDirs::new(&db, vec![]);
+        PreprocessSettings::new(&db, vec![], vec![]);
 
         let root_file =
             db.get_files()
@@ -532,7 +533,7 @@ broken { prop = <1>;
     #[test]
     fn lowering_diagnostic_has_macro_labels() {
         let db = crate::db::BaseDatabase::default();
-        IncludeDirs::new(&db, vec![]);
+        PreprocessSettings::new(&db, vec![], vec![]);
         let root_file = db.get_files().add_virtual(
             &db,
             "/main.dts".into(),

@@ -1,1 +1,2 @@
 include-dirs = ["this_is_a_test"]
+defines = ["FOO", "BAR=2"]

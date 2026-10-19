@@ -13,8 +13,8 @@ use expect_test::expect;
 use crate::{
     db::BaseDb,
     expand::expand_root,
-    includes::IncludeDirs,
     lowering::{lower_root_file, tests::fmt_diags},
+    settings::PreprocessSettings,
 };
 
 fn run_dtc(contents: &str) -> Result<String, String> {
@@ -67,7 +67,7 @@ fn cross_check_dtc_success(contents: &str) -> Result<(), ()> {
     let dtc_output = run_dtc(contents);
 
     let db = crate::db::BaseDatabase::default();
-    IncludeDirs::new(&db, vec![]);
+    PreprocessSettings::new(&db, vec![], vec![]);
 
     let root_file = db
         .get_files()

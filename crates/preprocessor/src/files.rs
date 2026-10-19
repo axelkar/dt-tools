@@ -9,6 +9,9 @@ use crate::{
     token::PpToken,
 };
 
+/// Prefix of synthetic sources that hold command-line macro definitions.
+pub(crate) const COMMAND_LINE_SOURCE_PREFIX: &str = "/<command-line:";
+
 /// An identifier for a source file within one preprocessing run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceId(pub u32);
@@ -18,6 +21,14 @@ pub struct SourceId(pub u32);
 pub struct SourceFile {
     pub id: SourceId,
     pub path: Utf8PathBuf,
+}
+
+impl SourceFile {
+    /// Returns true for synthetic sources that hold command-line macro definitions.
+    #[must_use]
+    pub fn is_command_line(&self) -> bool {
+        self.path.as_str().starts_with(COMMAND_LINE_SOURCE_PREFIX)
+    }
 }
 
 /// Source files for one preprocessing run.

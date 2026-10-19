@@ -157,13 +157,13 @@ fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<ExpandedTex
 
 #[cfg(test)]
 mod tests {
-    use crate::{db::BaseDb, includes::IncludeDirs};
+    use crate::{db::BaseDb, settings::PreprocessSettings};
 
     /// The order diagnostic points at the definition name, not its whole body.
     #[test]
     fn definition_before_dts_v1_points_at_the_name() {
         let db = crate::db::BaseDatabase::default();
-        IncludeDirs::new(&db, vec![]);
+        PreprocessSettings::new(&db, vec![], vec![]);
 
         let root_file = db.get_files().add_virtual(
             &db,

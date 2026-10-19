@@ -8,19 +8,19 @@ mod substitution;
 
 use std::{borrow::Cow, sync::Arc};
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use dt_tools_diagnostic::{Diagnostic, Severity, Span};
 pub(crate) use rescan::{MacroToken, TokenSpelling};
 
 use crate::{
-    config::PreprocessorConfig,
-    env::{MacroEnv, MacroKind},
+    config::{Define, PreprocessorConfig},
+    env::{MacroDef, MacroEnv, MacroKind},
     expand::{
         conditional::Conditionals,
         rescan::{TokenStream, extend_hide},
         substitution::substitute_object_like,
     },
-    files::{LoadedFiles, SourceId},
+    files::{COMMAND_LINE_SOURCE_PREFIX, LoadedFiles, SourceId},
     lexer::PpTokenKind,
     origin::MacroExpansion,
     output::{IncludeEdge, MacroDefSite},
@@ -60,6 +60,10 @@ where
         byte_cap_reported: false,
     };
 
+    for define in &config.defines {
+        define_predefined(&mut expander, files, define);
+    }
+
     expand_file(&mut expander, files, read_file, file, tokens, orig_len, 0);
 
     let Expander {
@@ -78,6 +82,35 @@ where
         diagnostics,
         skipped,
     }
+}
+
+/// Defines a macro from [`PreprocessorConfig::defines`].
+fn define_predefined(expander: &mut Expander<'_>, files: &mut LoadedFiles, define: &Define) {
+    let path = Utf8PathBuf::from(format!("{COMMAND_LINE_SOURCE_PREFIX}{}>", define.name));
+    let contents = format!("{} {}", define.name, define.value);
+    let loaded = files.add(&path, &contents);
+
+    let Some((name_token, replacement)) = loaded.tokens.split_first() else {
+        return;
+    };
+
+    if name_token.kind != PpTokenKind::Ident || name_token.text(&files.cleaned) != define.name {
+        expander.report(
+            Severity::Error,
+            format!("invalid macro name `{}`", define.name),
+            name_token.orig.within_file(loaded.id),
+        );
+        return;
+    }
+
+    expander.env.define(
+        define.name.clone(),
+        MacroDef {
+            kind: MacroKind::Object,
+            replacement: replacement.to_vec(),
+            definition: name_token.orig.within_file(loaded.id),
+        },
+    );
 }
 
 /// Handles directives, conditionals, and macros of one file in source order.
