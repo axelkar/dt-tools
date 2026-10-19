@@ -7,33 +7,11 @@
 * [IDE integration](#lsp)
 * Linting
 * Devicetree binding validation
-* Preprocessor features with some restrictions:
-  + Macros can only substitute references (`&`-syntax), name definitions of nodes, properties and labels, property values, cell values, nodes and properties.
-  + Macros must be individually parseable. This is not allowed:
-    ```dts
-    #define SPECIAL_SYNTAX ) + (
-    #define SUM1 1 + 2
-    #define SUM2 (1 + 2)
-
-    / {
-      prop = (1 SPECIAL_SYNTAX 2);
-      equal = (SUM1 * 2), (SUM2 * 2); // The C preprocessor would not evaluate these to the same value
-    };
-    ```
-  + `#include` directives can only be used outside of nodes (🚧 note that this may change)
-  + Conditionals can only wrap nodes, properties and other preprocessor directives
+* C preprocessing matching the kernel's `cpp -x assembler-with-cpp` invocation for the constructs used by DTS.
 * Extensive unit and integration tests written in Rust
 * Possibly in the future:
   + Comparing DTS or DTB files
   + Comparing Android `dt` and `dtbo` partitions with `/sys/firmware/fdt`
-
-## Crates
-
-* [`dt-tools-parser`](crates/parser) implements an error-resistant parser inspired by rust-analyzer
-* [`dt-tools-analyzer`](crates/analyzer) is a source file analyzer
-* [`dt-tools-lsp`](crates/lsp) is a [language server](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide#why-language-server). It basically adds IDE support.
-* [`dt-tools-lint`](crates/lint) is a linter for DTS
-* [`dt-tools-binding`](crates/binding) is a crate supposed to validate and match devicetree binding YAMLs
 
 ## Screenshots
 
@@ -55,12 +33,14 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## LSP
 
+`dt-tools` implements a [language server](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide#why-language-server) in the [`dt-tools-lsp`](./crates/lsp) crate.
+
 The VSCode extension's documentation can be found [here](vscode/README.md).
 
 The language server is also packaged for Neovim with the Lua script in [`./crates/lsp/lsp.lua`](./crates/lsp/lsp.lua).
 
 ```sh
-cargo build -p lsp
+cargo build -p dt-tools-lsp
 nvim --cmd 'luafile ./crates/lsp/lsp.lua' lint_showcase.dts
 ```
 

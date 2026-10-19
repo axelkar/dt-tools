@@ -40,7 +40,7 @@ yet or fixed on the master branch.
 
 ## Testing
 
-You can run all unit and integration tests by running the follwoing command:
+You can run all unit and integration tests by running the following command:
 ```sh
 cargo test
 ```
@@ -66,6 +66,7 @@ All notable changes to the project will be documented during releases in [CHANGE
    ```sh
    cargo fmt
    cargo clippy
+   cargo clippy --all-features
    cargo test
    ```
 2. Make a GitHub [pull request](https://github.com/axelkar/dt-tools/pulls).

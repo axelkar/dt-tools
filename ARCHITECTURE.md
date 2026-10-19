@@ -1,8 +1,30 @@
 # Architecture
 
+## Pipeline
+
+A root DTS file goes through three stages:
+
+1. `crates/preprocessor` expands it with a token-level C preprocessor, producing
+   one expanded text and a provenance map. A second dtc-style pass splices
+   `/include/`.
+2. The expanded text is parsed as a single CST (`expand_root` and
+   `expanded_parse` in [`crates/lowering`](crates/lowering)) using
+   [`crates/parser`](crates/parser).
+3. [`crates/lowering`](crates/lowering) lowers the expanded CST to a flat
+   mid-level intermediate representation (MIR). Lowering has no macro
+   environment and does not recurse into includes.
+
+Diagnostics and MIR provenance are stored in expanded-text coordinates and
+resolved to file spans by consumers.
+
+## Preprocessor
+
+We don't use GCC or Clang because they don't provide precise source provenance
+and would be bad for performance.
+
 ## Analyzer
 
-Work in progress, see https://github.com/axelkar/dt-tools/issues/5
+Old analysis path, superseded by the MIR in [`crates/lowering`](crates/lowering).
 
 ## Parser
 
