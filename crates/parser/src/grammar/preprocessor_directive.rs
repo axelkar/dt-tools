@@ -50,6 +50,10 @@ pub(super) fn eat_preprocessor_directive(
 ) -> bool {
     p.add_expected(Expected::PreprocessorDirective);
 
+    if !p.peek().is_some_and(TokenKind::is_preprocessor_directive) {
+        return false;
+    }
+
     if p.check(BEGIN_COND_SET).silent().at() {
         let m_cond = p.start();
         p.bump();
@@ -57,15 +61,8 @@ pub(super) fn eat_preprocessor_directive(
         m_cond.complete(p, NodeKind::PreprocessorConditional);
         true
     } else {
-        p.check(&[
-            TokenKind::UndefDirective,
-            TokenKind::PragmaDirective,
-            TokenKind::DefineDirective,
-            TokenKind::IncludeDirective,
-            TokenKind::ErrorDirective,
-        ])
-        .silent()
-        .eat()
+        p.bump();
+        true
     }
 }
 
