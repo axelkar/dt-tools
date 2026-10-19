@@ -151,6 +151,7 @@ impl ProvenanceMap {
     #[must_use]
     pub fn resolve(&self, range: TextRange) -> MultiSpan<SourceId> {
         let mut primary_spans: Vec<Span<SourceId>> = Vec::new();
+        let mut groups: Vec<Option<PrimaryGroup<'_>>> = Vec::new();
         let mut span_labels: Vec<SpanLabel<SourceId>> = Vec::new();
 
         for segment in &self.segments {
@@ -158,27 +159,36 @@ impl ProvenanceMap {
                 continue;
             };
 
-            let segment_spans = match &segment.origin {
-                Origin::File { file, range: orig } => {
-                    vec![clipped_span(*file, *orig, segment.range, subrange)]
-                }
+            let (segment_spans, mergeable) = match &segment.origin {
+                Origin::File { file, range: orig } => (
+                    vec![clipped_span(*file, *orig, segment.range, subrange)],
+                    true,
+                ),
                 Origin::Concat {
                     left,
                     right,
                     operator,
                 } => {
                     push_label(&mut span_labels, *operator, "pasted here with `##`");
-                    vec![*left, *right]
+                    // Keep both operands as distinct locations.
+                    (vec![*left, *right], false)
                 }
                 Origin::Stringify { operator, argument } => {
                     push_label(&mut span_labels, *operator, "stringified here");
-                    vec![*argument]
+                    (vec![*argument], true)
                 }
-                Origin::Generated => Vec::new(),
+                Origin::Generated => (Vec::new(), true),
             };
 
             for span in &segment_spans {
-                push_span(&mut primary_spans, *span);
+                push_span(
+                    &mut primary_spans,
+                    &mut groups,
+                    *span,
+                    mergeable,
+                    segment.expansion.as_deref(),
+                    &segment.arguments,
+                );
             }
 
             for argument in &segment.arguments {
@@ -210,8 +220,6 @@ impl ProvenanceMap {
         {
             primary_spans.push(span);
         }
-
-        merge_adjacent_spans(&mut primary_spans);
 
         MultiSpan {
             primary_spans,
@@ -275,11 +283,48 @@ fn clipped_span(
     }
 }
 
-/// Pushes `span` unless it is already present.
-fn push_span(spans: &mut Vec<Span<SourceId>>, span: Span<SourceId>) {
-    if !spans.contains(&span) {
-        spans.push(span);
+/// Primary spans sharing a source file, macro expansion, and argument set.
+#[derive(Debug, PartialEq)]
+struct PrimaryGroup<'a> {
+    file: SourceId,
+    expansion: Option<&'a MacroExpansion>,
+    arguments: &'a [Arc<Argument>],
+}
+
+/// Pushes `span`, merging it into the covering span of its origin group if requested.
+fn push_span<'a>(
+    spans: &mut Vec<Span<SourceId>>,
+    groups: &mut Vec<Option<PrimaryGroup<'a>>>,
+    span: Span<SourceId>,
+    mergeable: bool,
+    expansion: Option<&'a MacroExpansion>,
+    arguments: &'a [Arc<Argument>],
+) {
+    if spans.contains(&span) {
+        return;
     }
+
+    let group = mergeable.then_some(PrimaryGroup {
+        file: span.file,
+        expansion,
+        arguments,
+    });
+
+    if let Some(group) = &group
+        && let Some(index) = groups
+            .iter()
+            .position(|existing| existing.as_ref() == Some(group))
+    {
+        let existing = &mut spans[index];
+        existing.text_range = TextRange::new(
+            existing.text_range.start.min(span.text_range.start),
+            existing.text_range.end.max(span.text_range.end),
+        );
+        return;
+    }
+
+    spans.push(span);
+    groups.push(group);
 }
 
 /// Pushes a label unless it is already present.
@@ -293,31 +338,13 @@ fn push_label(labels: &mut Vec<SpanLabel<SourceId>>, span: Span<SourceId>, messa
     }
 }
 
-/// Merges adjacent spans in the same file.
-fn merge_adjacent_spans(spans: &mut Vec<Span<SourceId>>) {
-    let mut merged: Vec<Span<SourceId>> = Vec::with_capacity(spans.len());
-
-    for span in spans.drain(..) {
-        if let Some(last) = merged.last_mut()
-            && last.file == span.file
-            && last.text_range.end == span.text_range.start
-        {
-            last.text_range = last.text_range.to(span.text_range);
-            continue;
-        }
-        merged.push(span);
-    }
-
-    *spans = merged;
-}
-
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
+    use std::{ops::Range, sync::Arc};
 
     use dt_tools_diagnostic::text_range::TextRange;
 
-    use super::{Origin, ProvenanceMap};
+    use super::{MacroExpansion, Origin, ProvenanceMap};
     use crate::files::SourceId;
 
     #[test]
@@ -368,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_ranges_across_segments() {
+    fn merges_segments_of_the_origin_group() {
         let mut map = ProvenanceMap::new();
         let file = SourceId(0);
         // Two runs split by a removed comment: 0..3 -> 0..3, 4..7 -> 8..11.
@@ -387,9 +414,54 @@ mod tests {
         push(&mut map, 4..7, 8..11);
 
         let span = map.resolve(TextRange::new(0, 7));
-        assert_eq!(span.primary_spans.len(), 2);
-        assert_eq!(span.primary_spans[0].text_range, TextRange::new(0, 3));
-        assert_eq!(span.primary_spans[1].text_range, TextRange::new(8, 11));
+        assert_eq!(span.primary_spans.len(), 1);
+        assert_eq!(span.primary_spans[0].text_range, TextRange::new(0, 11));
+    }
+
+    #[test]
+    fn keeps_different_origin_groups_separate() {
+        let mut map = ProvenanceMap::new();
+        let file = SourceId(0);
+        let expansion = Arc::new(MacroExpansion {
+            name: "X".into(),
+            invocation: TextRange::new(10, 11).within_file(file),
+            definition: TextRange::new(12, 13).within_file(file),
+            parent: None,
+        });
+
+        let push = |map: &mut ProvenanceMap, cleaned: Range<usize>| {
+            map.push(
+                TextRange::from(cleaned.clone()),
+                Origin::File {
+                    file,
+                    range: TextRange::from(cleaned),
+                },
+                Some(Arc::clone(&expansion)),
+                Vec::new(),
+            );
+        };
+        push(&mut map, 0..3);
+        push(&mut map, 4..7);
+
+        assert_eq!(map.resolve(TextRange::new(0, 7)).primary_spans.len(), 1);
+
+        let expansion = Arc::new(MacroExpansion {
+            name: "Y".into(),
+            invocation: TextRange::new(20, 21).within_file(file),
+            definition: TextRange::new(22, 23).within_file(file),
+            parent: None,
+        });
+        map.push(
+            TextRange::new(10, 13),
+            Origin::File {
+                file,
+                range: TextRange::new(10, 13),
+            },
+            Some(expansion),
+            Vec::new(),
+        );
+
+        assert_eq!(map.resolve(TextRange::new(0, 13)).primary_spans.len(), 2);
     }
 
     #[test]

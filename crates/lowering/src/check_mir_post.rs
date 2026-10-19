@@ -60,10 +60,10 @@ fn check_phandle(
 ) -> Option<Diagnostic<File>> {
     match target {
         mir::MirPhandleTarget::Label(name) => {
-            if !result.labels(db).get(name).is_some_and(Option::is_some) {
-                Some(Cow::Owned(format!("Label not found: {name}")))
-            } else {
+            if result.labels(db).get(name).is_some_and(Option::is_some) {
                 None
+            } else {
+                Some(Cow::Owned(format!("Label not found: {name}")))
             }
         }
         mir::MirPhandleTarget::Path(path) => {

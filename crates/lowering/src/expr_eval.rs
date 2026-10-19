@@ -63,7 +63,6 @@ pub fn interpret_escaped_char_tok(
     })
 }
 
-#[expect(clippy::too_many_lines, reason = "It's pretty enough as is")]
 pub fn eval(ast: ast::Expr, diag: &mut Diag<'_, '_>) -> Result<i64, ()> {
     match ast {
         ast::Expr::PrefixExpr(prefix_expr) => {

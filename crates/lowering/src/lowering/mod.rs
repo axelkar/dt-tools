@@ -63,7 +63,7 @@ pub struct LoweredFile<'db> {
 ///
 /// Will panic if [`IncludeDirs`] hasn't been defined.
 #[salsa::tracked(lru = 64)]
-pub fn lower_root_file<'db>(db: &'db dyn BaseDb, root_file: File) -> Option<LoweredFile<'db>> {
+pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'_>> {
     profiling::scope!("lowering::lower_root_file", root_file.path(db).as_str());
 
     let expanded = expand_root(db, root_file).as_ref()?;
@@ -282,7 +282,7 @@ pub(crate) mod tests {
             expect![[r#"
                 dts-v1 /main.dts L2:1-L2:10
                 node / /main.dts L5:1-L5:22
-                node /foo labels=[FOO] /main.dts L5:5-L5:19
+                node /foo labels=[FOO] /main.dts L3:15-L3:18
                 node / /main.dts L6:1-L6:22
                 property /prop = <&FOO>; /main.dts L6:5-L6:19
             "#]],
@@ -324,7 +324,7 @@ pub(crate) mod tests {
             expect![[r#"
                 dts-v1 /main.dts L2:1-L2:10
                 node / /main.dts L5:1-L5:19
-                node /SUBSTITUTED@bar /main.dts L5:5-L5:16
+                node /SUBSTITUTED@bar /main.dts L3:13-L3:24
                 node / /main.dts L6:1-L6:19
                 node /bar@SUBSTITUTED /main.dts L6:5-L6:16
             "#]],
@@ -345,7 +345,7 @@ pub(crate) mod tests {
             expect![[r#"
                 dts-v1 /main.dts L2:1-L2:10
                 node / /main.dts L6:1-L6:15
-                node /BAR /main.dts L6:5-L6:12
+                node /BAR /main.dts L3:21-L3:24
             "#]],
         );
     }
@@ -444,12 +444,14 @@ pub(crate) mod tests {
             expect![[r#"
                 dts-v1 /main.dts L2:1-L2:10
                 node / /main.dts L9:1-L12:3
-                node /PREFIX_suffix /main.dts L10:5-L10:29
-                node /foo_suffix /main.dts L11:5-L11:30
+                node /PREFIX_suffix /main.dts L10:9-L10:15
+                node /foo_suffix /main.dts L7:16-L7:19
             "#]],
         );
     }
 
+    /// The preprocessor stops recursion and leaves `SELF` in the expanded text,
+    /// so lowering reports it as undefined.
     #[test]
     fn mir_macro_recursive() {
         check_mir(
@@ -466,11 +468,12 @@ pub(crate) mod tests {
                 property /prop; /main.dts L5:5-L5:17
 
                 --- errors ---
-                Error L3:14-L3:18: macro `SELF` expanded recursively
+                Error L3:14-L3:18: Macro `SELF` is not defined
             "#]],
         );
     }
 
+    /// Prescanning does not change the recursion behavior.
     #[test]
     fn mir_macro_recursive_with_prescan() {
         check_mir(
@@ -488,7 +491,7 @@ pub(crate) mod tests {
                 property /prop; /main.dts L6:5-L6:21
 
                 --- errors ---
-                Error L3:14-L3:18: macro `SELF` expanded recursively
+                Error L3:14-L3:18: Macro `SELF` is not defined
             "#]],
         );
     }

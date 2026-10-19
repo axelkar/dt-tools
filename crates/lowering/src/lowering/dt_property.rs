@@ -668,7 +668,6 @@ MACRO;
 
                     --- errors ---
                     Error L4:10: Unmatched `;` [dt-tools(syntax-error)]
-                    Error L4:5-L4:10: Unmatched `;` [dt-tools(syntax-error)]
                 "#]],
             );
         }
