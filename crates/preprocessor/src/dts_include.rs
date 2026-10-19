@@ -33,6 +33,8 @@ pub(crate) fn splice<R>(
 where
     R: FnMut(&Utf8Path) -> Option<String>,
 {
+    profiling::scope!("preprocessor::splice", sources.get(root).path.as_str());
+
     if !text.contains("/include/") {
         return Splice {
             text: text.to_owned(),
@@ -161,13 +163,13 @@ fn report_expected_string(out: &mut Splice, span: Span<SourceId>) {
 }
 
 /// Returns `range`'s first source span.
-fn source_span(map: &ProvenanceMap, range: TextRange, fallback: SourceId) -> Span<SourceId> {
+fn source_span(map: &ProvenanceMap, range: TextRange, file: SourceId) -> Span<SourceId> {
     map.resolve(range)
         .primary_spans
         .first()
         .copied()
         .unwrap_or(Span {
-            file: fallback,
+            file,
             text_range: range,
         })
 }
@@ -181,11 +183,13 @@ fn splice_text<R>(
     sources: &mut SourceSet,
     config: &PreprocessorConfig,
     read_file: &mut R,
-    fallback: SourceId,
+    root: SourceId,
     depth: usize,
 ) where
     R: FnMut(&Utf8Path) -> Option<String>,
 {
+    profiling::scope!("preprocessor::splice_text", sources.get(root).path.as_str());
+
     let tokens = lex(text);
     let mut copied = 0;
     let mut index = 0;
@@ -197,7 +201,7 @@ fn splice_text<R>(
         }
 
         let directive = &tokens[index];
-        let span = source_span(map, directive.text_range, fallback);
+        let span = source_span(map, directive.text_range, root);
         let Some((name, end, string_index)) = include_name(&tokens, index) else {
             report_expected_string(out, span);
             index += 1;
@@ -247,12 +251,14 @@ fn splice_text<R>(
             None,
             Vec::new(),
         );
+
         let mut nested = Splice {
             text: String::new(),
             map: ProvenanceMap::new(),
             includes: Vec::new(),
             diagnostics: Vec::new(),
         };
+
         splice_text(
             &mut nested,
             &contents,
@@ -263,6 +269,7 @@ fn splice_text<R>(
             id,
             depth + 1,
         );
+
         append_nested(out, nested);
     }
 

@@ -17,6 +17,7 @@ displaydoc.workspace = true
 dt-tools-diagnostic.workspace = true
 dt-tools-parser.workspace = true
 logos.workspace = true
+profiling = "1.0.18"
 rustc-hash.workspace = true
 thiserror.workspace = true
 

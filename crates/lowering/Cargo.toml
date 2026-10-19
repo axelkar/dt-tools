@@ -30,7 +30,7 @@ expect-test.workspace = true
 
 [features]
 default = []
-tracy = ["profiling/profile-with-tracy", "dt-tools-parser/tracy"]
+tracy = ["profiling/profile-with-tracy"]
 
 [lints]
 workspace = true

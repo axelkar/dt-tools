@@ -19,6 +19,8 @@ const MAX_RUN: usize = 4;
 /// merge into different tokens when re-lexed. Separators are recorded as [`Origin::Generated`].
 #[must_use]
 pub(crate) fn emit(tokens: &[MacroToken], cleaned: &str) -> (String, ProvenanceMap) {
+    profiling::scope!("preprocessor::emit");
+
     let mut out = String::with_capacity(cleaned.len());
     let mut map = ProvenanceMap::new();
     let mut run: Vec<&MacroToken> = Vec::new();

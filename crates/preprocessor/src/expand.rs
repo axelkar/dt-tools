@@ -48,6 +48,8 @@ pub(crate) fn expand<R>(
 where
     R: FnMut(&Utf8Path) -> Option<String>,
 {
+    profiling::scope!("preprocessor::expand", files.path(file).as_str());
+
     let mut expander = Expander {
         env: MacroEnv::default(),
         config,
@@ -127,6 +129,8 @@ pub(super) fn expand_file<R>(
 ) where
     R: FnMut(&Utf8Path) -> Option<String>,
 {
+    profiling::scope!("preprocessor::expand_file", files.path(file).as_str());
+
     let mut conditionals = Conditionals::default();
     let mut stream = TokenStream::new(tokens);
 
@@ -288,6 +292,8 @@ impl Expander<'_> {
         stream: &mut TokenStream<'_>,
         cleaned: &str,
     ) {
+        profiling::scope!("preprocessor::expand_object_like", name);
+
         if self.at_depth_limit(instance_token, cleaned) {
             return;
         }
@@ -329,6 +335,8 @@ impl Expander<'_> {
         stream: &mut TokenStream<'_>,
         cleaned: &str,
     ) {
+        profiling::scope!("preprocessor::expand_function_like", name);
+
         if self.at_depth_limit(instance_token, cleaned) {
             return;
         }

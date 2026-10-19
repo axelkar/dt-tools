@@ -35,6 +35,8 @@ pub fn preprocess(
     config: &PreprocessorConfig,
     mut read_file: impl FnMut(&Utf8Path) -> Option<String>,
 ) -> PreprocessedRoot {
+    profiling::scope!("preprocessor::preprocess", root.as_str());
+
     let mut files = LoadedFiles::default();
     let root_id = files.sources.add(root);
 

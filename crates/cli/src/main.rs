@@ -89,6 +89,11 @@ enum Command {
 fn main() -> Result<()> {
     color_eyre::install()?;
 
+    // Set up profiling
+    #[cfg(feature = "tracy")]
+    profiling::tracy_client::Client::start();
+    profiling::register_thread!("Main Thread");
+
     let cli = Cli::parse();
 
     let mut tracing_env_filter = EnvFilter::builder()

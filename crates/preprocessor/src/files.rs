@@ -94,6 +94,8 @@ pub(crate) fn resolve_file<R>(
 where
     R: FnMut(&Utf8Path) -> Option<String>,
 {
+    profiling::scope!("preprocessor::resolve_file", name);
+
     let name = Utf8Path::new(name);
     let mut candidates = Vec::new();
 
@@ -137,6 +139,8 @@ pub(crate) struct LoadedFile {
 impl LoadedFiles {
     /// Lexes `contents` as `path` and appends it to the cleaned buffer.
     pub(crate) fn add(&mut self, path: &Utf8Path, contents: &str) -> LoadedFile {
+        profiling::scope!("preprocessor::LoadedFiles::add", path.as_str());
+
         let id = self.sources.add(path);
         let mut lexed = lex(contents, id);
         let base = self.cleaned.len();

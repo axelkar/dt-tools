@@ -219,6 +219,8 @@ impl LexedFile {
 /// Panic in debug mode when bugs are detected.
 #[must_use]
 pub fn lex(contents: &str, file: SourceId) -> LexedFile {
+    profiling::scope!("preprocessor::lex");
+
     let (spliced, splice_checkpoints) = splice_lines(contents);
 
     let mut cleaned_text = String::with_capacity(spliced.len());

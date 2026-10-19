@@ -486,6 +486,7 @@ dependencies = [
  "memory-stats",
  "owo-colors",
  "parking_lot",
+ "profiling",
  "rayon",
  "tracing-subscriber",
 ]
@@ -609,6 +610,7 @@ dependencies = [
  "dt-tools-parser",
  "expect-test",
  "logos",
+ "profiling",
  "rustc-hash",
  "strum",
  "thiserror",
