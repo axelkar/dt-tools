@@ -62,7 +62,7 @@ pub(crate) struct Directive<'a> {
 /// tokens in assembler mode.
 pub(crate) fn parse<'a>(tokens: &'a [PpToken], cleaned_text: &str) -> Option<Directive<'a>> {
     let hash = tokens.first()?;
-    if hash.kind != PpTokenKind::Punct || hash.text(cleaned_text) != "#" || !hash.line_start {
+    if !hash.line_start || hash.kind != PpTokenKind::Punct || hash.text(cleaned_text) != "#" {
         return None;
     }
 

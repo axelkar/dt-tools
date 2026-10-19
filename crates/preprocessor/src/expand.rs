@@ -159,7 +159,7 @@ pub(super) fn expand_file<R>(
         };
 
         if conditionals.is_active() {
-            expander.expand_token(&token, &mut stream, &files.cleaned);
+            expander.expand_token(token, &mut stream, &files.cleaned);
         }
     }
 
@@ -212,7 +212,7 @@ impl Expander<'_> {
     /// Expansion = pre-expansion (prescan) + argument substitution + rescan.
     ///
     /// Reference: [WG14 N3220 (C23 draft) § 6.10.5 Macro replacement](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n3220.pdf#subsection.6.10.5).
-    fn expand_token(&mut self, token: &MacroToken, stream: &mut TokenStream<'_>, cleaned: &str) {
+    fn expand_token(&mut self, token: MacroToken, stream: &mut TokenStream<'_>, cleaned: &str) {
         if self.expanded_bytes <= self.config.max_expanded_bytes
             && token.kind == PpTokenKind::Ident
             && let name = token.text(cleaned)
@@ -222,7 +222,7 @@ impl Expander<'_> {
             match &definition.kind {
                 MacroKind::Object => {
                     self.expand_object_like(
-                        token,
+                        &token,
                         name,
                         definition.definition,
                         &definition.replacement,
@@ -241,12 +241,12 @@ impl Expander<'_> {
                     if !next.is_some_and(|next| {
                         next.kind == PpTokenKind::Punct && next.text(cleaned) == "("
                     }) {
-                        self.push(token.clone(), cleaned);
+                        self.push(token, cleaned);
                         return;
                     }
 
                     self.expand_function_like(
-                        token,
+                        &token,
                         name,
                         definition.definition,
                         &definition.replacement,
@@ -260,7 +260,7 @@ impl Expander<'_> {
             }
         }
 
-        self.push(token.clone(), cleaned);
+        self.push(token, cleaned);
     }
 
     /// Returns true if the expansion depth cap was reached.
@@ -423,7 +423,7 @@ impl Expander<'_> {
         stream.push_replacement(argument);
 
         while let Some(token) = stream.next() {
-            self.expand_token(&token, &mut stream, cleaned);
+            self.expand_token(token, &mut stream, cleaned);
         }
 
         std::mem::replace(&mut self.tokens, saved)

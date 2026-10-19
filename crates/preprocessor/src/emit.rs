@@ -24,6 +24,7 @@ pub(crate) fn emit(tokens: &[MacroToken], cleaned: &str) -> (String, ProvenanceM
     let mut out = String::with_capacity(cleaned.len());
     let mut map = ProvenanceMap::new();
     let mut run: Vec<&MacroToken> = Vec::new();
+    let mut scratch = String::new();
 
     let mut push = |text: &str, origin, expansion, argument| {
         let start = out.len();
@@ -42,7 +43,7 @@ pub(crate) fn emit(tokens: &[MacroToken], cleaned: &str) -> (String, ProvenanceM
         if !is_first {
             let separator = if token.line_start {
                 Some("\n")
-            } else if token.has_space_before || !can_follow(&run, token, cleaned) {
+            } else if token.has_space_before || !can_follow(&run, token, cleaned, &mut scratch) {
                 Some(" ")
             } else {
                 None
@@ -72,19 +73,52 @@ pub(crate) fn emit(tokens: &[MacroToken], cleaned: &str) -> (String, ProvenanceM
 }
 
 /// Returns true if `next` can directly follow `run` without a separator.
-fn can_follow(run: &[&MacroToken], next: &MacroToken, cleaned: &str) -> bool {
+///
+/// `scratch` is reused between calls to avoid allocating the concatenated text.
+fn can_follow(run: &[&MacroToken], next: &MacroToken, cleaned: &str, scratch: &mut String) -> bool {
+    profiling::scope!("preprocessor::emit::can_follow");
+
     if run.is_empty() {
         return true;
     }
 
-    let expected: Vec<&MacroToken> = run.iter().copied().chain([next]).collect();
-    let mut text = String::new();
-    for token in &expected {
-        text.push_str(token.text(cleaned));
+    let mut expected = [next; MAX_RUN + 1];
+    for (slot, token) in expected.iter_mut().zip(run) {
+        *slot = token;
     }
+    let expected = &expected[..=run.len()];
 
-    let mut lexer = PpTokenKind::lexer(&text);
-    for token in &expected {
+    let text = if let Some(text) = contiguous_text(expected, cleaned) {
+        text
+    } else {
+        scratch.clear();
+        for token in expected {
+            scratch.push_str(token.text(cleaned));
+        }
+        scratch
+    };
+
+    relex_matches(text, expected, cleaned)
+}
+
+/// Returns the slice of `cleaned` covering `tokens` when their ranges are contiguous.
+fn contiguous_text<'a>(tokens: &[&MacroToken], cleaned: &'a str) -> Option<&'a str> {
+    let first = tokens.first()?.cleaned_range()?;
+    let mut end = first.end;
+    for token in &tokens[1..] {
+        let range = token.cleaned_range()?;
+        if range.start != end {
+            return None;
+        }
+        end = range.end;
+    }
+    Some(&cleaned[first.start..end])
+}
+
+/// Returns true if re-lexing `text` yields exactly `expected`.
+fn relex_matches(text: &str, expected: &[&MacroToken], cleaned: &str) -> bool {
+    let mut lexer = PpTokenKind::lexer(text);
+    for token in expected {
         let Some(result) = lexer.next() else {
             return false;
         };
