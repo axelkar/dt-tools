@@ -1,4 +1,6 @@
-use std::{borrow::Cow, collections::BTreeSet, fmt};
+use std::{borrow::Cow, fmt};
+
+use rustc_hash::FxHashSet;
 
 use dt_tools_diagnostic::Span;
 use dt_tools_preprocessor::PreprocessedRoot;
@@ -18,10 +20,24 @@ fn strip_base<'a>(this: &'a str, base: &str) -> Option<&'a str> {
             .filter(|stripped| stripped.starts_with('/'))
     }
 }
-fn btreeset_find_base_of<'a>(set: &BTreeSet<&'a str>, needle: &'a str) -> Option<&'a str> {
-    set.range(..=needle)
-        .rfind(|possible_base| strip_base(needle, possible_base).is_some())
-        .map(|v| &**v)
+/// Returns true if `path` or one of its ancestors is in `deleted`.
+fn has_deleted_ancestor(deleted: &FxHashSet<&str>, path: &str) -> bool {
+    if deleted.is_empty() {
+        return false;
+    }
+
+    if deleted.contains(path) {
+        return true;
+    }
+
+    for (index, _) in path.match_indices('/') {
+        let end = if index == 0 { 1 } else { index };
+        if deleted.contains(&path[..end]) {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Mid-level intermediate representation of devicetrees.
@@ -136,7 +152,8 @@ impl Mir {
     ///
     /// Note that the order is reversed.
     pub fn iter_live_defs_under(&self, path_base: &str) -> impl Iterator<Item = &MirDefinition> {
-        let mut deleted = BTreeSet::<&str>::new();
+        let mut overwritten = FxHashSet::<&str>::default();
+        let mut deleted = FxHashSet::<&str>::default();
 
         self.definitions
             .iter()
@@ -151,22 +168,27 @@ impl Mir {
                 let stripped = strip_base(&def.path, path_base)?;
 
                 match def.value {
+                    MirDefinitionValue::Property(_) => {
+                        if overwritten.contains(stripped)
+                            || has_deleted_ancestor(&deleted, stripped)
+                        {
+                            return None;
+                        }
+
+                        overwritten.insert(stripped);
+                        Some(def)
+                    }
                     MirDefinitionValue::Node(_)
-                    | MirDefinitionValue::Property(_)
                     | MirDefinitionValue::V1Directive
                     | MirDefinitionValue::PluginDirective => {
-                        if btreeset_find_base_of(&deleted, stripped).is_none() {
-                            if let MirDefinitionValue::Property(_) = def.value {
-                                // Overwritten
-                                deleted.insert(stripped);
-                            }
-
-                            Some(def)
-                        } else {
-                            None
-                        }
+                        (!has_deleted_ancestor(&deleted, stripped)).then_some(def)
                     }
-                    MirDefinitionValue::DeletedNode | MirDefinitionValue::DeletedProperty => {
+                    MirDefinitionValue::DeletedNode => {
+                        deleted.insert(stripped);
+                        None
+                    }
+                    MirDefinitionValue::DeletedProperty => {
+                        overwritten.insert(stripped);
                         deleted.insert(stripped);
                         None
                     }
