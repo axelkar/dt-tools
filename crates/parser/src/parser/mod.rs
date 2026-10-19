@@ -203,9 +203,10 @@ pub(crate) struct Parser<'t, 'input> {
 impl<'t, 'input> Parser<'t, 'input> {
     /// Creates and initializes a parser.
     fn new(source: Source<'t, 'input>) -> Self {
+        let event_capacity = source.tokens.len().saturating_mul(2).saturating_add(8);
         Self {
             source,
-            events: Vec::new(),
+            events: Vec::with_capacity(event_capacity),
             expected: SmallVec::new(),
         }
     }
