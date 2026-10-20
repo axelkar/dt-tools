@@ -42,6 +42,8 @@ fn make_hover_info(
 }
 
 pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
+    profiling::scope!("lsp::handlers::hover");
+
     let params = params.text_document_position_params;
     let uri = params.text_document.uri;
     let path = uri_to_path(&uri).expect("Invalid document URI");
@@ -97,6 +99,8 @@ pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
 }
 
 fn cst_tree_section(db: &dyn BaseDb, file: File, offset: usize) -> Option<(String, TextRange)> {
+    profiling::scope!("lsp::handlers::hover::cst_tree_section");
+
     let parse = dt_tools_lowering::parse_file(db, file)?;
     let file_ast = parse.parse(db).source_file();
     let cst = file_ast.syntax();
@@ -185,8 +189,12 @@ fn mir_definition_section(
         s
     }
 
+    profiling::scope!("lsp::handlers::hover::mir_definition_section");
+
     let preprocessed = preprocess_root(db, root_file)?;
     let mir = lower_root_file(db, root_file)?.mir(db);
+
+    // TODO: PERF: resolve file+offset to preprocessed text offset, then filter MIR definitions.
 
     // TODO: unresolved_extensions
     let matching_defs = mir
@@ -256,6 +264,8 @@ fn macro_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
+    profiling::scope!("lsp::handlers::hover::macro_section");
+
     let preprocessed = preprocess_root(db, root_file)?;
 
     let def = preprocessed.macro_defs(db).iter().find(|def| {
@@ -273,6 +283,8 @@ fn label_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
+    profiling::scope!("lsp::handlers::hover::label_section");
+
     let preprocessed = preprocess_root(db, root_file)?;
     let result = lower_root_file(db, root_file)?;
 
@@ -299,6 +311,8 @@ fn include_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
+    profiling::scope!("lsp::handlers::hover::include_section");
+
     let preprocessed = preprocess_root(db, root_file)?;
 
     let edge = preprocessed.includes(db).iter().find(|edge| {

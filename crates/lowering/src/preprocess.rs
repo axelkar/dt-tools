@@ -137,6 +137,8 @@ pub fn resolve_range<'db>(
     preprocessed: PreprocessedRoot<'db>,
     range: TextRange,
 ) -> MultiSpan<File> {
+    profiling::scope!("lowering::preprocess::resolve_range");
+
     let resolved = preprocessed.map(db).resolve(range);
     MultiSpan {
         primary_spans: resolved
