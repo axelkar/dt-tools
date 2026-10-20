@@ -1,4 +1,4 @@
-use std::{mem::ManuallyDrop, sync::Mutex, time::Instant};
+use std::{io::Write as _, mem::ManuallyDrop, sync::Mutex, time::Instant};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{
@@ -16,7 +16,7 @@ use dt_tools_lowering::{
     emit_parse_errors,
     lowering::lower_root_file,
     parse_file,
-    preprocess::{preprocess_root, preprocessed_syntax_diagnostics, preprocessor_diagnostics},
+    preprocess::{preprocess_root, preprocessor_diagnostics},
     settings::PreprocessSettings,
 };
 use dt_tools_workspace::{
@@ -195,18 +195,12 @@ fn cmd_preprocess(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
         preprocess_root(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
 
     eprintln!("{} {}", "Preprocessed".green().bold(), file);
-    // TODO: print preprocessing output to stdout, everything else to stderr
-    println!(
-        "{}\n{}",
-        "Preprocessing output:".cyan(),
-        preprocessed.text(&db)
-    );
+    print!("{}", preprocessed.text(&db));
+    std::io::stdout().flush()?;
 
-    let mut diagnostics = preprocessor_diagnostics(&db, preprocessed);
-    // TODO: only C preprocessing, no DTS parsing nor lowering in this command
-    diagnostics.extend(preprocessed_syntax_diagnostics(&db, root_file));
+    let diagnostics = preprocessor_diagnostics(&db, preprocessed);
 
-    println!("{}", "\nDiagnostics:".red());
+    eprintln!("{}", "\nDiagnostics:".red());
     if print_diagnostics(diagnostics, &db)? {
         std::process::exit(1);
     }
