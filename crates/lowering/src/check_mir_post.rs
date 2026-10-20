@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, Span, SpanLabel};
+use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity};
 
 use crate::{
     db::BaseDb,
@@ -120,41 +120,44 @@ fn check_phandle(
 fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<PreprocessedText>>) {
     profiling::scope!("lowering::check_mir_post::check_directives");
 
+    // Headers are a prefix of the file, and `/plugin/;` belongs to the header
+    // opened by the preceding `/dts-v1/;`.
     let mut seen_dts_v1 = false;
     let mut errored_about_dts_v1 = false;
-    let mut previous_plugin: Option<Span<PreprocessedText>> = None;
+    let mut in_headers = true;
+    let mut plugin_allowed = false;
 
     for def in &mir.definitions {
         match def.value {
             mir::MirDefinitionValue::V1Directive => {
-                // Note: /dts-v1/; is allowed to be twice
-                seen_dts_v1 = true;
-            }
-            mir::MirDefinitionValue::PluginDirective => {
-                if !seen_dts_v1 {
+                if !in_headers {
                     diagnostics.push(Diagnostic {
                         span: MultiSpan::from(def.name_span),
-                        msg: "`/plugin/;` before `/dts-v1/`;".into(),
+                        msg: "`/dts-v1/;` after definitions".into(),
                         severity: Severity::Error,
                     });
-                } else if let Some(previous) = previous_plugin {
-                    let mut span = MultiSpan::from(def.name_span);
-                    span.span_labels.push(SpanLabel {
-                        span: previous,
-                        msg: "Previous definition here".into(),
-                    });
+                    continue;
+                }
+                seen_dts_v1 = true;
+                plugin_allowed = true;
+            }
+            mir::MirDefinitionValue::PluginDirective => {
+                if !plugin_allowed {
                     diagnostics.push(Diagnostic {
-                        span,
-                        msg: "`/plugin/;` twice".into(),
+                        span: MultiSpan::from(def.name_span),
+                        msg: "`/plugin/;` must immediately follow `/dts-v1/`".into(),
                         severity: Severity::Error,
                     });
                 }
-                previous_plugin = Some(def.name_span);
+                plugin_allowed = false;
             }
             mir::MirDefinitionValue::Node(_)
             | mir::MirDefinitionValue::Property(_)
             | mir::MirDefinitionValue::DeletedNode
             | mir::MirDefinitionValue::DeletedProperty => {
+                in_headers = false;
+                plugin_allowed = false;
+
                 if !seen_dts_v1 && !errored_about_dts_v1 {
                     errored_about_dts_v1 = true;
                     diagnostics.push(Diagnostic {

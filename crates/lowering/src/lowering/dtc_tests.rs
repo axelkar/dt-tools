@@ -107,6 +107,52 @@ fn empty() {
     assert_eq!(cross_check_dtc_success("/dts-v1/; / {};"), Ok(()));
 }
 
+mod directive_order {
+    use super::*;
+
+    #[test]
+    fn repeated_headers() {
+        assert_eq!(
+            cross_check_dtc_success("/dts-v1/; /plugin/; /dts-v1/; /plugin/; / {};"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn plugin_twice() {
+        assert_eq!(
+            cross_check_dtc_success("/dts-v1/; /plugin/; /plugin/; / {};"),
+            Err(())
+        );
+    }
+
+    #[test]
+    fn plugin_before_dts_v1() {
+        assert_eq!(cross_check_dtc_success("/plugin/; / {};"), Err(()));
+    }
+
+    #[test]
+    fn plugin_after_definition() {
+        assert_eq!(
+            cross_check_dtc_success("/dts-v1/; / { }; /plugin/;"),
+            Err(())
+        );
+    }
+
+    #[test]
+    fn definition_before_dts_v1() {
+        assert_eq!(cross_check_dtc_success("/ { }; /dts-v1/;"), Err(()));
+    }
+
+    #[test]
+    fn dts_v1_after_definition() {
+        assert_eq!(
+            cross_check_dtc_success("/dts-v1/; / { }; /dts-v1/;"),
+            Err(())
+        );
+    }
+}
+
 mod delete_nonexistent {
     use super::*;
 
