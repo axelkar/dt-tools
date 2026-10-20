@@ -107,6 +107,41 @@ fn empty() {
     assert_eq!(cross_check_dtc_success("/dts-v1/; / {};"), Ok(()));
 }
 
+mod property_delete_liveness {
+    use super::*;
+
+    /// A property delete at a node's path does not delete the node.
+    #[test]
+    fn node_survives() {
+        assert_eq!(
+            cross_check_dtc_success(
+                r#"/dts-v1/;
+/ { foo {}; };
+/ { /delete-property/ foo; };
+&{/foo} { bar = <1>; };
+"#
+            ),
+            Ok(())
+        );
+    }
+
+    /// Deleting a node after an unrelated property delete still clears its labels.
+    #[test]
+    fn labels_cleared() {
+        assert_eq!(
+            cross_check_dtc_success(
+                r#"/dts-v1/;
+/ { x { y { z { LBL: w {}; }; }; }; };
+/ { x { /delete-property/ y; }; };
+/delete-node/ &{/x};
+/ { p = <&LBL>; };
+"#
+            ),
+            Err(())
+        );
+    }
+}
+
 mod directive_order {
     use super::*;
 

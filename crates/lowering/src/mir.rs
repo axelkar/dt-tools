@@ -192,7 +192,6 @@ impl Mir {
                     }
                     MirDefinitionValue::DeletedProperty => {
                         overwritten.insert(stripped);
-                        deleted.insert(stripped);
                         None
                     }
                 }
