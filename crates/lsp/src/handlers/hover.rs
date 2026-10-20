@@ -3,7 +3,7 @@ use std::fmt::Write;
 use dt_tools_diagnostic::Span;
 use dt_tools_lowering::{
     db::BaseDb,
-    expand::{expand_root, resolve_range, source_file},
+    expand::{ExpandedRoot, expand_root, resolve_range, source_file},
     file::File,
     lowering::lower_root_file,
     mir::{MirDefinition, MirDefinitionValue},
@@ -135,9 +135,9 @@ fn mir_definition_section(
         format!("{inflected} `{}`", values.iter().join(", "))
     }
 
-    fn fmt_mir_def(
-        db: &dyn BaseDb,
-        expanded: &dt_tools_lowering::expand::PreprocessedRoot,
+    fn fmt_mir_def<'db>(
+        db: &'db dyn BaseDb,
+        expanded: ExpandedRoot<'db>,
         def: &MirDefinition,
         most_precise: &MirDefinition,
         already_defined: &mut bool,
@@ -185,7 +185,7 @@ fn mir_definition_section(
         s
     }
 
-    let expanded = expand_root(db, root_file).as_ref()?;
+    let expanded = expand_root(db, root_file)?;
     let mir = lower_root_file(db, root_file)?.mir(db);
 
     // TODO: unresolved_extensions
@@ -254,9 +254,9 @@ fn macro_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
-    let expanded = expand_root(db, root_file).as_ref()?;
+    let expanded = expand_root(db, root_file)?;
 
-    let def = expanded.macro_defs.iter().find(|def| {
+    let def = expanded.macro_defs(db).iter().find(|def| {
         source_file(db, expanded, def.span.file) == file
             && def.span.text_range.byte_range().contains(&offset)
     })?;
@@ -271,7 +271,7 @@ fn label_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
-    let expanded = expand_root(db, root_file).as_ref()?;
+    let expanded = expand_root(db, root_file)?;
     let result = lower_root_file(db, root_file)?;
 
     let (name, span) = result
@@ -297,9 +297,9 @@ fn include_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
-    let expanded = expand_root(db, root_file).as_ref()?;
+    let expanded = expand_root(db, root_file)?;
 
-    let edge = expanded.includes.iter().find(|edge| {
+    let edge = expanded.includes(db).iter().find(|edge| {
         source_file(db, expanded, edge.span.file) == file
             && edge.span.text_range.byte_range().contains(&offset)
     })?;

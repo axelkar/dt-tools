@@ -33,7 +33,7 @@ pub struct LoweredFile<'db> {
     /// Diagnostics emitted by lowering.
     ///
     /// Their spans are offsets into the root's expanded text, not file positions. Consumers
-    /// resolve them with the root's [`dt_tools_preprocessor::PreprocessedRoot`].
+    /// resolve them with the root's [`crate::expand::ExpandedRoot`].
     #[tracked]
     #[returns(ref)]
     pub diagnostics: Vec<Diagnostic<ExpandedText>>,
@@ -69,7 +69,7 @@ pub struct LoweredFile<'db> {
 pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'_>> {
     profiling::scope!("lowering::lower_root_file", root_file.path(db).as_str());
 
-    let expanded = expand_root(db, root_file).as_ref()?;
+    let expanded = expand_root(db, root_file)?;
     let parse = expanded_parse(db, root_file)?;
     let file_ast = parse.parse(db).source_file();
 
@@ -90,7 +90,7 @@ pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'
     }
 
     let processed_files = expanded
-        .sources
+        .sources(db)
         .iter()
         .filter(|source| !source.is_command_line())
         .map(|source| db.get_files().get_file(db, &source.path))
@@ -223,9 +223,7 @@ pub(crate) mod tests {
 
         let result = lower_root_file(&db, root_file).expect("Should be a readable file");
         let mir = result.mir(&db);
-        let expanded = expand_root(&db, root_file)
-            .as_ref()
-            .expect("Should be a readable file");
+        let expanded = expand_root(&db, root_file).expect("Should be a readable file");
 
         let mut out = mir.display(&db, expanded);
         if !diags.is_empty() {

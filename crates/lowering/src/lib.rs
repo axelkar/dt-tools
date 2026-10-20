@@ -156,7 +156,7 @@ pub fn compute_diagnostics(
         );
     }
 
-    let mut processed_files = if let Some(expanded) = expand_root(db, root_file).as_ref() {
+    let mut processed_files = if let Some(expanded) = expand_root(db, root_file) {
         diagnostics.extend(preprocessor_diagnostics(db, expanded));
         diagnostics.extend(expanded_syntax_diagnostics(db, root_file));
 

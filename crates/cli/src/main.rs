@@ -191,12 +191,11 @@ fn cmd_expand(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
     init_preprocess_settings(&db, workspace);
 
     let root_file = db.get_files().get_file(&db, &abs_path);
-    let expanded = expand_root(&db, root_file)
-        .as_ref()
-        .ok_or_eyre("File does not exist or is not readable")?;
+    let expanded =
+        expand_root(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
 
     eprintln!("{} {}", "Preprocessed".green().bold(), file);
-    println!("{}\n{}", "Preprocessing output:".cyan(), expanded.text);
+    println!("{}\n{}", "Preprocessing output:".cyan(), expanded.text(&db));
 
     let mut diagnostics = preprocessor_diagnostics(&db, expanded);
     diagnostics.extend(expanded_syntax_diagnostics(&db, root_file));
@@ -223,9 +222,8 @@ fn cmd_mir(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
 
     let (diagnostics, _processed_files) = compute_diagnostics(&db, root_file);
 
-    let expanded = expand_root(&db, root_file)
-        .as_ref()
-        .ok_or_eyre("File does not exist or is not readable")?;
+    let expanded =
+        expand_root(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
 
     eprintln!("{} diagnostics and MIR", "  Computed".green().bold());
     print!(

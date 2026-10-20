@@ -37,9 +37,9 @@ pub async fn goto_definition(
 
     let offset = position_to_offset(params.position, rope)?;
 
-    let expanded = expand_root(db, file).as_ref()?;
+    let expanded = expand_root(db, file)?;
 
-    let edge = expanded.includes.iter().find(|edge| {
+    let edge = expanded.includes(db).iter().find(|edge| {
         source_file(db, expanded, edge.span.file) == file
             && edge.span.text_range.byte_range().contains(&offset)
     });

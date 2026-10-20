@@ -3,10 +3,9 @@ use std::{borrow::Cow, fmt};
 use rustc_hash::FxHashSet;
 
 use dt_tools_diagnostic::Span;
-use dt_tools_preprocessor::PreprocessedRoot;
 
 use crate::{
-    expand::{ExpandedText, resolve_range},
+    expand::{ExpandedRoot, ExpandedText, resolve_range},
     file::DisplaySpanLineColumn,
 };
 
@@ -68,7 +67,11 @@ impl Mir {
     ///
     /// Panics if a definition's provenance has no primary span.
     #[must_use]
-    pub fn display(&self, db: &dyn crate::db::BaseDb, expanded: &PreprocessedRoot) -> String {
+    pub fn display<'db>(
+        &self,
+        db: &'db dyn crate::db::BaseDb,
+        expanded: ExpandedRoot<'db>,
+    ) -> String {
         use std::fmt::Write;
 
         let mut out = String::new();
@@ -476,9 +479,7 @@ mod tests {
 
         let result = lower_root_file(&db, root_file).expect("Should be a readable file");
         let mir = result.mir(&db);
-        let expanded = expand_root(&db, root_file)
-            .as_ref()
-            .expect("Should be a readable file");
+        let expanded = expand_root(&db, root_file).expect("Should be a readable file");
 
         let new_mir = Mir {
             definitions: Mir::iter_live_defs_under(mir, path_base).cloned().collect(),

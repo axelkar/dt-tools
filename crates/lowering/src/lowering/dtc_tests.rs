@@ -89,9 +89,7 @@ fn cross_check_dtc_success(contents: &str) -> Result<(), ()> {
         (Ok(()), Err(dtc_output)) => {
             let result = lower_root_file(&db, root_file).expect("Should be a readable file");
             let mir = result.mir(&db);
-            let expanded = expand_root(&db, root_file)
-                .as_ref()
-                .expect("Should be a readable file");
+            let expanded = expand_root(&db, root_file).expect("Should be a readable file");
             let out = mir.display(&db, expanded);
 
             panic!(
