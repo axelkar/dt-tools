@@ -54,6 +54,9 @@ struct Cli {
     /// This can be overridden by the `RUST_LOG` environment variable
     #[arg(short, long)]
     verbose: bool,
+    /// Initial directory for workspace search instead of the current working directory.
+    #[arg(long)]
+    workspace_start_dir: Option<Utf8PathBuf>,
     #[command(subcommand)]
     command: Command,
     #[clap(flatten)]
@@ -111,8 +114,13 @@ fn main() -> Result<()> {
         .with_env_filter(tracing_env_filter)
         .init();
 
-    let cwd = Utf8Path::new(".").canonicalize_utf8()?;
-    let res = dt_tools_workspace::Workspace::find_workspace_dir(&cwd);
+    let start = if let Some(start) = cli.workspace_start_dir {
+        start
+    } else {
+        Utf8Path::new(".").canonicalize_utf8()?
+    };
+
+    let res = dt_tools_workspace::Workspace::find_workspace_dir(&start);
     let workspace_dir = res.workspace_dir();
 
     let toml_config = match &res {
