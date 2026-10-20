@@ -65,7 +65,7 @@ pub struct LoweredFile<'db> {
 /// # Panics
 ///
 /// Will panic if [`PreprocessSettings`] hasn't been defined.
-#[salsa::tracked(lru = 64)]
+#[salsa::tracked(returns(copy), lru = 64)]
 pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'_>> {
     profiling::scope!("lowering::lower_root_file", root_file.path(db).as_str());
 

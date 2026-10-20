@@ -9,7 +9,7 @@ use crate::{
     mir, tag_diagnostics,
 };
 
-#[salsa::tracked(returns(ref), lru = 64)]
+#[salsa::tracked(lru = 64)]
 pub(super) fn check_mir_post<'db>(
     db: &'db dyn BaseDb,
     result: LoweredFile<'db>,

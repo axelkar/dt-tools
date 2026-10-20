@@ -15,7 +15,8 @@ pub struct ExpandedText;
 /// Returns the preprocessed text and provenance of `root`.
 ///
 /// Returns `None` if the file doesn't exist.
-#[salsa::tracked(returns(ref), lru = 32)]
+// TODO: return a tracked struct so e.g. expanded_parse doesn't recompute when PreprocessedRoot.map changes
+#[salsa::tracked(lru = 32)]
 pub fn expand_root(db: &dyn BaseDb, root: File) -> Option<PreprocessedRoot> {
     profiling::scope!("lowering::expand_root", root.path(db).as_str());
 
@@ -48,11 +49,11 @@ pub fn expand_root(db: &dyn BaseDb, root: File) -> Option<PreprocessedRoot> {
 /// Parses the expanded text of `root`.
 ///
 /// Returns `None` if the file doesn't exist.
-#[salsa::tracked(no_eq, lru = 64)]
+#[salsa::tracked(returns(copy), no_eq, lru = 64)]
 pub fn expanded_parse(db: &dyn BaseDb, root: File) -> Option<Parse<'_>> {
     let expanded = expand_root(db, root).as_ref()?;
     let parse = dt_tools_parser::parser::Entrypoint::SourceFile.parse(&expanded.text);
-    Some(Parse::new(db, parse))
+    Some(Parse::new(db, parse.into_static()))
 }
 
 /// Returns the file for a preprocessor source id.

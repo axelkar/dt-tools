@@ -15,17 +15,16 @@ pub type FxDashMap<K, V> =
 /// The main database input.
 #[salsa::input(debug)]
 pub struct File {
-    #[returns(ref)]
     pub path: Utf8PathBuf,
 
     // TODO(important): combine `contents` and `is_readable_file` into `contents: Option<String>`
     /// **Note:** The file may not exist. Check [`File::is_readable_file`] before reading contents.
-    #[returns(ref)]
     pub contents: String,
 
     /// Salsa doesn't support deleting inputs: <https://github.com/astral-sh/ruff/blob/438ef334d3e71ef0ac70927c799fb159d8f25267/crates/ruff_db/src/files.rs#L322-L323>
     ///
     /// Missing files should also exist inside Salsa's database: <https://github.com/astral-sh/ruff/blob/438ef334d3e71ef0ac70927c799fb159d8f25267/crates/ruff_db/src/files.rs#L31-L34>
+    #[returns(copy)]
     pub is_readable_file: bool,
 }
 

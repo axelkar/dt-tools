@@ -20,14 +20,13 @@ pub mod settings;
 
 #[salsa::tracked]
 pub struct Parse<'db> {
-    #[returns(ref)]
     #[no_eq]
-    pub parse: dt_tools_parser::parser::Parse<'db>,
+    pub parse: dt_tools_parser::parser::Parse<'static>,
 }
 
-// `no_eq`: Always changes when `file.contents` changes
+// `no_eq` is an optimization: the return value always changes when `file.contents` changes
 /// Returns `None` if the file doesn't exist.
-#[salsa::tracked(no_eq, returns(ref), lru = 64)]
+#[salsa::tracked(no_eq, lru = 64)]
 pub fn rope(db: &dyn db::BaseDb, file: file::File) -> Option<ropey::Rope> {
     if !file.is_readable_file(db) {
         return None;
@@ -37,7 +36,7 @@ pub fn rope(db: &dyn db::BaseDb, file: file::File) -> Option<ropey::Rope> {
 
 // `no_eq`: Probably faster to compare the inputs than the whole AST
 /// Returns `None` if the file doesn't exist.
-#[salsa::tracked(no_eq, lru = 64)]
+#[salsa::tracked(returns(copy), no_eq, lru = 64)]
 pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
     profiling::scope!("lowering::parse_file", file.path(db).as_str());
 
@@ -47,7 +46,7 @@ pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
 
     let contents: &str = file.contents(db);
     let parse = dt_tools_parser::parser::Entrypoint::SourceFile.parse(contents);
-    Some(Parse::new(db, parse))
+    Some(Parse::new(db, parse.into_static()))
 }
 
 pub(crate) fn tag_diagnostics<F>(diagnostics: &mut [Diagnostic<F>], tag: &str) {
@@ -114,7 +113,7 @@ pub fn emit_parse_errors(
 }
 
 /// Returns the lint diagnostics for `file`.
-#[salsa::tracked(returns(ref), lru = 256)]
+#[salsa::tracked(lru = 256)]
 pub fn lint_file(db: &dyn db::BaseDb, file: file::File) -> Vec<Diagnostic<file::File>> {
     profiling::scope!("lowering::lint_file", file.path(db).as_str());
 
@@ -133,7 +132,7 @@ pub fn lint_file(db: &dyn db::BaseDb, file: file::File) -> Vec<Diagnostic<file::
         .collect()
 }
 
-#[salsa::tracked(returns(ref), lru = 64)]
+#[salsa::tracked(lru = 64)]
 pub fn compute_diagnostics(
     db: &dyn db::BaseDb,
     root_file: file::File,
