@@ -45,7 +45,7 @@ const HELP_TEMPLATE: &str = "\
 {all-args}{after-help}\
     ";
 
-/// dt is a fast Devicetree parser, linter and compiler all in one.
+/// dt-tools-cli is a fast Devicetree parser, linter and compiler all in one.
 #[derive(Parser, Debug)]
 #[command(version, author, about, long_about = None, styles = styles(), help_template = HELP_TEMPLATE)]
 struct Cli {
@@ -64,8 +64,6 @@ struct Cli {
 enum Command {
     /// Parse a DTS file and show lex/parse errors
     Parse { file: Utf8PathBuf },
-    /// Lint DTS and DTB files
-    Lint {},
     /// Lower a DTS file to MIR and show diagnostics
     Mir { file: Utf8PathBuf },
     /// Preprocess a DTS file and show the preprocessed text and diagnostics
@@ -138,7 +136,6 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Parse { file } => cmd_parse(&file)?,
-        Command::Lint {} => todo!(),
         Command::Mir { file } => cmd_mir(&file, &workspace)?,
         Command::Preprocess { file } => cmd_preprocess(&file, &workspace)?,
         Command::CheckMany {
