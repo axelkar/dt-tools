@@ -15,9 +15,7 @@ use crate::{
     diag::Diag,
     expand::ExpandedText,
     lowering::item::{lower_item, resolve_phandle},
-    mir::{
-        Mir, MirDefinition, MirDefinitionValue, MirNodeData, MirPhandleTarget, UnresolvedExtension,
-    },
+    mir::{Mir, MirDefinition, MirDefinitionValue, MirNodeData, UnresolvedExtension},
 };
 
 /// Lowers an [`ast::DtNode`] and its subtree to flat [`MirDefinition`]s.
@@ -70,14 +68,12 @@ pub(crate) fn lower_dt_node(
                     .unresolved_extensions
                     .extend(body_mir.unresolved_extensions);
 
-                if let MirPhandleTarget::Label(label) = target {
-                    ctx.mir.unresolved_extensions.push(UnresolvedExtension {
-                        label,
-                        body: body_mir.definitions,
-                        provenance,
-                        phandle_span: phandle.syntax().text_range().within_file(ExpandedText),
-                    });
-                }
+                ctx.mir.unresolved_extensions.push(UnresolvedExtension {
+                    target,
+                    body: body_mir.definitions,
+                    provenance,
+                    phandle_span: phandle.syntax().text_range().within_file(ExpandedText),
+                });
             }
         }
     } else {
@@ -367,7 +363,46 @@ mod tests {
                 dts-v1 /main.dts L2:1-L2:10
                 plugin /main.dts L3:1-L3:10
                 --- unresolved extensions ---
-                  label=UNKNOWN (1 definitions)
+                  target=&UNKNOWN (1 definitions)
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_extension_unresolved_path() {
+        check_mir(
+            r#"
+/dts-v1/;
+/plugin/;
+&{/UNKNOWN} { prop = <1>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                plugin /main.dts L3:1-L3:10
+                --- unresolved extensions ---
+                  target=&{/UNKNOWN} (1 definitions)
+            "#]],
+        );
+    }
+
+    #[test]
+    fn mir_extension_unresolved_label_path() {
+        check_mir(
+            r#"
+/dts-v1/;
+/plugin/;
+/ { LBL: node {}; };
+&{LBL/missing} { prop = <1>; };
+"#,
+            &[],
+            expect![[r#"
+                dts-v1 /main.dts L2:1-L2:10
+                plugin /main.dts L3:1-L3:10
+                node / /main.dts L4:1-L4:21
+                node /node labels=[LBL] /main.dts L4:5-L4:18
+                --- unresolved extensions ---
+                  target=&{LBL/missing} (1 definitions)
             "#]],
         );
     }

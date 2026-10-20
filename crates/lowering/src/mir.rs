@@ -137,8 +137,8 @@ impl Mir {
             for ext in &self.unresolved_extensions {
                 let _ = writeln!(
                     out,
-                    "  label={} ({} definitions)",
-                    ext.label,
+                    "  target={} ({} definitions)",
+                    ext.target,
                     ext.body.len()
                 );
             }
@@ -438,12 +438,12 @@ impl fmt::Display for MirPhandleTarget {
     }
 }
 
-/// Extension node (`&label { ... }`) that couldn't be resolved because the label hasn't been
-/// defined yet. Only produced in overlay mode (`/plugin/;`).
+/// Extension node (`&label { ... }`, `&{/path} { ... }`, or `&{label/path} { ... }`) that
+/// couldn't be resolved during lowering. Only produced in overlay mode (`/plugin/;`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnresolvedExtension {
-    /// The label that the extension targets.
-    pub label: String,
+    /// The reference that the extension targets.
+    pub target: MirPhandleTarget,
     /// Definitions from the extension body (paths relative to target).
     pub body: Vec<MirDefinition>,
     /// The source location that produced the definition.
