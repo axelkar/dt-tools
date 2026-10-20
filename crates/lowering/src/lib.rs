@@ -28,10 +28,7 @@ pub struct Parse<'db> {
 /// Returns `None` if the file doesn't exist.
 #[salsa::tracked(no_eq, lru = 64)]
 pub fn rope(db: &dyn db::BaseDb, file: file::File) -> Option<ropey::Rope> {
-    if !file.is_readable_file(db) {
-        return None;
-    }
-    Some(ropey::Rope::from_str(file.contents(db)))
+    Some(ropey::Rope::from_str(file.contents(db).as_deref()?))
 }
 
 // `no_eq`: Probably faster to compare the inputs than the whole AST
@@ -40,11 +37,7 @@ pub fn rope(db: &dyn db::BaseDb, file: file::File) -> Option<ropey::Rope> {
 pub fn parse_file(db: &dyn db::BaseDb, file: file::File) -> Option<Parse<'_>> {
     profiling::scope!("lowering::parse_file", file.path(db).as_str());
 
-    if !file.is_readable_file(db) {
-        return None;
-    }
-
-    let contents: &str = file.contents(db);
+    let contents = file.contents(db).as_deref()?;
     let parse = dt_tools_parser::parser::Entrypoint::SourceFile.parse(contents);
     Some(Parse::new(db, parse.into_static()))
 }
@@ -120,10 +113,13 @@ pub fn lint_file(db: &dyn db::BaseDb, file: file::File) -> Vec<Diagnostic<file::
     let Some(parse) = parse_file(db, file) else {
         return Vec::new();
     };
+    let Some(contents) = file.contents(db).as_deref() else {
+        return Vec::new();
+    };
 
     let parse = parse.parse(db);
 
-    dt_tools_lint::default_lint(&parse.source_file(), file.contents(db), file)
+    dt_tools_lint::default_lint(&parse.source_file(), contents, file)
         .into_iter()
         .map(|mut lint| {
             tag_diagnostic(&mut lint.diagnostic, &format!("dt-tools(lint {})", lint.id));
@@ -141,7 +137,7 @@ pub fn compute_diagnostics(
 
     let mut diagnostics = Vec::new();
 
-    if !root_file.is_readable_file(db) {
+    if root_file.contents(db).is_none() {
         // TODO: test this with LSP. Getting rope will probably panic
         return (
             vec![Diagnostic::new(

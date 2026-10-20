@@ -92,9 +92,7 @@ impl Session {
         let file = db.get_files().get_file(db, path);
 
         // Because we got a change notification from LSP...
-        // FIXME: rename `is_readable_file` to something more fitting
-        file.set_contents(db).to(contents);
-        file.set_is_readable_file(db).to(true);
+        file.set_contents(db).to(Some(contents));
 
         if let Some(mut open_doc) = self.open_docs.get_mut(path) {
             open_doc.version = version;

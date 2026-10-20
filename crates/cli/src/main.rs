@@ -155,7 +155,13 @@ fn main() -> Result<()> {
             do_print_diagnostics,
             only_fail,
             only_summary,
-        } => cmd_check_many(&files, do_print_diagnostics, only_fail, only_summary, &workspace)?,
+        } => cmd_check_many(
+            &files,
+            do_print_diagnostics,
+            only_fail,
+            only_summary,
+            &workspace,
+        )?,
     }
 
     Ok(())

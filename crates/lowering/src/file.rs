@@ -8,7 +8,6 @@ use salsa::Durability;
 
 use crate::{db::BaseDb, settings::PreprocessSettings};
 
-// FIXME: rename `is_readable_file` to something more fitting
 pub type FxDashMap<K, V> =
     dashmap::DashMap<K, V, std::hash::BuildHasherDefault<rustc_hash::FxHasher>>;
 
@@ -17,15 +16,11 @@ pub type FxDashMap<K, V> =
 pub struct File {
     pub path: Utf8PathBuf,
 
-    // TODO(important): combine `contents` and `is_readable_file` into `contents: Option<String>`
-    /// **Note:** The file may not exist. Check [`File::is_readable_file`] before reading contents.
-    pub contents: String,
-
-    /// Salsa doesn't support deleting inputs: <https://github.com/astral-sh/ruff/blob/438ef334d3e71ef0ac70927c799fb159d8f25267/crates/ruff_db/src/files.rs#L322-L323>
+    /// The file's contents, or `None` if the file could not be read.
     ///
-    /// Missing files should also exist inside Salsa's database: <https://github.com/astral-sh/ruff/blob/438ef334d3e71ef0ac70927c799fb159d8f25267/crates/ruff_db/src/files.rs#L31-L34>
-    #[returns(copy)]
-    pub is_readable_file: bool,
+    /// Salsa doesn't support deleting inputs, so missing files are stored as `None`:
+    /// <https://github.com/astral-sh/ruff/blob/438ef334d3e71ef0ac70927c799fb159d8f25267/crates/ruff_db/src/files.rs#L31-L34>
+    pub contents: Option<String>,
 }
 
 impl File {
@@ -63,7 +58,7 @@ impl Files {
     ///
     /// # Missing files
     ///
-    /// **Note:** The file may not exist. Check [`File::is_readable_file`] before reading contents.
+    /// **Note:** The file may not exist. [`File::contents`] is `None` in that case.
     ///
     /// # Panics
     ///
@@ -76,12 +71,9 @@ impl Files {
         *self.by_path.entry_ref(path).or_insert_with(|| {
             tracing::trace!("Adding file '{path}'");
 
-            let (contents, is_readable_file) = match std::fs::read_to_string(path) {
-                Ok(contents) => (contents, true),
-                Err(_) => (String::new(), false),
-            };
+            let contents = std::fs::read_to_string(path).ok();
 
-            File::builder(path.to_owned(), contents, is_readable_file)
+            File::builder(path.to_owned(), contents)
                 .path_durability(Durability::HIGH) // the path is immutable
                 .new(db)
         })
@@ -95,7 +87,7 @@ impl Files {
     pub fn add_virtual(&self, db: &dyn BaseDb, path: Utf8PathBuf, contents: String) -> File {
         assert!(path.is_absolute());
 
-        let file = File::builder(path.clone(), contents, true)
+        let file = File::builder(path.clone(), Some(contents))
             .path_durability(Durability::HIGH)
             .new(db);
         self.by_path.insert(path, file);
@@ -110,9 +102,9 @@ impl fmt::Display for DisplaySpanLineColumn<'_> {
         let fmt_line_column = |f: &mut fmt::Formatter<'_>, offset| {
             let Some((line, column)) = self.0.file.line_column(self.1, offset) else {
                 panic!(
-                    "Span should be valid. file.path={}, file.is_readable_file={}. text_range={}. offset={}",
+                    "Span should be valid. file.path={}, file.contents.is_some()={}. text_range={}. offset={}",
                     self.0.file.path(self.1),
-                    self.0.file.is_readable_file(self.1),
+                    self.0.file.contents(self.1).is_some(),
                     self.0.text_range,
                     offset,
                 );
@@ -147,8 +139,8 @@ mod tests {
         let file = db.get_files().get_file(&db, &file_path.clone());
 
         assert_eq!(
-            (file.contents(&db), file.is_readable_file(&db)),
-            (&std::fs::read_to_string(file_path).unwrap(), true)
+            file.contents(&db).as_deref(),
+            Some(std::fs::read_to_string(file_path).unwrap().as_str())
         );
     }
 

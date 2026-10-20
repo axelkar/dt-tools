@@ -63,7 +63,7 @@ impl<'db> PreprocessedRoot<'db> {
 pub fn preprocess_root(db: &dyn BaseDb, root: File) -> Option<PreprocessedRoot<'_>> {
     profiling::scope!("lowering::preprocess_root", root.path(db).as_str());
 
-    if !root.is_readable_file(db) {
+    if root.contents(db).is_none() {
         return None;
     }
 
@@ -84,8 +84,7 @@ pub fn preprocess_root(db: &dyn BaseDb, root: File) -> Option<PreprocessedRoot<'
 
     let preprocessed = preprocess(root.path(db), &config, |path| {
         let file = files.get_file(db, path);
-        file.is_readable_file(db)
-            .then(|| file.contents(db).to_owned())
+        file.contents(db).clone()
     });
 
     Some(PreprocessedRoot::new(

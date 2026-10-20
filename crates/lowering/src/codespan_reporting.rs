@@ -40,7 +40,10 @@ pub fn print_diagnostics(
     let mut simple_files = SimpleFiles::new();
     let mut file_to_id: HashMap<File, usize> = HashMap::new();
     for &file in &files {
-        let id = simple_files.add(file.path(db).clone(), file.contents(db).as_str().to_owned());
+        let id = simple_files.add(
+            file.path(db).clone(),
+            file.contents(db).as_deref().unwrap_or_default().to_owned(),
+        );
         file_to_id.insert(file, id);
     }
 
