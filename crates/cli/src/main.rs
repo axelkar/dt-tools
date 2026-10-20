@@ -81,6 +81,10 @@ enum Command {
         #[arg(long = "print-diagnostics")]
         do_print_diagnostics: bool,
 
+        /// Print only the names of the files that failed
+        #[arg(long)]
+        only_fail: bool,
+
         /// Print only the summary
         #[arg(long)]
         only_summary: bool,
@@ -149,8 +153,9 @@ fn main() -> Result<()> {
         Command::CheckMany {
             files,
             do_print_diagnostics,
+            only_fail,
             only_summary,
-        } => cmd_check_many(&files, do_print_diagnostics, only_summary, &workspace)?,
+        } => cmd_check_many(&files, do_print_diagnostics, only_fail, only_summary, &workspace)?,
     }
 
     Ok(())
@@ -247,6 +252,7 @@ fn cmd_mir(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
 fn cmd_check_many(
     files: &[Utf8PathBuf],
     do_print_diagnostics: bool,
+    only_fail: bool,
     only_summary: bool,
     workspace: &Workspace,
 ) -> Result<()> {
@@ -287,7 +293,9 @@ fn cmd_check_many(
             if !only_summary {
                 let _guard = print_lock.lock();
                 if passed {
-                    println!("{} ... {}", file, "PASS".green().bold());
+                    if !only_fail {
+                        println!("{} ... {}", file, "PASS".green().bold());
+                    }
                 } else {
                     println!("{} ... {}", file, "FAIL".red().bold());
                     if do_print_diagnostics {
