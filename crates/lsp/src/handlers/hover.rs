@@ -91,7 +91,7 @@ pub fn hover(state: &crate::Backend, params: HoverParams) -> Option<Hover> {
     Some(make_hover_info(
         db,
         file,
-        section_strs.join("\n---\n"),
+        section_strs.join("\n\n---\n\n"),
         Some(text_range),
     ))
 }
