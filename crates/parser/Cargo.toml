@@ -33,13 +33,11 @@ notify = "8.0.0"
 owo-colors.workspace = true
 pretty_assertions.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-serde_json.workspace = true
 strum.workspace = true
 
 [features]
 default = []
 grammar-tracing = []
-visualize = []
 
 [lints]
 workspace = true

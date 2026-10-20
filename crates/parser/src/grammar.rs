@@ -12,29 +12,6 @@ use crate::{
 pub(crate) mod expr;
 mod preprocessor_directive;
 
-macro_rules! vis {
-    (begin) => {
-        #[cfg(feature = "visualize")]
-        crate::parser::visualizer::Event::GramBegin(vis!(@function_name)).visualize();
-    };
-    (end) => {
-        #[cfg(feature = "visualize")]
-        crate::parser::visualizer::Event::GramEnd(vis!(@function_name)).visualize();
-    };
-    (@function_name) => {{
-        // Okay, this is ugly, I get it. However, this is the best we can get on a stable rust.
-        fn f() {}
-        fn type_name_of<T>(_: T) -> &'static str {
-            std::any::type_name::<T>()
-        }
-        let name = type_name_of(f);
-        // `3` is the length of the `::f`.
-        &name[..name.len() - 3]
-    }};
-}
-// Export the macro with path-based scoping
-pub(crate) use vis;
-
 // Gets rid of annoying cfg hints in rust-analyzer
 macro_rules! debug {
     ($($args:tt)*) => {
@@ -274,7 +251,6 @@ fn dt_expr(p: &mut Parser) {
 ///
 /// - Form: `<1>`.
 fn dt_cell_list(m: Marker, p: &mut Parser) -> Result<CompletedMarker, ()> {
-    vis!(begin);
 
     assert!(p.eat(TokenKind::LAngle));
 
@@ -284,7 +260,6 @@ fn dt_cell_list(m: Marker, p: &mut Parser) -> Result<CompletedMarker, ()> {
     }
     p.expect(TokenKind::RAngle);
 
-    vis!(end);
     Ok(m.complete(p, NodeKind::DtCellList))
 }
 
@@ -379,7 +354,6 @@ pub(super) fn propvalues(p: &mut Parser, ending_kinds: &[TokenKind]) -> Result<(
 fn dt_property(m: Marker, p: &mut Parser) -> CompletedMarker {
     profiling::scope!("grammar::dt_property");
 
-    vis!(begin);
     if p.eat(TokenKind::Semicolon) {
         return m.complete(p, NodeKind::DtProperty);
     }
@@ -396,7 +370,6 @@ fn dt_property(m: Marker, p: &mut Parser) -> CompletedMarker {
     p.check(TokenKind::Semicolon)
         .expect_recoverable(ITEM_RECOVERY_SET);
 
-    vis!(end);
     m.complete(p, NodeKind::DtProperty)
 }
 
@@ -407,7 +380,6 @@ fn dt_property(m: Marker, p: &mut Parser) -> CompletedMarker {
 fn dt_node_body(p: &mut Parser, m: Marker) {
     profiling::scope!("grammar::dt_node_body");
 
-    vis!(begin);
     debug!("dt_node_body start");
 
     let lcurly_span = p
@@ -439,14 +411,12 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
     m.complete(p, NodeKind::DtNode);
 
     debug!("dt_node_body end");
-    vis!(end);
 }
 
 #[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn item(p: &mut Parser) {
     profiling::scope!("grammar::item");
 
-    vis!(begin);
     debug!("item start");
 
     if eat_node_or_prop(p) {
@@ -487,7 +457,6 @@ fn item(p: &mut Parser) {
     }
 
     debug!("item end");
-    vis!(end);
 }
 
 /// Eats e.g. the labels and name of a node or property.

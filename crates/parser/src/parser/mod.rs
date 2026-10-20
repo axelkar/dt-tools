@@ -115,19 +115,6 @@ impl Entrypoint {
             Lexer::new(input).collect()
         };
 
-        #[cfg(feature = "visualize")]
-        visualizer::Event::Init {
-            tokens: tokens
-                .iter()
-                .map(|tok| visualizer::OwnedToken {
-                    kind: tok.kind,
-                    text: tok.text.to_owned(),
-                    text_range: tok.text_range,
-                })
-                .collect(),
-        }
-        .visualize();
-
         let source = Source::new(&tokens);
         let mut parser = Parser::new(source);
         let p = &mut parser;
@@ -624,53 +611,6 @@ impl TokenMatcher for LabelName {
     }
     fn consume(self, p: &mut Parser) {
         p.bump_name_generic(&LABEL_NAME_SET);
-    }
-}
-
-#[cfg(feature = "visualize")]
-pub mod visualizer {
-    use std::cell::RefCell;
-
-    use crate::lexer::{LexError, TokenKind};
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct OwnedToken {
-        pub kind: Result<TokenKind, LexError>,
-        pub text: String,
-        pub text_range: crate::TextRange,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum Event {
-        Init {
-            tokens: Vec<OwnedToken>,
-        },
-        /// Always clears steps
-        NextToken {
-            cursor: usize,
-            prev_next_cursor: usize,
-        },
-        /// Always increases steps
-        PeekKindImmediate,
-        /// Clears steps if cursor has increased
-        SkippedTrivia {
-            cursor: usize,
-        },
-        GramBegin(&'static str),
-        GramEnd(&'static str),
-    }
-    impl Event {
-        pub fn visualize(self) {
-            VEC.with_borrow_mut(|vec| vec.push(self));
-        }
-    }
-
-    thread_local! {
-        static VEC: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
-    }
-
-    pub fn take_events() -> Vec<Event> {
-        VEC.with_borrow_mut(std::mem::take)
     }
 }
 

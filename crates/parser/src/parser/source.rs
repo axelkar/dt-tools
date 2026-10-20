@@ -104,13 +104,6 @@ impl<'t, 'input> Source<'t, 'input> {
         self.steps = 0;
         self.prev_next_cursor = self.cursor;
 
-        #[cfg(feature = "visualize")]
-        super::visualizer::Event::NextToken {
-            cursor: self.cursor,
-            prev_next_cursor: self.prev_next_cursor,
-        }
-        .visualize();
-
         Some(token)
     }
 
@@ -190,12 +183,6 @@ impl<'t, 'input> Source<'t, 'input> {
             self.steps = 0;
         }
         self.steps += 1;
-
-        #[cfg(feature = "visualize")]
-        super::visualizer::Event::SkippedTrivia {
-            cursor: self.cursor,
-        }
-        .visualize();
     }
 
     /// Peeks ahead at the current token's kind.
@@ -208,9 +195,6 @@ impl<'t, 'input> Source<'t, 'input> {
         profiling::scope!("parser::Source::peek_kind_immediate");
 
         self.steps += 1;
-
-        #[cfg(feature = "visualize")]
-        super::visualizer::Event::PeekKindImmediate.visualize();
 
         // We can ignore the error when peeking
         Some(

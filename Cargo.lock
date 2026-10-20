@@ -607,7 +607,6 @@ dependencies = [
  "owo-colors",
  "pretty_assertions",
  "profiling",
- "serde_json",
  "smallvec",
  "smol_str",
  "strum",
