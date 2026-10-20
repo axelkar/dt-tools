@@ -1,4 +1,4 @@
-use std::{mem::ManuallyDrop, path::Path, sync::Mutex, time::Instant};
+use std::{mem::ManuallyDrop, sync::Mutex, time::Instant};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{
@@ -8,7 +8,7 @@ use clap::{
         styling::{AnsiColor, Style},
     },
 };
-use color_eyre::eyre::{OptionExt, Result, WrapErr, eyre};
+use color_eyre::eyre::{OptionExt, Result, WrapErr};
 use dt_tools_lowering::{
     codespan_reporting::print_diagnostics,
     compute_diagnostics,
@@ -113,8 +113,7 @@ fn main() -> Result<()> {
         .with_env_filter(tracing_env_filter)
         .init();
 
-    let cwd = Utf8PathBuf::from_path_buf(Path::new(".").canonicalize()?)
-        .map_err(|_| eyre!("Current directory isn't UTF-8"))?;
+    let cwd = Utf8Path::new(".").canonicalize_utf8()?;
     let res = dt_tools_workspace::Workspace::find_workspace_dir(&cwd);
     let workspace_dir = res.workspace_dir();
 
