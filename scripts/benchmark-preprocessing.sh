@@ -33,7 +33,7 @@ include=(-I "$linux/include" -I "$linux/scripts/dtc/include-prefixes")
 cpp_flags=(-E -nostdinc -undef -D__DTS__ -x assembler-with-cpp -P)
 
 our_cmd="$preprocess $(quote "${include[@]}") -D __DTS__"
-expand_cmd="$cli $(quote "${include[@]}") -D __DTS__ expand"
+preprocess_cmd="$cli $(quote "${include[@]}") -D __DTS__ preprocess"
 mir_cmd="$cli $(quote "${include[@]}") -D __DTS__ mir"
 gcc_cmd="gcc $(quote "${cpp_flags[@]}") $(quote "${include[@]}")"
 clang_cmd="clang $(quote "${cpp_flags[@]}") $(quote "${include[@]}")"
@@ -43,7 +43,7 @@ hyperfine=(hyperfine --warmup 3 --shell=none --export-markdown -)
 echo "== single file preprocessing: ${board#"$linux/"}"
 "${hyperfine[@]}" \
   -n dt-tools-preprocessor "$our_cmd $(quote "$board")" \
-  -n dt-tools-expand "$expand_cmd $(quote "$board")" \
+  -n dt-tools-cli-preprocess "$preprocess_cmd $(quote "$board")" \
   -n gcc "$gcc_cmd $(quote "$board")" \
   -n clang "$clang_cmd $(quote "$board")"
 
@@ -59,7 +59,7 @@ echo "== corpus: preprocessing"
 fd_cmd="fd -e dts . $(quote "$corpus") -x"
 "${hyperfine[@]}" \
   -n dt-tools-preprocessor "$fd_cmd $our_cmd" \
-  -n dt-tools-expand "$fd_cmd $expand_cmd" \
+  -n dt-tools-cli-preprocess "$fd_cmd $preprocess_cmd" \
   -n gcc "$fd_cmd $gcc_cmd" \
   -n clang "$fd_cmd $clang_cmd"
 

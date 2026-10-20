@@ -12,7 +12,6 @@ use num_traits::{AsPrimitive, Num};
 use super::{LowerCtx, lower_phandle, undefined_macro};
 use crate::{
     diag::Diag,
-    expand::ExpandedText,
     expr_eval::{self, interpret_escaped_char_tok, parse_int_tok},
     extra_num_traits::{Bits, Signedness},
     lowering::{
@@ -23,6 +22,7 @@ use crate::{
         MirCell32, MirCellList, MirDefinition, MirDefinitionValue, MirPhandleTarget,
         MirPropertyData, MirValue,
     },
+    preprocess::PreprocessedText,
 };
 
 /// Lowers an [`ast::DtProperty`] to a [`MirDefinition`], if valid.
@@ -50,9 +50,9 @@ pub(crate) fn lower_dt_property(
     let path = build_path(parent_node_path, &name);
 
     let text_range = prop.syntax().text_range();
-    let provenance = text_range.within_file(ExpandedText);
+    let provenance = text_range.within_file(PreprocessedText);
     let name_span = prop.name().map_or(provenance, |name| {
-        name.syntax().text_range().within_file(ExpandedText)
+        name.syntax().text_range().within_file(PreprocessedText)
     });
 
     ctx.mir.definitions.push(MirDefinition {

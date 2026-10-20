@@ -2,20 +2,20 @@ use std::borrow::Cow;
 
 use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
 
-use crate::expand::{
-    expand_root, expanded_syntax_diagnostics, preprocessor_diagnostics, resolve_diagnostic,
+use crate::preprocess::{
+    preprocess_root, preprocessed_syntax_diagnostics, preprocessor_diagnostics, resolve_diagnostic,
 };
 
 mod check_mir_post;
 pub mod codespan_reporting;
 pub mod db;
 mod diag;
-pub mod expand;
 mod expr_eval;
 mod extra_num_traits;
 pub mod file;
 pub mod lowering;
 pub mod mir;
+pub mod preprocess;
 pub mod settings;
 
 #[salsa::tracked]
@@ -137,10 +137,7 @@ pub fn compute_diagnostics(
     db: &dyn db::BaseDb,
     root_file: file::File,
 ) -> (Vec<Diagnostic<file::File>>, Vec<file::File>) {
-    profiling::scope!(
-        "lowering::compute_file_diagnostics",
-        root_file.path(db).as_str()
-    );
+    profiling::scope!("lowering::compute_diagnostics", root_file.path(db).as_str());
 
     let mut diagnostics = Vec::new();
 
@@ -156,22 +153,22 @@ pub fn compute_diagnostics(
         );
     }
 
-    let mut processed_files = if let Some(expanded) = expand_root(db, root_file) {
-        diagnostics.extend(preprocessor_diagnostics(db, expanded));
-        diagnostics.extend(expanded_syntax_diagnostics(db, root_file));
+    let mut processed_files = if let Some(preprocessed) = preprocess_root(db, root_file) {
+        diagnostics.extend(preprocessor_diagnostics(db, preprocessed));
+        diagnostics.extend(preprocessed_syntax_diagnostics(db, root_file));
 
         if let Some(result) = lowering::lower_root_file(db, root_file) {
             diagnostics.extend(
                 result
                     .diagnostics(db)
                     .iter()
-                    .map(|diagnostic| resolve_diagnostic(db, expanded, diagnostic)),
+                    .map(|diagnostic| resolve_diagnostic(db, preprocessed, diagnostic)),
             );
 
             diagnostics.extend(
                 check_mir_post::check_mir_post(db, result)
                     .iter()
-                    .map(|diagnostic| resolve_diagnostic(db, expanded, diagnostic)),
+                    .map(|diagnostic| resolve_diagnostic(db, preprocessed, diagnostic)),
             );
 
             result.processed_files(db).clone()

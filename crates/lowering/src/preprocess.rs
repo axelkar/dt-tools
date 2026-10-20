@@ -1,4 +1,4 @@
-//! Expanded-file Salsa queries.
+//! Preprocessing Salsa queries.
 
 use dt_tools_diagnostic::{
     Diagnostic, MultiSpan, Severity, Span, SpanLabel, text_range::TextRange,
@@ -10,9 +10,9 @@ use dt_tools_preprocessor::{
 
 use crate::{Parse, db::BaseDb, file::File, settings::PreprocessSettings};
 
-/// Identifies ranges in a root file's expanded text.
+/// Identifies ranges in a root file's preprocessed text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ExpandedText;
+pub struct PreprocessedText;
 
 /// The preprocessed output of a root file.
 ///
@@ -20,11 +20,11 @@ pub struct ExpandedText;
 /// by Salsa so a change to one, e.g. [`Self::map`], does not invalidate queries that read the
 /// others.
 #[salsa::tracked]
-pub struct ExpandedRoot<'db> {
-    /// The expanded text.
+pub struct PreprocessedRoot<'db> {
+    /// The preprocessed text.
     #[tracked]
     pub text: String,
-    /// Where the expanded text came from.
+    /// Where the preprocessed text came from.
     #[tracked]
     pub map: ProvenanceMap,
     /// Source files in first-encounter order.
@@ -44,7 +44,7 @@ pub struct ExpandedRoot<'db> {
     pub diagnostics: Vec<Diagnostic<SourceId>>,
 }
 
-impl<'db> ExpandedRoot<'db> {
+impl<'db> PreprocessedRoot<'db> {
     /// Returns the source file with `id`.
     ///
     /// # Panics
@@ -60,8 +60,8 @@ impl<'db> ExpandedRoot<'db> {
 ///
 /// Returns `None` if the file doesn't exist.
 #[salsa::tracked(returns(copy), lru = 32)]
-pub fn expand_root(db: &dyn BaseDb, root: File) -> Option<ExpandedRoot<'_>> {
-    profiling::scope!("lowering::expand_root", root.path(db).as_str());
+pub fn preprocess_root(db: &dyn BaseDb, root: File) -> Option<PreprocessedRoot<'_>> {
+    profiling::scope!("lowering::preprocess_root", root.path(db).as_str());
 
     if !root.is_readable_file(db) {
         return None;
@@ -88,7 +88,7 @@ pub fn expand_root(db: &dyn BaseDb, root: File) -> Option<ExpandedRoot<'_>> {
             .then(|| file.contents(db).to_owned())
     });
 
-    Some(ExpandedRoot::new(
+    Some(PreprocessedRoot::new(
         db,
         preprocessed.text,
         preprocessed.map,
@@ -100,78 +100,78 @@ pub fn expand_root(db: &dyn BaseDb, root: File) -> Option<ExpandedRoot<'_>> {
     ))
 }
 
-/// Parses the expanded text of `root`.
+/// Parses the preprocessed text of `root`.
 ///
 /// Returns `None` if the file doesn't exist.
 #[salsa::tracked(returns(copy), no_eq, lru = 64)]
-pub fn expanded_parse(db: &dyn BaseDb, root: File) -> Option<Parse<'_>> {
-    let expanded = expand_root(db, root)?;
-    let parse = dt_tools_parser::parser::Entrypoint::SourceFile.parse(expanded.text(db));
+pub fn preprocessed_parse(db: &dyn BaseDb, root: File) -> Option<Parse<'_>> {
+    let preprocessed = preprocess_root(db, root)?;
+    let parse = dt_tools_parser::parser::Entrypoint::SourceFile.parse(preprocessed.text(db));
     Some(Parse::new(db, parse.into_static()))
 }
 
 /// Returns the file for a preprocessor source id.
 pub fn source_file<'db>(
     db: &'db dyn BaseDb,
-    expanded: ExpandedRoot<'db>,
+    preprocessed: PreprocessedRoot<'db>,
     source: SourceId,
 ) -> File {
     db.get_files()
-        .get_file(db, &expanded.source(db, source).path)
+        .get_file(db, &preprocessed.source(db, source).path)
 }
 
 /// Converts a preprocessor span to a file span.
 pub fn resolve_span<'db>(
     db: &'db dyn BaseDb,
-    expanded: ExpandedRoot<'db>,
+    preprocessed: PreprocessedRoot<'db>,
     span: Span<SourceId>,
 ) -> Span<File> {
     Span {
-        file: source_file(db, expanded, span.file),
+        file: source_file(db, preprocessed, span.file),
         text_range: span.text_range,
     }
 }
 
-/// Resolves a range in the expanded text to file spans.
+/// Resolves a range in the preprocessed text to file spans.
 pub fn resolve_range<'db>(
     db: &'db dyn BaseDb,
-    expanded: ExpandedRoot<'db>,
+    preprocessed: PreprocessedRoot<'db>,
     range: TextRange,
 ) -> MultiSpan<File> {
-    let resolved = expanded.map(db).resolve(range);
+    let resolved = preprocessed.map(db).resolve(range);
     MultiSpan {
         primary_spans: resolved
             .primary_spans
             .iter()
-            .map(|span| resolve_span(db, expanded, *span))
+            .map(|span| resolve_span(db, preprocessed, *span))
             .collect(),
         span_labels: resolved
             .span_labels
             .iter()
             .map(|label| SpanLabel {
-                span: resolve_span(db, expanded, label.span),
+                span: resolve_span(db, preprocessed, label.span),
                 msg: label.msg.clone(),
             })
             .collect(),
     }
 }
 
-/// Converts a diagnostic in expanded-text coordinates to file spans.
+/// Converts a diagnostic in preprocessed-text coordinates to file spans.
 pub fn resolve_diagnostic<'db>(
     db: &'db dyn BaseDb,
-    expanded: ExpandedRoot<'db>,
-    diagnostic: &Diagnostic<ExpandedText>,
+    preprocessed: PreprocessedRoot<'db>,
+    diagnostic: &Diagnostic<PreprocessedText>,
 ) -> Diagnostic<File> {
     let mut span = MultiSpan::empty();
 
     for raw_span in &diagnostic.span.primary_spans {
-        let resolved = resolve_range(db, expanded, raw_span.text_range);
+        let resolved = resolve_range(db, preprocessed, raw_span.text_range);
         span.primary_spans.extend(resolved.primary_spans);
         span.span_labels.extend(resolved.span_labels);
     }
 
     for label in &diagnostic.span.span_labels {
-        let resolved = resolve_range(db, expanded, label.span.text_range);
+        let resolved = resolve_range(db, preprocessed, label.span.text_range);
         if let Some(file_span) = resolved.primary_spans.into_iter().next() {
             span.span_labels.push(SpanLabel {
                 span: file_span,
@@ -190,9 +190,9 @@ pub fn resolve_diagnostic<'db>(
 /// Returns the preprocessor diagnostics with file spans.
 pub fn preprocessor_diagnostics<'db>(
     db: &'db dyn BaseDb,
-    expanded: ExpandedRoot<'db>,
+    preprocessed: PreprocessedRoot<'db>,
 ) -> Vec<Diagnostic<File>> {
-    expanded
+    preprocessed
         .diagnostics(db)
         .iter()
         .map(|diagnostic| Diagnostic {
@@ -201,14 +201,14 @@ pub fn preprocessor_diagnostics<'db>(
                     .span
                     .primary_spans
                     .iter()
-                    .map(|span| resolve_span(db, expanded, *span))
+                    .map(|span| resolve_span(db, preprocessed, *span))
                     .collect(),
                 span_labels: diagnostic
                     .span
                     .span_labels
                     .iter()
                     .map(|label| SpanLabel {
-                        span: resolve_span(db, expanded, label.span),
+                        span: resolve_span(db, preprocessed, label.span),
                         msg: label.msg.clone(),
                     })
                     .collect(),
@@ -219,24 +219,24 @@ pub fn preprocessor_diagnostics<'db>(
         .collect()
 }
 
-/// Returns the syntax diagnostics of `root`'s expanded text with file spans.
-pub fn expanded_syntax_diagnostics(db: &dyn BaseDb, root: File) -> Vec<Diagnostic<File>> {
-    profiling::scope!("lowering::expand::expanded_syntax_diagnostics");
+/// Returns the syntax diagnostics of `root`'s preprocessed text with file spans.
+pub fn preprocessed_syntax_diagnostics(db: &dyn BaseDb, root: File) -> Vec<Diagnostic<File>> {
+    profiling::scope!("lowering::preprocess::preprocessed_syntax_diagnostics");
 
-    let Some(expanded) = expand_root(db, root) else {
+    let Some(preprocessed) = preprocess_root(db, root) else {
         return Vec::new();
     };
-    let Some(parse) = expanded_parse(db, root) else {
+    let Some(parse) = preprocessed_parse(db, root) else {
         return Vec::new();
     };
 
-    parse_diagnostics(db, expanded, parse.parse(db))
+    parse_diagnostics(db, preprocessed, parse.parse(db))
 }
 
-/// Converts an expanded parse's errors to file diagnostics.
+/// Converts an preprocessed parse's errors to file diagnostics.
 fn parse_diagnostics<'db>(
     db: &'db dyn BaseDb,
-    expanded: ExpandedRoot<'db>,
+    preprocessed: PreprocessedRoot<'db>,
     parse: &dt_tools_parser::parser::Parse<'_>,
 ) -> Vec<Diagnostic<File>> {
     let mut diagnostics = Vec::new();
@@ -244,7 +244,7 @@ fn parse_diagnostics<'db>(
 
     for lex_error in &parse.lex_errors {
         diagnostics.push(Diagnostic {
-            span: resolve_range(db, expanded, lex_error.text_range),
+            span: resolve_range(db, preprocessed, lex_error.text_range),
             msg: format!("{} [lex error]", lex_error.inner).into(),
             severity: Severity::Error,
         });
@@ -257,10 +257,10 @@ fn parse_diagnostics<'db>(
             break;
         }
 
-        let mut span = resolve_range(db, expanded, error.primary_text_range);
+        let mut span = resolve_range(db, preprocessed, error.primary_text_range);
         span.span_labels
             .extend(error.span_labels.iter().filter_map(|(range, msg)| {
-                let span = resolve_range(db, expanded, *range)
+                let span = resolve_range(db, preprocessed, *range)
                     .primary_spans
                     .first()
                     .copied()?;
@@ -288,8 +288,8 @@ mod tests {
     use dt_tools_diagnostic::Severity;
 
     use super::{
-        expand_root, expanded_parse, expanded_syntax_diagnostics, preprocessor_diagnostics,
-        source_file,
+        preprocess_root, preprocessed_parse, preprocessed_syntax_diagnostics,
+        preprocessor_diagnostics, source_file,
     };
     use crate::{
         db::{BaseDatabase, BaseDb},
@@ -304,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn expanded_parse_skips_inactive_branches() {
+    fn preprocessed_parse_skips_inactive_branches() {
         let db = BaseDatabase::default();
         PreprocessSettings::new(&db, Vec::new(), vec![]);
         let file = virtual_file(
@@ -316,69 +316,72 @@ mod tests {
         let raw = parse_file(&db, file).expect("readable");
         assert!(!raw.parse(&db).errors.is_empty());
 
-        let expanded = expand_root(&db, file).expect("readable");
-        assert!(!expanded.text(&db).contains("not a node"));
+        let preprocessed = preprocess_root(&db, file).expect("readable");
+        assert!(!preprocessed.text(&db).contains("not a node"));
 
-        let parse = expanded_parse(&db, file).expect("readable");
+        let parse = preprocessed_parse(&db, file).expect("readable");
         let parse = parse.parse(&db);
         assert!(parse.errors.is_empty(), "{:?}", parse.errors);
         assert!(parse.lex_errors.is_empty());
     }
 
     #[test]
-    fn expands_includes_before_parsing() {
+    fn preprocesses_includes_before_parsing() {
         let db = BaseDatabase::default();
         PreprocessSettings::new(&db, Vec::new(), vec![]);
         let main = virtual_file(&db, "/main.dts", "#include \"a.dtsi\"\n/ { x = <1>; };\n");
         virtual_file(&db, "/a.dtsi", "/ { y = <2>; };\n");
 
-        let expanded = expand_root(&db, main).expect("readable");
+        let preprocessed = preprocess_root(&db, main).expect("readable");
         assert!(
-            expanded.text(&db).contains("y = <2>"),
+            preprocessed.text(&db).contains("y = <2>"),
             "{:?}",
-            expanded.text(&db)
+            preprocessed.text(&db)
         );
 
-        assert_eq!(expanded.includes(&db).len(), 1);
-        let edge = &expanded.includes(&db)[0];
-        assert_eq!(source_file(&db, expanded, edge.span.file), main);
-        assert_eq!(source_file(&db, expanded, edge.file).path(&db), "/a.dtsi");
+        assert_eq!(preprocessed.includes(&db).len(), 1);
+        let edge = &preprocessed.includes(&db)[0];
+        assert_eq!(source_file(&db, preprocessed, edge.span.file), main);
+        assert_eq!(
+            source_file(&db, preprocessed, edge.file).path(&db),
+            "/a.dtsi"
+        );
 
-        let parse = expanded_parse(&db, main).expect("readable");
+        let parse = preprocessed_parse(&db, main).expect("readable");
         let parse = parse.parse(&db);
         assert!(parse.errors.is_empty(), "{:?}", parse.errors);
     }
 
-    /// Command-line defines are visible before the root is expanded.
+    /// Command-line defines are visible before the root is preprocessed.
     #[test]
-    fn expands_command_line_defines() {
+    fn preprocesses_command_line_defines() {
         let db = BaseDatabase::default();
         PreprocessSettings::new(&db, Vec::new(), vec![("FLAG".to_owned(), "42".to_owned())]);
         let file = virtual_file(&db, "/main.dts", "/ { x = <FLAG>; };\n");
 
-        let expanded = expand_root(&db, file).expect("readable");
+        let preprocessed = preprocess_root(&db, file).expect("readable");
         assert!(
-            expanded.text(&db).contains("<42>"),
+            preprocessed.text(&db).contains("<42>"),
             "{:?}",
-            expanded.text(&db)
+            preprocessed.text(&db)
         );
         assert!(
-            expanded
+            preprocessed
                 .sources(&db)
                 .iter()
                 .any(dt_tools_preprocessor::SourceFile::is_command_line),
             "{:?}",
-            expanded.sources(&db)
+            preprocessed.sources(&db)
         );
     }
 
     #[test]
-    fn reports_expanded_syntax_errors_with_file_spans() {
+    fn reports_preprocessed_syntax_errors_with_file_spans() {
         let db = BaseDatabase::default();
         PreprocessSettings::new(&db, Vec::new(), vec![]);
         let main = virtual_file(&db, "/main.dts", "/ { x = <1>;\n");
 
-        let diagnostics = expanded_syntax_diagnostics(&db, main);
+        let diagnostics = preprocessed_syntax_diagnostics(&db, main);
         assert!(!diagnostics.is_empty());
         assert_eq!(diagnostics[0].severity, Severity::Error);
         assert_eq!(diagnostics[0].span.primary_spans[0].file, main);
@@ -390,7 +393,7 @@ mod tests {
         PreprocessSettings::new(&db, Vec::new(), vec![]);
         let main = virtual_file(&db, "/main.dts", "#define BAD 1 +\n/ { x = <BAD>; };\n");
 
-        let diagnostics = expanded_syntax_diagnostics(&db, main);
+        let diagnostics = preprocessed_syntax_diagnostics(&db, main);
         assert!(
             diagnostics.iter().any(|diagnostic| {
                 diagnostic
@@ -409,8 +412,8 @@ mod tests {
         PreprocessSettings::new(&db, Vec::new(), vec![]);
         let main = virtual_file(&db, "/main.dts", "#include \"missing.dtsi\"\n/ { };\n");
 
-        let expanded = expand_root(&db, main).expect("readable");
-        let diagnostics = preprocessor_diagnostics(&db, expanded);
+        let preprocessed = preprocess_root(&db, main).expect("readable");
+        let diagnostics = preprocessor_diagnostics(&db, preprocessed);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].severity, Severity::Error);

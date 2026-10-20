@@ -4,17 +4,17 @@
 
 A root DTS file goes through three stages:
 
-1. `crates/preprocessor` expands it with a token-level C preprocessor, producing
-   one expanded text and a provenance map. A second dtc-style pass splices
-   `/include/`.
-2. The expanded text is parsed as a single CST (`expand_root` and
-   `expanded_parse` in [`crates/lowering`](crates/lowering)) using
+1. `crates/preprocessor` preprocesses it with a token-level C preprocessor,
+   producing one preprocessed text and a provenance map. A second dtc-style pass
+   splices `/include/`.
+2. The preprocessed text is parsed as a single CST (`preprocess_root` and
+   `preprocessed_parse` in [`crates/lowering`](crates/lowering)) using
    [`crates/parser`](crates/parser).
-3. [`crates/lowering`](crates/lowering) lowers the expanded CST to a flat
+3. [`crates/lowering`](crates/lowering) lowers the preprocessed CST to a flat
    mid-level intermediate representation (MIR). Lowering has no macro
    environment and does not recurse into includes.
 
-Diagnostics and MIR provenance are stored in expanded-text coordinates and
+Diagnostics and MIR provenance are stored in preprocessed-text coordinates and
 resolved to file spans by consumers.
 
 ## Preprocessor

@@ -1,4 +1,4 @@
-//! Expanded CST -> MIR lowering.
+//! Preprocessed CST -> MIR lowering.
 
 use dt_tools_diagnostic::{Diagnostic, Severity, Span};
 use dt_tools_parser::ast::{self, AstNode, AstToken, HasMacroInvocation, HasName};
@@ -7,9 +7,9 @@ use rustc_hash::FxHashMap;
 use crate::{
     db::BaseDb,
     diag::Diag,
-    expand::{ExpandedText, expand_root, expanded_parse},
     file::File,
     mir::{Mir, MirPhandleTarget},
+    preprocess::{PreprocessedText, preprocess_root, preprocessed_parse},
 };
 
 pub(crate) mod dt_node;
@@ -23,8 +23,8 @@ mod item;
 pub struct Label {
     /// Path of the labeled node.
     pub path: String,
-    /// The label's span in the expanded text.
-    pub span: Span<ExpandedText>,
+    /// The label's span in the preprocessed text.
+    pub span: Span<PreprocessedText>,
 }
 
 /// Result of lowering a root file and its includes.
@@ -32,11 +32,11 @@ pub struct Label {
 pub struct LoweredFile<'db> {
     /// Diagnostics emitted by lowering.
     ///
-    /// Their spans are offsets into the root's expanded text, not file positions. Consumers
-    /// resolve them with the root's [`crate::expand::ExpandedRoot`].
+    /// Their spans are offsets into the root's preprocessed text, not file positions. Consumers
+    /// resolve them with the root's [`crate::preprocess::PreprocessedRoot`].
     #[tracked]
     #[returns(ref)]
-    pub diagnostics: Vec<Diagnostic<ExpandedText>>,
+    pub diagnostics: Vec<Diagnostic<PreprocessedText>>,
 
     /// List of files processed, for publishing diagnostics.
     #[tracked]
@@ -54,7 +54,7 @@ pub struct LoweredFile<'db> {
     pub labels: FxHashMap<String, Option<Label>>,
 }
 
-/// Lowers the expanded CST to [`Mir`], starting from a root file.
+/// Lowers the preprocessed CST to [`Mir`], starting from a root file.
 ///
 /// [`LoweredFile`] also contains a lot of additional metadata, in addition to the MIR.
 ///
@@ -69,8 +69,8 @@ pub struct LoweredFile<'db> {
 pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'_>> {
     profiling::scope!("lowering::lower_root_file", root_file.path(db).as_str());
 
-    let expanded = expand_root(db, root_file)?;
-    let parse = expanded_parse(db, root_file)?;
+    let preprocessed = preprocess_root(db, root_file)?;
+    let parse = preprocessed_parse(db, root_file)?;
     let file_ast = parse.parse(db).source_file();
 
     let mut diagnostics = Vec::new();
@@ -89,7 +89,7 @@ pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'
         }
     }
 
-    let processed_files = expanded
+    let processed_files = preprocessed
         .sources(db)
         .iter()
         .filter(|source| !source.is_command_line())
@@ -118,7 +118,7 @@ impl LowerCtx<'_> {
     }
 }
 
-/// Emits a diagnostic for a macro invocation left in the expanded text.
+/// Emits a diagnostic for a macro invocation left in the preprocessed text.
 pub(crate) fn undefined_macro(diag: &mut Diag<'_>, invocation: &ast::MacroInvocation) {
     let name = invocation
         .green_ident()
@@ -223,9 +223,9 @@ pub(crate) mod tests {
 
         let result = lower_root_file(&db, root_file).expect("Should be a readable file");
         let mir = result.mir(&db);
-        let expanded = expand_root(&db, root_file).expect("Should be a readable file");
+        let preprocessed = preprocess_root(&db, root_file).expect("Should be a readable file");
 
-        let mut out = mir.display(&db, expanded);
+        let mut out = mir.display(&db, preprocessed);
         if !diags.is_empty() {
             out.push('\n');
             fmt_diags(&db, &mut out, diags);
@@ -462,7 +462,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// The preprocessor stops recursion and leaves `SELF` in the expanded text,
+    /// The preprocessor stops recursion and leaves `SELF` in the preprocessed text,
     /// so lowering reports it as undefined.
     #[test]
     fn mir_macro_recursive() {

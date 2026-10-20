@@ -13,9 +13,9 @@ use dt_tools_parser::{
 use super::{Label, LowerCtx, lower_phandle, undefined_macro};
 use crate::{
     diag::Diag,
-    expand::ExpandedText,
     lowering::item::{lower_item, resolve_phandle},
     mir::{Mir, MirDefinition, MirDefinitionValue, MirNodeData, UnresolvedExtension},
+    preprocess::PreprocessedText,
 };
 
 /// Lowers an [`ast::DtNode`] and its subtree to flat [`MirDefinition`]s.
@@ -25,9 +25,9 @@ pub(crate) fn lower_dt_node(
     parent_node_path: &str,
     dt_node: &ast::DtNode,
 ) {
-    let provenance = dt_node.syntax().text_range().within_file(ExpandedText);
+    let provenance = dt_node.syntax().text_range().within_file(PreprocessedText);
     let name_range = definition_name_range(dt_node);
-    let name_span = name_range.within_file(ExpandedText);
+    let name_span = name_range.within_file(PreprocessedText);
     let omit_if_no_ref = dt_node.omit_if_no_ref();
 
     let lower_resolved = |ctx: &mut _, diag: &mut _, provenance, node_path: &String| {
@@ -72,7 +72,7 @@ pub(crate) fn lower_dt_node(
                     target,
                     body: body_mir.definitions,
                     provenance,
-                    phandle_span: phandle.syntax().text_range().within_file(ExpandedText),
+                    phandle_span: phandle.syntax().text_range().within_file(PreprocessedText),
                 });
             }
         }
@@ -136,7 +136,10 @@ pub(crate) fn collect_labels(
             if let Some(Some(old_label)) = ctx.labels.get(&label_name)
                 && old_label.path != node_path
             {
-                let span = label_ast.syntax().text_range().within_file(ExpandedText);
+                let span = label_ast
+                    .syntax()
+                    .text_range()
+                    .within_file(PreprocessedText);
                 diag.push(Diagnostic {
                     span: MultiSpan::from(span).with_span_label(SpanLabel {
                         span: old_label.span,
@@ -148,7 +151,10 @@ pub(crate) fn collect_labels(
                     severity: Severity::Warn,
                 });
             } else {
-                let span = label_ast.syntax().text_range().within_file(ExpandedText);
+                let span = label_ast
+                    .syntax()
+                    .text_range()
+                    .within_file(PreprocessedText);
                 ctx.labels.insert(
                     label_name.clone(),
                     Some(Label {
@@ -227,7 +233,7 @@ pub(crate) fn build_path(parent: &str, name: &str) -> String {
     }
 }
 
-/// Resolves a name, diagnosing a macro invocation left in the expanded text.
+/// Resolves a name, diagnosing a macro invocation left in the preprocessed text.
 pub(crate) fn resolve_name_or_macro<Ast: HasName + HasMacroInvocation>(
     diag: &mut Diag<'_>,
     ast: &Ast,

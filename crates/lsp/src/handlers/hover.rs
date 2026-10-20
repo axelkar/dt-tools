@@ -3,10 +3,10 @@ use std::fmt::Write;
 use dt_tools_diagnostic::Span;
 use dt_tools_lowering::{
     db::BaseDb,
-    expand::{ExpandedRoot, expand_root, resolve_range, source_file},
     file::File,
     lowering::lower_root_file,
     mir::{MirDefinition, MirDefinitionValue},
+    preprocess::{PreprocessedRoot, preprocess_root, resolve_range, source_file},
 };
 use dt_tools_parser::{TextRange, ast::AstNode};
 use itertools::Itertools;
@@ -137,7 +137,7 @@ fn mir_definition_section(
 
     fn fmt_mir_def<'db>(
         db: &'db dyn BaseDb,
-        expanded: ExpandedRoot<'db>,
+        preprocessed: PreprocessedRoot<'db>,
         def: &MirDefinition,
         most_precise: &MirDefinition,
         already_defined: &mut bool,
@@ -175,7 +175,7 @@ fn mir_definition_section(
         };
 
         let is_here = def == most_precise;
-        let span = resolve_range(db, expanded, def.provenance.text_range)
+        let span = resolve_range(db, preprocessed, def.provenance.text_range)
             .primary_spans
             .first()
             .copied()
@@ -185,7 +185,7 @@ fn mir_definition_section(
         s
     }
 
-    let expanded = expand_root(db, root_file)?;
+    let preprocessed = preprocess_root(db, root_file)?;
     let mir = lower_root_file(db, root_file)?.mir(db);
 
     // TODO: unresolved_extensions
@@ -193,7 +193,7 @@ fn mir_definition_section(
         .definitions
         .iter()
         .filter(|def| {
-            resolve_range(db, expanded, def.provenance.text_range)
+            resolve_range(db, preprocessed, def.provenance.text_range)
                 .primary_spans
                 .first()
                 .is_some_and(|span| {
@@ -203,7 +203,7 @@ fn mir_definition_section(
         .collect_vec();
 
     let most_precise = *matching_defs.iter().max_by_key(|def| def.path.len())?;
-    let primary_span = resolve_range(db, expanded, most_precise.provenance.text_range)
+    let primary_span = resolve_range(db, preprocessed, most_precise.provenance.text_range)
         .primary_spans
         .first()
         .copied()
@@ -217,7 +217,9 @@ fn mir_definition_section(
             "MIR: `{}`\n\n- {}",
             most_precise.path,
             mir.history(&most_precise.path)
-                .map(|def| { fmt_mir_def(db, expanded, def, most_precise, &mut already_defined) })
+                .map(|def| {
+                    fmt_mir_def(db, preprocessed, def, most_precise, &mut already_defined)
+                })
                 .collect_vec()
                 .join("\n- ")
         ),
@@ -254,10 +256,10 @@ fn macro_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
-    let expanded = expand_root(db, root_file)?;
+    let preprocessed = preprocess_root(db, root_file)?;
 
-    let def = expanded.macro_defs(db).iter().find(|def| {
-        source_file(db, expanded, def.span.file) == file
+    let def = preprocessed.macro_defs(db).iter().find(|def| {
+        source_file(db, preprocessed, def.span.file) == file
             && def.span.text_range.byte_range().contains(&offset)
     })?;
 
@@ -271,7 +273,7 @@ fn label_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
-    let expanded = expand_root(db, root_file)?;
+    let preprocessed = preprocess_root(db, root_file)?;
     let result = lower_root_file(db, root_file)?;
 
     let (name, span) = result
@@ -279,7 +281,7 @@ fn label_section(
         .iter()
         .filter_map(|(name, label)| {
             let label = label.as_ref()?;
-            let span = resolve_range(db, expanded, label.span.text_range)
+            let span = resolve_range(db, preprocessed, label.span.text_range)
                 .primary_spans
                 .first()
                 .copied()?;
@@ -297,13 +299,13 @@ fn include_section(
     file: File,
     offset: usize,
 ) -> Option<(String, TextRange)> {
-    let expanded = expand_root(db, root_file)?;
+    let preprocessed = preprocess_root(db, root_file)?;
 
-    let edge = expanded.includes(db).iter().find(|edge| {
-        source_file(db, expanded, edge.span.file) == file
+    let edge = preprocessed.includes(db).iter().find(|edge| {
+        source_file(db, preprocessed, edge.span.file) == file
             && edge.span.text_range.byte_range().contains(&offset)
     })?;
-    let target = source_file(db, expanded, edge.file);
+    let target = source_file(db, preprocessed, edge.file);
 
     Some((
         format!("Resolved include: `{}`", target.path(db)),

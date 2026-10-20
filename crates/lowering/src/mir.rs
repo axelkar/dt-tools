@@ -5,8 +5,8 @@ use rustc_hash::FxHashSet;
 use dt_tools_diagnostic::Span;
 
 use crate::{
-    expand::{ExpandedRoot, ExpandedText, resolve_range},
     file::DisplaySpanLineColumn,
+    preprocess::{PreprocessedRoot, PreprocessedText, resolve_range},
 };
 
 fn strip_base<'a>(this: &'a str, base: &str) -> Option<&'a str> {
@@ -70,7 +70,7 @@ impl Mir {
     pub fn display<'db>(
         &self,
         db: &'db dyn crate::db::BaseDb,
-        expanded: ExpandedRoot<'db>,
+        preprocessed: PreprocessedRoot<'db>,
     ) -> String {
         use std::fmt::Write;
 
@@ -119,7 +119,7 @@ impl Mir {
                 format!(" {}", def.path)
             };
 
-            let provenance = resolve_range(db, expanded, def.provenance.text_range);
+            let provenance = resolve_range(db, preprocessed, def.provenance.text_range);
             let primary_span = *provenance
                 .primary_spans
                 .first()
@@ -255,9 +255,9 @@ pub struct MirDefinition {
     pub path: String,
     pub value: MirDefinitionValue,
     /// The source location that produced the definition.
-    pub provenance: Span<ExpandedText>,
-    /// The span of the definition's name or directive in the expanded text.
-    pub name_span: Span<ExpandedText>,
+    pub provenance: Span<PreprocessedText>,
+    /// The span of the definition's name or directive in the preprocessed text.
+    pub name_span: Span<PreprocessedText>,
 }
 
 /// What kind of definition this is.
@@ -450,9 +450,9 @@ pub struct UnresolvedExtension {
     /// Definitions from the extension body (paths relative to target).
     pub body: Vec<MirDefinition>,
     /// The source location that produced the definition.
-    pub provenance: Span<ExpandedText>,
+    pub provenance: Span<PreprocessedText>,
     /// The span of the definition's phandle.
-    pub phandle_span: Span<ExpandedText>,
+    pub phandle_span: Span<PreprocessedText>,
 }
 
 #[cfg(test)]
@@ -465,7 +465,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        db::BaseDb, expand::expand_root, lowering::lower_root_file, settings::PreprocessSettings,
+        db::BaseDb, lowering::lower_root_file, preprocess::preprocess_root,
+        settings::PreprocessSettings,
     };
 
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
@@ -479,14 +480,14 @@ mod tests {
 
         let result = lower_root_file(&db, root_file).expect("Should be a readable file");
         let mir = result.mir(&db);
-        let expanded = expand_root(&db, root_file).expect("Should be a readable file");
+        let preprocessed = preprocess_root(&db, root_file).expect("Should be a readable file");
 
         let new_mir = Mir {
             definitions: Mir::iter_live_defs_under(mir, path_base).cloned().collect(),
             unresolved_extensions: Vec::new(),
         };
 
-        expect.assert_eq(&new_mir.display(&db, expanded));
+        expect.assert_eq(&new_mir.display(&db, preprocessed));
     }
 
     #[test]

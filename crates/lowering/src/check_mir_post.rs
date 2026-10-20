@@ -4,16 +4,17 @@ use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, Span, SpanLabel};
 
 use crate::{
     db::BaseDb,
-    expand::ExpandedText,
     lowering::{LoweredFile, dt_node::build_path},
-    mir, tag_diagnostics,
+    mir,
+    preprocess::PreprocessedText,
+    tag_diagnostics,
 };
 
 #[salsa::tracked(lru = 64)]
 pub(super) fn check_mir_post<'db>(
     db: &'db dyn BaseDb,
     result: LoweredFile<'db>,
-) -> Vec<Diagnostic<ExpandedText>> {
+) -> Vec<Diagnostic<PreprocessedText>> {
     profiling::scope!("lowering::check_mir_post");
 
     let mut diagnostics = Vec::new();
@@ -31,7 +32,7 @@ fn check_phandles(
     db: &dyn BaseDb,
     result: LoweredFile<'_>,
     mir: &mir::Mir,
-    diagnostics: &mut Vec<Diagnostic<ExpandedText>>,
+    diagnostics: &mut Vec<Diagnostic<PreprocessedText>>,
 ) {
     profiling::scope!("lowering::check_mir_post::check_phandles");
 
@@ -67,7 +68,7 @@ fn check_phandle(
     result: LoweredFile<'_>,
     def: &mir::MirDefinition,
     target: &mir::MirPhandleTarget,
-) -> Option<Diagnostic<ExpandedText>> {
+) -> Option<Diagnostic<PreprocessedText>> {
     profiling::scope!(
         "lowering::check_mir_post::check_phandle",
         format!("{target:?}").as_str()
@@ -116,12 +117,12 @@ fn check_phandle(
 }
 
 /// Validates the existence and order of /dts-v1/; and /plugin/;
-fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<ExpandedText>>) {
+fn check_directives(mir: &mir::Mir, diagnostics: &mut Vec<Diagnostic<PreprocessedText>>) {
     profiling::scope!("lowering::check_mir_post::check_directives");
 
     let mut seen_dts_v1 = false;
     let mut errored_about_dts_v1 = false;
-    let mut previous_plugin: Option<Span<ExpandedText>> = None;
+    let mut previous_plugin: Option<Span<PreprocessedText>> = None;
 
     for def in &mir.definitions {
         match def.value {

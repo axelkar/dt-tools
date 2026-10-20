@@ -14,9 +14,9 @@ use dt_tools_lowering::{
     compute_diagnostics,
     db::{BaseDatabase, BaseDb},
     emit_parse_errors,
-    expand::{expand_root, expanded_syntax_diagnostics, preprocessor_diagnostics},
     lowering::lower_root_file,
     parse_file,
+    preprocess::{preprocess_root, preprocessed_syntax_diagnostics, preprocessor_diagnostics},
     settings::PreprocessSettings,
 };
 use dt_tools_workspace::{
@@ -68,8 +68,8 @@ enum Command {
     Lint {},
     /// Lower a DTS file to MIR and show diagnostics
     Mir { file: Utf8PathBuf },
-    /// Preprocess a DTS file and show the expanded text and diagnostics
-    Expand { file: Utf8PathBuf },
+    /// Preprocess a DTS file and show the preprocessed text and diagnostics
+    Preprocess { file: Utf8PathBuf },
     /// Check many DTS files for errors with a single Salsa database for reuse
     CheckMany {
         /// One or more DTS files to check
@@ -140,7 +140,7 @@ fn main() -> Result<()> {
         Command::Parse { file } => cmd_parse(&file)?,
         Command::Lint {} => todo!(),
         Command::Mir { file } => cmd_mir(&file, &workspace)?,
-        Command::Expand { file } => cmd_expand(&file, &workspace)?,
+        Command::Preprocess { file } => cmd_preprocess(&file, &workspace)?,
         Command::CheckMany {
             files,
             do_print_diagnostics,
@@ -182,7 +182,7 @@ fn init_preprocess_settings(db: &BaseDatabase, workspace: &Workspace) {
     );
 }
 
-fn cmd_expand(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
+fn cmd_preprocess(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
     let abs_path = file
         .canonicalize_utf8()
         .wrap_err_with(|| format!("File {file} doesn't exist"))?;
@@ -191,14 +191,20 @@ fn cmd_expand(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
     init_preprocess_settings(&db, workspace);
 
     let root_file = db.get_files().get_file(&db, &abs_path);
-    let expanded =
-        expand_root(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
+    let preprocessed =
+        preprocess_root(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
 
     eprintln!("{} {}", "Preprocessed".green().bold(), file);
-    println!("{}\n{}", "Preprocessing output:".cyan(), expanded.text(&db));
+    // TODO: print preprocessing output to stdout, everything else to stderr
+    println!(
+        "{}\n{}",
+        "Preprocessing output:".cyan(),
+        preprocessed.text(&db)
+    );
 
-    let mut diagnostics = preprocessor_diagnostics(&db, expanded);
-    diagnostics.extend(expanded_syntax_diagnostics(&db, root_file));
+    let mut diagnostics = preprocessor_diagnostics(&db, preprocessed);
+    // TODO: only C preprocessing, no DTS parsing nor lowering in this command
+    diagnostics.extend(preprocessed_syntax_diagnostics(&db, root_file));
 
     println!("{}", "\nDiagnostics:".red());
     if print_diagnostics(diagnostics, &db)? {
@@ -222,14 +228,14 @@ fn cmd_mir(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
 
     let (diagnostics, _processed_files) = compute_diagnostics(&db, root_file);
 
-    let expanded =
-        expand_root(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
+    let preprocessed =
+        preprocess_root(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
 
     eprintln!("{} diagnostics and MIR", "  Computed".green().bold());
     print!(
         "{}{}",
         "MIR:\n".cyan(),
-        result.mir(&db).display(&db, expanded)
+        result.mir(&db).display(&db, preprocessed)
     );
 
     println!("{}", "\nDiagnostics:".red());
