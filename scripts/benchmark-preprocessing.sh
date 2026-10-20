@@ -69,7 +69,9 @@ check_many_cmd="$fd_cmd_batch $(quote "$cli") $(quote "${include[@]}") -D __DTS_
 echo
 echo "== corpus: pipelines"
 "${hyperfine[@]}" \
-  -n "preprocess + dtc" "$fd_cmd $(quote "$pipeline") dtc" \
-  -n "preprocess + mir" "$fd_cmd $(quote "$pipeline") mir" \
-  -n "mir" "$fd_cmd $mir_cmd" \
-  -n "check-many" "$check_many_cmd"
+  -n "check-many" "$check_many_cmd" \
+  -n "preprocess + dtc" "$fd_cmd $(quote "$pipeline") dtc"
+
+# Too slow
+#  -n "mir" "$fd_cmd $mir_cmd" \
+#  -n "preprocess + mir" "$fd_cmd $(quote "$pipeline") mir"
