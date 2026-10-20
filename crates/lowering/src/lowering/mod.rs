@@ -48,10 +48,10 @@ pub struct LoweredFile<'db> {
     #[returns(ref)]
     pub mir: Mir,
 
-    /// Labels by name. `None` marks a deleted label.
+    /// Labels by name, with every live binding. Deleting a node removes its bindings.
     #[tracked]
     #[returns(ref)]
-    pub labels: FxHashMap<String, Option<Label>>,
+    pub labels: FxHashMap<String, Vec<Label>>,
 }
 
 /// Lowers the preprocessed CST to [`Mir`], starting from a root file.
@@ -108,7 +108,7 @@ pub fn lower_root_file(db: &dyn BaseDb, root_file: File) -> Option<LoweredFile<'
 /// Context threaded through the tree traversal.
 pub(crate) struct LowerCtx<'a> {
     pub(crate) mir: &'a mut Mir,
-    pub(crate) labels: &'a mut FxHashMap<String, Option<Label>>,
+    pub(crate) labels: &'a mut FxHashMap<String, Vec<Label>>,
 }
 impl LowerCtx<'_> {
     /// Returns true if this is currently in overlay mode.

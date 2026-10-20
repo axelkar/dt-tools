@@ -1,6 +1,4 @@
-use std::borrow::Cow;
-
-use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
+use dt_tools_diagnostic::Severity;
 use dt_tools_parser::{
     TextRange,
     ast::{
@@ -131,40 +129,24 @@ pub(crate) fn collect_labels(
 ) -> Vec<String> {
     let mut labels: Vec<String> = Vec::new();
     for label_ast in dt_node.labels() {
-        if let Ok(label_name) = resolve_name_or_macro(diag, &label_ast) {
-            // Check for duplicate labels (dtc: no duplicates globally).
-            if let Some(Some(old_label)) = ctx.labels.get(&label_name)
-                && old_label.path != node_path
-            {
-                let span = label_ast
-                    .syntax()
-                    .text_range()
-                    .within_file(PreprocessedText);
-                diag.push(Diagnostic {
-                    span: MultiSpan::from(span).with_span_label(SpanLabel {
-                        span: old_label.span,
-                        msg: Cow::Owned(format!(
-                            "Previous definition of label `{label_name}` here"
-                        )),
-                    }),
-                    msg: Cow::Owned(format!("Duplicate label `{label_name}`")),
-                    severity: Severity::Warn,
-                });
-            } else {
-                let span = label_ast
-                    .syntax()
-                    .text_range()
-                    .within_file(PreprocessedText);
-                ctx.labels.insert(
-                    label_name.clone(),
-                    Some(Label {
-                        path: node_path.to_owned(),
-                        span,
-                    }),
-                );
-                labels.push(label_name);
-            }
-        }
+        let Ok(label_name) = resolve_name_or_macro(diag, &label_ast) else {
+            continue;
+        };
+
+        let span = label_ast
+            .syntax()
+            .text_range()
+            .within_file(PreprocessedText);
+
+        ctx.labels
+            .entry(label_name.clone())
+            .or_default()
+            .push(Label {
+                path: node_path.to_owned(),
+                span,
+            });
+
+        labels.push(label_name);
     }
     labels
 }
@@ -444,10 +426,10 @@ mod tests {
                 node / /main.dts L3:1-L3:20
                 node /bar labels=[foo] /main.dts L3:5-L3:17
                 node / /main.dts L4:1-L4:20
-                node /baz /main.dts L4:5-L4:17
+                node /baz labels=[foo] /main.dts L4:5-L4:17
 
                 --- errors ---
-                Warn L4:5-L4:9: Duplicate label `foo`
+                Warn L4:5-L4:9: Duplicate label `foo` [dt_tools_lowering::check_mir_post]
             "#]],
         );
     }

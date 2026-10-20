@@ -142,6 +142,27 @@ mod property_delete_liveness {
     }
 }
 
+mod duplicate_labels {
+    use super::*;
+
+    /// A duplicate label takes over when the first definition is deleted.
+    #[test]
+    fn surviving_binding() {
+        assert_eq!(
+            cross_check_dtc_success(
+                r#"/dts-v1/;
+/ { a { LBL: x {}; }; };
+/ { LBL: y {}; };
+/delete-node/ &{/a/x};
+/ { p = <&LBL>; };
+&LBL { q = <2>; };
+"#
+            ),
+            Ok(())
+        );
+    }
+}
+
 mod directive_order {
     use super::*;
 

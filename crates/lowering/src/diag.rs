@@ -29,9 +29,4 @@ impl<'s> Diag<'s> {
             severity,
         });
     }
-
-    /// Pushes a pre-built diagnostic.
-    pub fn push(&mut self, diag: Diagnostic<PreprocessedText>) {
-        self.sink.push(diag);
-    }
 }

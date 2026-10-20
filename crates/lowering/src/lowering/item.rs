@@ -134,11 +134,13 @@ pub(crate) fn emit_delete_directive(
             return;
         };
 
-        // Clear the labels
+        // Deleted nodes take their labels with them.
         for def in ctx.mir.iter_live_defs_under(&target_path) {
             if let MirDefinitionValue::Node(data) = &def.value {
                 for label in &data.labels {
-                    ctx.labels.insert(label.clone(), None);
+                    if let Some(bindings) = ctx.labels.get_mut(label) {
+                        bindings.retain(|binding| binding.path != def.path);
+                    }
                 }
             }
         }
@@ -177,7 +179,7 @@ pub(crate) fn resolve_phandle(
             if let Some(path) = ctx
                 .labels
                 .get(name)
-                .and_then(Option::as_ref)
+                .and_then(|bindings| bindings.first())
                 .map(|label| &label.path)
             {
                 Ok(path.to_owned())
@@ -199,7 +201,7 @@ pub(crate) fn resolve_phandle(
             let Some(base) = ctx
                 .labels
                 .get(label)
-                .and_then(Option::as_ref)
+                .and_then(|bindings| bindings.first())
                 .map(|label| label.path.clone())
             else {
                 if ctx.is_overlay() {

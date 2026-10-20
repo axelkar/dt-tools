@@ -279,8 +279,8 @@ fn label_section(
     let (name, span) = result
         .labels(db)
         .iter()
+        .flat_map(|(name, labels)| labels.iter().map(move |label| (name, label)))
         .filter_map(|(name, label)| {
-            let label = label.as_ref()?;
             let span = resolve_range(db, preprocessed, label.span.text_range)
                 .primary_spans
                 .first()

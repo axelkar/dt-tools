@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
-use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity};
+use dt_tools_diagnostic::{Diagnostic, MultiSpan, Severity, SpanLabel};
+use rustc_hash::FxHashSet;
 
 use crate::{
     db::BaseDb,
@@ -20,12 +21,46 @@ pub(super) fn check_mir_post<'db>(
     let mut diagnostics = Vec::new();
 
     let mir = result.mir(db);
+    check_duplicate_labels(db, result, &mut diagnostics);
     check_phandles(db, result, mir, &mut diagnostics);
     check_directives(mir, &mut diagnostics);
 
     tag_diagnostics(&mut diagnostics, module_path!());
 
     diagnostics
+}
+
+/// Reports labels that are still bound at more than one live path.
+fn check_duplicate_labels(
+    db: &dyn BaseDb,
+    result: LoweredFile<'_>,
+    diagnostics: &mut Vec<Diagnostic<PreprocessedText>>,
+) {
+    for (name, bindings) in result.labels(db) {
+        // Redefining the same node repeats its labels, which dtc treats as one slot.
+        let mut seen_paths = FxHashSet::<&str>::default();
+        let mut first: Option<&crate::lowering::Label> = None;
+
+        for binding in bindings {
+            if !seen_paths.insert(&binding.path) {
+                continue;
+            }
+
+            let Some(previous) = first else {
+                first = Some(binding);
+                continue;
+            };
+
+            diagnostics.push(Diagnostic {
+                span: MultiSpan::from(binding.span).with_span_label(SpanLabel {
+                    span: previous.span,
+                    msg: Cow::Owned(format!("Previous definition of label `{name}` here")),
+                }),
+                msg: Cow::Owned(format!("Duplicate label `{name}`")),
+                severity: Severity::Warn,
+            });
+        }
+    }
 }
 
 fn check_phandles(
@@ -76,7 +111,11 @@ fn check_phandle(
 
     match target {
         mir::MirPhandleTarget::Label(name) => {
-            if result.labels(db).get(name).is_some_and(Option::is_some) {
+            if result
+                .labels(db)
+                .get(name)
+                .is_some_and(|bindings| !bindings.is_empty())
+            {
                 None
             } else {
                 Some(Cow::Owned(format!("Label not found: {name}")))
@@ -86,7 +125,7 @@ fn check_phandle(
             let base = result
                 .labels(db)
                 .get(label)
-                .and_then(Option::as_ref)
+                .and_then(|bindings| bindings.first())
                 .map(|label| label.path.clone());
 
             match base {
