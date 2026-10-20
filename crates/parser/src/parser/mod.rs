@@ -7,8 +7,6 @@ use std::sync::Arc;
 
 pub(crate) use marker::{CompletedMarker, Marker};
 use smallvec::SmallVec;
-#[cfg(feature = "grammar-tracing")]
-use tracing::debug;
 
 use self::{event::Event, source::Source};
 use crate::{
@@ -322,8 +320,6 @@ impl<'t, 'input> Parser<'t, 'input> {
     ///
     /// Returns true if a token was bumped.
     pub fn expect(&mut self, matcher: impl TokenMatcher) -> bool {
-        #[cfg(feature = "grammar-tracing")]
-        debug!("expect");
         self.check(matcher).expect()
     }
 
@@ -393,9 +389,6 @@ impl<'t, 'input> Parser<'t, 'input> {
     fn bump_name_generic(&mut self, set: &[TokenKind]) {
         profiling::scope!("parser::Parser::bump_name_generic");
 
-        #[cfg(feature = "grammar-tracing")]
-        tracing::info!("bump_name_generic");
-
         assert!(self.check(set).silent().at());
 
         // Make sure no trivia tokens get into the combined token
@@ -431,9 +424,6 @@ impl<'t, 'input> Parser<'t, 'input> {
         profiling::scope!("parser::Parser::bump");
 
         self.expected.clear();
-
-        #[cfg(feature = "grammar-tracing")]
-        debug!(pos = self.events.len(), kind = ?self.source.peek_kind(), "push token");
 
         assert!(
             self.source.next_token().is_some(),

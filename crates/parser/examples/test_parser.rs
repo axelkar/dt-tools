@@ -1,19 +1,8 @@
 //! Parses the file at argv 1 and prints the CST
 
 use owo_colors::{OwoColorize as _, colors::xterm::Gray};
-use tracing::level_filters::LevelFilter;
-use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy()
-                .add_directive("dt_tools_parser=trace".parse()?),
-        )
-        .init();
-
     let path = std::env::args()
         .nth(1)
         .expect("Should have a path as an argument");

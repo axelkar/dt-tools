@@ -61,9 +61,6 @@ impl<'t, 'input> Sink<'t, 'input> {
     pub(super) fn finish(mut self) -> Parse<'input> {
         profiling::scope!("parser::Sink::finish");
         for idx in 0..self.events.len() {
-            #[cfg(feature = "grammar-tracing")]
-            let _span = tracing::span!(tracing::Level::TRACE, "loop", pos = idx).entered();
-
             match std::mem::replace(&mut self.events[idx], Event::Placeholder) {
                 Event::StartNode {
                     kind,
@@ -72,9 +69,6 @@ impl<'t, 'input> Sink<'t, 'input> {
                     // Eat trivia before starting the node
                     // If trivia is attached, the node's range won't be what you expect
                     self.eat_trivia();
-
-                    #[cfg(feature = "grammar-tracing")]
-                    tracing::debug!(?kind, "start node");
 
                     if forward_parent.is_none() {
                         self.start_node(kind);
@@ -116,8 +110,6 @@ impl<'t, 'input> Sink<'t, 'input> {
                 }
                 Event::AddCombinedToken { kind, n_raw_tokens } => {
                     self.eat_trivia();
-                    #[cfg(feature = "grammar-tracing")]
-                    tracing::debug!(cursor = self.cursor, ?kind, "add combined token");
 
                     let first = &self.tokens[self.cursor];
                     let last = &self.tokens[self.cursor + n_raw_tokens - 1];
@@ -134,8 +126,6 @@ impl<'t, 'input> Sink<'t, 'input> {
                     self.cursor += n_raw_tokens;
                 }
                 Event::FinishNode => {
-                    #[cfg(feature = "grammar-tracing")]
-                    tracing::debug!(kind = ?self.current_node.kind, "finish node");
                     let next_current_node = self.stack.pop().unwrap();
                     let old_current_node =
                         std::mem::replace(&mut self.current_node, next_current_node);
@@ -189,8 +179,6 @@ impl<'t, 'input> Sink<'t, 'input> {
                 TokenKind::Unrecognized
             }
         };
-        #[cfg(feature = "grammar-tracing")]
-        tracing::debug!(cursor = self.cursor, ?kind, "add token");
 
         self.current_node.width += text.len();
 

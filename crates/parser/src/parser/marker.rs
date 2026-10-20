@@ -14,9 +14,6 @@ impl Marker {
         let pos = p.events.len();
         p.events.push(Event::Placeholder);
 
-        #[cfg(feature = "grammar-tracing")]
-        tracing::debug!(pos, "start node");
-
         Self {
             pos,
             bomb: if cfg!(debug_assertions) {
@@ -44,9 +41,6 @@ impl Marker {
             kind,
             forward_parent: None,
         };
-
-        #[cfg(feature = "grammar-tracing")]
-        tracing::debug!(?kind, pos = p.events.len(), "end node");
 
         p.events.push(Event::FinishNode);
 

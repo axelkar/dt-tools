@@ -12,14 +12,6 @@ use crate::{
 pub(crate) mod expr;
 mod preprocessor_directive;
 
-// Gets rid of annoying cfg hints in rust-analyzer
-macro_rules! debug {
-    ($($args:tt)*) => {
-        #[cfg(feature = "grammar-tracing")]
-        tracing::debug!($($args)*);
-    }
-}
-
 /// Parses a macro invocation.
 ///
 /// May or may not have arguments.
@@ -251,7 +243,6 @@ fn dt_expr(p: &mut Parser) {
 ///
 /// - Form: `<1>`.
 fn dt_cell_list(m: Marker, p: &mut Parser) -> Result<CompletedMarker, ()> {
-
     assert!(p.eat(TokenKind::LAngle));
 
     if cells::<false>(p).is_err() {
@@ -376,11 +367,8 @@ fn dt_property(m: Marker, p: &mut Parser) -> CompletedMarker {
 /// The caller is expected to handle the label, ampersand, name and unit address.
 ///
 /// - Form: `{ foo = "bar"; baz {}; };`.
-#[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn dt_node_body(p: &mut Parser, m: Marker) {
     profiling::scope!("grammar::dt_node_body");
-
-    debug!("dt_node_body start");
 
     let lcurly_span = p
         .range()
@@ -409,15 +397,10 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
         .expect_recoverable(ITEM_RECOVERY_SET);
 
     m.complete(p, NodeKind::DtNode);
-
-    debug!("dt_node_body end");
 }
 
-#[cfg_attr(feature = "grammar-tracing", tracing::instrument(skip_all))]
 fn item(p: &mut Parser) {
     profiling::scope!("grammar::item");
-
-    debug!("item start");
 
     if eat_node_or_prop(p) {
     } else if p.check(TokenKind::Equals).silent().at() {
@@ -455,8 +438,6 @@ fn item(p: &mut Parser) {
     } else {
         p.error().msg_expected().bump_wrap_err().emit();
     }
-
-    debug!("item end");
 }
 
 /// Eats e.g. the labels and name of a node or property.

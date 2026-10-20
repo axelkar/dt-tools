@@ -109,8 +109,6 @@ impl<'t, 'input> Source<'t, 'input> {
 
     /// Returns the last token's range if it exists. The token may be trivia.
     pub(crate) fn last_token_range(&self) -> Option<TextRange> {
-        #[cfg(feature = "grammar-tracing")]
-        tracing::debug!(last_token = ?self.tokens.last());
         Some(self.tokens.last()?.text_range)
     }
 

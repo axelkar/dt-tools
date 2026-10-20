@@ -611,8 +611,6 @@ dependencies = [
  "smol_str",
  "strum",
  "thiserror",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

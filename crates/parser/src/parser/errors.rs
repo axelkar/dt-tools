@@ -41,9 +41,6 @@ impl core::fmt::Display for Expected {
 fn fmt_expected_message(p: &mut Parser) -> String {
     use std::fmt::Write;
 
-    #[cfg(feature = "grammar-tracing")]
-    tracing::error!("emit_expect_error");
-
     let mut message = "Expected ".to_owned();
 
     p.expected = std::mem::take(&mut p.expected)
@@ -224,9 +221,6 @@ impl ErrorBuilder<'_, '_, '_, MessageFilled> {
         for hint in self.hints {
             self.span_labels.push((primary_text_range, hint));
         }
-
-        #[cfg(feature = "grammar-tracing")]
-        tracing::debug!(?primary_text_range, message = %self.msg.0, expected = ?self.p.expected);
 
         self.p.emit_parse_error(ParseError {
             message: self.msg.0,
