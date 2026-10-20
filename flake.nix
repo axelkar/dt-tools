@@ -25,20 +25,21 @@
       # Helper function to generate an attrset '{ x86_64-linux = f "x86_64-linux"; ... }'.
       forAllSystems = nixpkgs.lib.genAttrs targetSystems;
 
-      linuxBindings =
+      linuxSrc =
         pkgs:
         let
-          linuxVersion = "6.18.19";
+          linuxVersion = "7.3";
           linuxSrcRaw = pkgs.fetchurl {
             url = "mirror://kernel/linux/kernel/v${nixpkgs.lib.versions.major linuxVersion}.x/linux-${linuxVersion}.tar.xz";
-            hash = "sha256-6q94JxzQfGitnEyacMcnGLM6u9cWI52CuslrF1HrCQw=";
+            hash = "sha256-hzY8JPEOBjIes2J2VSEJTpRHH2v/i84taz5A858ASVM=";
           };
-          linuxSrc = pkgs.runCommand "linux-${linuxVersion}-src" { } ''
-            mkdir "$out"
-            tar -xf "${linuxSrcRaw}" --strip-components=1 -C "$out"
-          '';
         in
-        "${linuxSrc}/Documentation/devicetree/bindings";
+        pkgs.runCommand "linux-${linuxVersion}-src" { } ''
+          mkdir "$out"
+          tar -xf "${linuxSrcRaw}" --strip-components=1 -C "$out"
+        '';
+
+      linuxBindings = pkgs: "${linuxSrc pkgs}/Documentation/devicetree/bindings";
     in
     {
       packages = forAllSystems (
@@ -105,6 +106,7 @@
               hyperfine
             ];
 
+            env.LINUX = linuxSrc pkgs;
             env.DT_TOOLS_LINUX_BINDINGS = linuxBindings pkgs;
             env.DT_TOOLS_DT_SCHEMA_REPO = dt-schema.outPath;
           };
