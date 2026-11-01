@@ -25,8 +25,7 @@ use tower_lsp_server::{
         WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
     },
 };
-use tracing::{debug, info, level_filters::LevelFilter};
-use tracing_subscriber::EnvFilter;
+use tracing::{debug, info};
 use triomphe::Arc;
 
 use crate::{capabilities::ResolvedClientCapabilities, err_report::Report, lsp_utils::uri_to_path};
@@ -37,14 +36,14 @@ mod handlers;
 mod lsp_utils;
 
 /// A fast map that can be sent between threads
-pub type FxDashMap<K, V> =
+pub(crate) type FxDashMap<K, V> =
     dashmap::DashMap<K, V, std::hash::BuildHasherDefault<rustc_hash::FxHasher>>;
 
 #[derive(Debug)]
-pub struct OpenDocument {
+pub(crate) struct OpenDocument {
     /// The latest version of the document, set by the LSP client. The server will panic in
     /// debug mode if we attempt to update the document with an 'older' version.
-    pub version: i32,
+    pub(crate) version: i32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,7 +53,7 @@ enum WorkspaceSource {
 }
 
 /// The global state for the LSP
-pub struct Session {
+pub(crate) struct Session {
     /// Files open in the LSP client.
     ///
     /// Key is the path on a filesystem, not the [`Uri`].
@@ -76,7 +75,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn root_file(&self) -> Option<dt_tools_lowering::file::File> {
+    pub(crate) fn root_file(&self) -> Option<dt_tools_lowering::file::File> {
         let root_uri = self.root_file.lock().clone()?;
         let root_path = uri_to_path(&root_uri);
 
@@ -85,7 +84,12 @@ impl Session {
         Some(db.get_files().get_file(db, root_path.as_ref()?))
     }
 
-    pub fn set_file_contents_from_lsp(&self, path: &Utf8Path, contents: String, version: i32) {
+    pub(crate) fn set_file_contents_from_lsp(
+        &self,
+        path: &Utf8Path,
+        contents: String,
+        version: i32,
+    ) {
         debug!(version, ?path, "set file contents from LSP");
 
         let db = &mut *self.db.lock();
@@ -468,12 +472,34 @@ impl Backend {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    color_eyre::install()?;
+/// TCP port used by the `tcp` transport.
+const TCP_PORT: u16 = 9257;
 
-    let first_arg = std::env::args().nth(1);
+/// How the server communicates with its LSP client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transport {
+    /// JSON-RPC over stdin/stdout.
+    Stdio,
+    /// Accepts one connection on 127.0.0.1:9257.
+    Tcp,
+}
 
+/// Runs the language server until the client disconnects.
+///
+/// The caller should install the global tracing subscriber.
+///
+/// # Errors
+///
+/// Returns an error if the Tokio runtime cannot be created, or if the TCP
+/// listener cannot bind or accept a connection.
+pub fn run(transport: Transport) -> std::io::Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_io()
+        .build()?
+        .block_on(serve(transport))
+}
+
+async fn serve(transport: Transport) -> std::io::Result<()> {
     let (service, socket) = LspService::new(|client| Backend {
         client,
         session: Arc::new(Session {
@@ -486,51 +512,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
     });
 
-    // Set up profiling
-    #[cfg(feature = "tracy")]
-    profiling::tracy_client::Client::start();
-    profiling::register_thread!("Main Thread");
-
-    let tracing_env_filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy()
-        // Too noisy logging at info level
-        .add_directive("salsa::function::execute=warn".parse()?);
-
-    #[cfg(debug_assertions)]
-    let tracing_env_filter = tracing_env_filter
-        .add_directive("dt_tools_lsp=debug".parse()?)
-        .add_directive("dt_tools_lowering=debug".parse()?)
-        .add_directive("dt_tools_parser=debug".parse()?);
-
-    if first_arg == Some("tcp".to_owned()) {
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_env_filter)
-            .init();
-
+    if transport == Transport::Tcp {
         info!("Using tcp");
-        let listener = TcpListener::bind(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9257)).await?;
-        let (stream, _) = listener.accept().await.unwrap();
+        let addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), TCP_PORT);
+        let listener = TcpListener::bind(addr).await?;
+        let (stream, _) = listener.accept().await?;
         let (read, write) = tokio::io::split(stream);
         Server::new(read, write, socket).serve(service).await;
-    } else if first_arg == Some("stdio-ansi".to_owned()) {
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_env_filter)
-            .with_writer(std::io::stderr) // stdout is used for LSP
-            .with_ansi(true)
-            .init();
-
-        info!("Using stdio");
-        let read = tokio::io::stdin();
-        let write = tokio::io::stdout();
-        Server::new(read, write, socket).serve(service).await;
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_env_filter)
-            .with_writer(std::io::stderr) // stdout is used for LSP
-            .with_ansi(false) // most likely ends up in a log file so ANSI colors are annoying
-            .init();
-
         info!("Using stdio");
         let read = tokio::io::stdin();
         let write = tokio::io::stdout();

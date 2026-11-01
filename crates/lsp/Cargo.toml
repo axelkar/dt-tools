@@ -25,7 +25,6 @@ dt-tools-lint.workspace = true
 parking_lot.workspace = true
 itertools.workspace = true
 tracing.workspace = true
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
 rayon.workspace = true
 triomphe = "0.1.15"
 rustc-hash.workspace = true
@@ -34,14 +33,9 @@ salsa.workspace = true
 camino.workspace = true
 dt-tools-workspace.workspace = true
 profiling = "1.0.18"
-color-eyre = "0.6.5"
 
 [dev-dependencies]
 expect-test.workspace = true
-
-[features]
-default = []
-tracy = ["profiling/profile-with-tracy", "dt-tools-lowering/tracy"]
 
 [lints]
 workspace = true

@@ -20,12 +20,14 @@ function createClient(): LanguageClient {
 	const serverOptions: ServerOptions = {
 		run: {
 			command: path,
+			args: ['lsp'],
 			options: {
 				env: extraEnv
 			}
 		},
 		debug: {
 			command: path,
+			args: ['lsp'],
 			options: {
 				env: extraEnv
 			}

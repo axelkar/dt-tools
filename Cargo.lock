@@ -459,6 +459,7 @@ dependencies = [
  "dt-tools-diagnostic",
  "dt-tools-lint",
  "dt-tools-lowering",
+ "dt-tools-lsp",
  "dt-tools-parser",
  "dt-tools-workspace",
  "memory-stats",
@@ -559,7 +560,6 @@ name = "dt-tools-lsp"
 version = "0.1.0"
 dependencies = [
  "camino",
- "color-eyre",
  "dashmap 7.0.0-rc2",
  "dt-tools-analyzer",
  "dt-tools-diagnostic",
@@ -579,7 +579,6 @@ dependencies = [
  "tokio",
  "tower-lsp-server",
  "tracing",
- "tracing-subscriber",
  "triomphe",
 ]
 

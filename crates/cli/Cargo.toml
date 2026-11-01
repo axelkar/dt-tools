@@ -1,7 +1,7 @@
 [package]
 name = "dt-tools"
 edition = "2024"
-description = "Devicetree CLI"
+description = "Modern devicetree tools in Rust"
 keywords = ["devicetree"]
 categories = ["compilers", "development-tools", "command-line-utilities"]
 
@@ -16,6 +16,7 @@ license.workspace = true
 clap = { version = "4.5.4", features = ["derive", "cargo"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 dt-tools-lowering.workspace = true
+dt-tools-lsp.workspace = true
 parking_lot.workspace = true
 dt-tools-parser.workspace = true
 dt-tools-lint.workspace = true

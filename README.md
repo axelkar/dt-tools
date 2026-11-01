@@ -33,14 +33,14 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## LSP
 
-`dt-tools` implements a [language server](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide#why-language-server) in the [`dt-tools-lsp`](./crates/lsp) crate.
+`dt-tools` implements a [language server](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide#why-language-server) in the [`dt-tools-lsp`](./crates/lsp) crate. The server runs as `dt-tools lsp`.
 
 The VSCode extension's documentation can be found [here](vscode/README.md).
 
 The language server is also packaged for Neovim with the Lua script in [`./crates/lsp/lsp.lua`](./crates/lsp/lsp.lua).
 
 ```sh
-cargo build -p dt-tools-lsp
+cargo build -p dt-tools
 nvim --cmd 'luafile ./crates/lsp/lsp.lua' lint_showcase.dts
 ```
 

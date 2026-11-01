@@ -2,7 +2,7 @@ use std::{io::Write as _, mem::ManuallyDrop, sync::Mutex, time::Instant};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{
-    Parser, Subcommand,
+    Args, Parser, Subcommand, ValueEnum,
     builder::{
         Styles,
         styling::{AnsiColor, Style},
@@ -54,11 +54,15 @@ struct Cli {
     /// This can be overridden by the `RUST_LOG` environment variable
     #[arg(short, long)]
     verbose: bool,
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Args, Debug)]
+struct WorkspaceArgs {
     /// Initial directory for workspace search.
     #[arg(long, default_value = ".")]
     workspace_start_dir: Utf8PathBuf,
-    #[command(subcommand)]
-    command: Command,
     #[clap(flatten)]
     config: CliConfig,
 }
@@ -68,11 +72,21 @@ enum Command {
     /// Parse a DTS file and show lex/parse errors
     Parse { file: Utf8PathBuf },
     /// Lower a DTS file to MIR and show diagnostics
-    Mir { file: Utf8PathBuf },
+    Mir {
+        #[command(flatten)]
+        workspace: WorkspaceArgs,
+        file: Utf8PathBuf,
+    },
     /// Preprocess a DTS file and show the preprocessed text and diagnostics
-    Preprocess { file: Utf8PathBuf },
+    Preprocess {
+        #[command(flatten)]
+        workspace: WorkspaceArgs,
+        file: Utf8PathBuf,
+    },
     /// Check many DTS files for errors with a single Salsa database for reuse
     CheckMany {
+        #[command(flatten)]
+        workspace: WorkspaceArgs,
         /// One or more DTS files to check
         #[arg(required = true)]
         files: Vec<Utf8PathBuf>,
@@ -89,6 +103,60 @@ enum Command {
         #[arg(long)]
         only_summary: bool,
     },
+    /// Run the language server
+    Lsp {
+        /// Transport used to communicate with the LSP client
+        #[arg(value_enum, default_value = "stdio")]
+        mode: LspMode,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum LspMode {
+    /// JSON-RPC over stdin/stdout, plain logs on stderr
+    Stdio,
+    /// JSON-RPC over stdin/stdout, ANSI-colored logs on stderr
+    StdioAnsi,
+    /// TCP on 127.0.0.1:9257, accepting one connection
+    Tcp,
+}
+
+impl LspMode {
+    fn transport(self) -> dt_tools_lsp::Transport {
+        match self {
+            Self::Stdio | Self::StdioAnsi => dt_tools_lsp::Transport::Stdio,
+            Self::Tcp => dt_tools_lsp::Transport::Tcp,
+        }
+    }
+}
+
+fn init_tracing(cli: &Cli) -> Result<()> {
+    let mut filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy()
+        // Too noisy logging at info level
+        .add_directive("salsa::function::execute=warn".parse()?);
+
+    if cfg!(debug_assertions) || cli.verbose {
+        filter = filter
+            .add_directive("dt_tools_lsp=debug".parse()?)
+            .add_directive("dt_tools_lowering=debug".parse()?)
+            .add_directive("dt_tools_parser=debug".parse()?);
+    }
+
+    let builder = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr);
+
+    match &cli.command {
+        // LSP stdio logs usually end up in a file.
+        Command::Lsp {
+            mode: LspMode::Stdio,
+        } => builder.with_ansi(false).init(),
+        _ => builder.init(),
+    }
+
+    Ok(())
 }
 
 /// Makes a path absolute without resolving symlinks.
@@ -109,24 +177,42 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let mut tracing_env_filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy()
-        // Too noisy logging at info level
-        .add_directive("salsa::function::execute=warn".parse()?);
+    init_tracing(&cli)?;
 
-    if cfg!(debug_assertions) || cli.verbose {
-        tracing_env_filter = tracing_env_filter
-            .add_directive("dt_tools_lsp=debug".parse()?)
-            .add_directive("dt_tools_lowering=debug".parse()?)
-            .add_directive("dt_tools_parser=debug".parse()?);
+    match cli.command {
+        Command::Parse { file } => cmd_parse(&file)?,
+        Command::Mir { workspace, file } => {
+            let workspace = load_workspace(workspace)?;
+            cmd_mir(&file, &workspace)?;
+        }
+        Command::Preprocess { workspace, file } => {
+            let workspace = load_workspace(workspace)?;
+            cmd_preprocess(&file, &workspace)?;
+        }
+        Command::CheckMany {
+            workspace,
+            files,
+            do_print_diagnostics,
+            only_fail,
+            only_summary,
+        } => {
+            let workspace = load_workspace(workspace)?;
+            cmd_check_many(
+                &files,
+                do_print_diagnostics,
+                only_fail,
+                only_summary,
+                &workspace,
+            )?;
+        }
+        Command::Lsp { mode } => cmd_lsp(mode)?,
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_env_filter)
-        .init();
+    Ok(())
+}
 
-    let start = to_absolute(&cli.workspace_start_dir)?;
+fn load_workspace(args: WorkspaceArgs) -> Result<Workspace> {
+    let start = to_absolute(&args.workspace_start_dir)?;
 
     let res = dt_tools_workspace::Workspace::find_workspace_dir(&start);
     let workspace_dir = res.workspace_dir();
@@ -142,7 +228,7 @@ fn main() -> Result<()> {
     };
 
     let mut config = CombinedConfig::merge_cli(
-        Some(cli.config),
+        Some(args.config),
         Some(EnvConfig::from_env()?),
         toml_config.transpose()?,
     );
@@ -153,29 +239,14 @@ fn main() -> Result<()> {
         .map(|dir| to_absolute(dir))
         .collect::<Result<Vec<_>>>()?;
 
-    let workspace = Workspace {
+    Ok(Workspace {
         config,
         path: workspace_dir.to_path_buf(),
-    };
+    })
+}
 
-    match cli.command {
-        Command::Parse { file } => cmd_parse(&file)?,
-        Command::Mir { file } => cmd_mir(&file, &workspace)?,
-        Command::Preprocess { file } => cmd_preprocess(&file, &workspace)?,
-        Command::CheckMany {
-            files,
-            do_print_diagnostics,
-            only_fail,
-            only_summary,
-        } => cmd_check_many(
-            &files,
-            do_print_diagnostics,
-            only_fail,
-            only_summary,
-            &workspace,
-        )?,
-    }
-
+fn cmd_lsp(mode: LspMode) -> Result<()> {
+    dt_tools_lsp::run(mode.transport()).wrap_err("LSP server failed")?;
     Ok(())
 }
 
@@ -355,4 +426,55 @@ fn cmd_check_many(
         std::process::exit(1);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tests that `lsp` defaults to stdio, accepts the defined modes and rejects unknown ones.
+    #[test]
+    fn lsp_modes() {
+        let parse = |args: &[&str]| {
+            let mut argv = vec!["dt-tools", "lsp"];
+            argv.extend_from_slice(args);
+            match Cli::try_parse_from(argv).unwrap().command {
+                Command::Lsp { mode } => mode,
+                _ => panic!("expected the lsp subcommand"),
+            }
+        };
+
+        assert_eq!(parse(&[]), LspMode::Stdio);
+        assert_eq!(parse(&["stdio"]), LspMode::Stdio);
+        assert_eq!(parse(&["stdio-ansi"]), LspMode::StdioAnsi);
+        assert_eq!(parse(&["tcp"]), LspMode::Tcp);
+        assert!(Cli::try_parse_from(["dt-tools", "lsp", "udp"]).is_err());
+    }
+
+    /// Tests that workspace options are accepted by workspace commands and
+    /// rejected by `lsp`.
+    #[test]
+    fn workspace_options_are_scoped() {
+        assert!(
+            Cli::try_parse_from(["dt-tools", "lsp", "-I", "include"]).is_err(),
+            "-I must not be accepted by lsp"
+        );
+        assert!(
+            Cli::try_parse_from(["dt-tools", "lsp", "--workspace-start-dir", "."]).is_err(),
+            "--workspace-start-dir must not be accepted by lsp"
+        );
+        assert!(
+            Cli::try_parse_from([
+                "dt-tools",
+                "mir",
+                "-I",
+                "include",
+                "--workspace-start-dir",
+                ".",
+                "file.dts",
+            ])
+            .is_ok(),
+            "workspace options must be accepted by mir"
+        );
+    }
 }

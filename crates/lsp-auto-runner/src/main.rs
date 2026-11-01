@@ -7,7 +7,7 @@ use std::{
 
 use owo_colors::{OwoColorize, colors::xterm::Gray};
 
-const PACKAGE: &str = "dt-tools-lsp";
+const PACKAGE: &str = "dt-tools";
 
 fn main() -> std::io::Result<()> {
     let bind_addr = SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 9257);
@@ -65,7 +65,7 @@ fn run_child(
     let executable = str::from_utf8(&jq_output.stdout).expect("Invalid UTF-8 sequence");
 
     println!(
-        "    {} {executable:?} \"stdio-ansi\" {program_args:?}",
+        "    {} {executable:?} \"lsp\" \"stdio-ansi\" {program_args:?}",
         " Running".green().bold()
     );
 
@@ -73,6 +73,7 @@ fn run_child(
     let stdout_fd: OwnedFd = stream.into();
 
     let mut child = Command::new(executable)
+        .arg("lsp")
         .arg("stdio-ansi")
         .args(program_args)
         .stdin(Stdio::from(stdin_fd))
