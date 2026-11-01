@@ -45,7 +45,7 @@ const HELP_TEMPLATE: &str = "\
 {all-args}{after-help}\
     ";
 
-/// dt-tools-cli is a fast Devicetree parser, linter and compiler all in one.
+/// dt-tools is a fast Devicetree parser, linter and compiler all in one.
 #[derive(Parser, Debug)]
 #[command(version, author, about, long_about = None, styles = styles(), help_template = HELP_TEMPLATE)]
 struct Cli {

@@ -9,20 +9,20 @@ set -euo pipefail
 linux="${LINUX:?set LINUX to the Linux kernel tree}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 preprocess="$repo/target/release/examples/preprocess"
-cli="$repo/target/release/dt-tools-cli"
+cli="$repo/target/release/dt-tools"
 pipeline="$repo/scripts/benchmark-pipeline.sh"
 dts_root="$linux/arch/arm64/boot/dts"
 board="$dts_root/qcom/sm7225-fairphone-fp4.dts"
 corpus="$dts_root/qcom"
 
-cargo build --release --manifest-path "$repo/Cargo.toml" -p dt-tools-cli
+cargo build --release --manifest-path "$repo/Cargo.toml" -p dt-tools
 cargo build --release --manifest-path "$repo/Cargo.toml" \
   -p dt-tools-preprocessor --example preprocess
 
 echo "== corpus is $corpus"
 
 # for $pipeline
-export LINUX PREPROCESS="$preprocess" DT_TOOLS_CLI="$cli"
+export LINUX PREPROCESS="$preprocess" DT_TOOLS="$cli"
 
 # Quotes arguments for hyperfine's shell-word parser.
 quote() {
@@ -43,7 +43,7 @@ hyperfine=(hyperfine --warmup 3 --shell=none --export-markdown -)
 echo "== single file preprocessing: ${board#"$linux/"}"
 "${hyperfine[@]}" \
   -n dt-tools-preprocessor "$our_cmd $(quote "$board")" \
-  -n dt-tools-cli-preprocess "$preprocess_cmd $(quote "$board")" \
+  -n dt-tools-preprocess "$preprocess_cmd $(quote "$board")" \
   -n gcc "$gcc_cmd $(quote "$board")" \
   -n clang "$clang_cmd $(quote "$board")"
 
@@ -59,7 +59,7 @@ echo "== corpus: preprocessing"
 fd_cmd="fd -e dts . $(quote "$corpus") -x"
 "${hyperfine[@]}" \
   -n dt-tools-preprocessor "$fd_cmd $our_cmd" \
-  -n dt-tools-cli-preprocess "$fd_cmd $preprocess_cmd" \
+  -n dt-tools-preprocess "$fd_cmd $preprocess_cmd" \
   -n gcc "$fd_cmd $gcc_cmd" \
   -n clang "$fd_cmd $clang_cmd"
 

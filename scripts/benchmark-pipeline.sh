@@ -5,7 +5,7 @@ set -euo pipefail
 
 linux="${LINUX:?set LINUX to the Linux kernel tree}"
 preprocess="${PREPROCESS:?set PREPROCESS to the preprocessor example}"
-cli="${DT_TOOLS_CLI:?set DT_TOOLS_CLI to dt-tools-cli}"
+cli="${DT_TOOLS:?set DT_TOOLS to dt-tools}"
 
 mode="$1"
 file="$2"

@@ -1,5 +1,5 @@
 [package]
-name = "dt-tools-cli"
+name = "dt-tools"
 edition = "2024"
 description = "Devicetree CLI"
 keywords = ["devicetree"]
