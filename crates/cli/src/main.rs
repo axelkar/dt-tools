@@ -8,7 +8,7 @@ use clap::{
         styling::{AnsiColor, Style},
     },
 };
-use color_eyre::eyre::{OptionExt, Result, WrapErr};
+use color_eyre::eyre::{OptionExt, Result, WrapErr, eyre};
 use dt_tools_lowering::{
     codespan_reporting::print_diagnostics,
     compute_diagnostics,
@@ -54,9 +54,9 @@ struct Cli {
     /// This can be overridden by the `RUST_LOG` environment variable
     #[arg(short, long)]
     verbose: bool,
-    /// Initial directory for workspace search instead of the current working directory.
-    #[arg(long)]
-    workspace_start_dir: Option<Utf8PathBuf>,
+    /// Initial directory for workspace search.
+    #[arg(long, default_value = ".")]
+    workspace_start_dir: Utf8PathBuf,
     #[command(subcommand)]
     command: Command,
     #[clap(flatten)]
@@ -91,6 +91,14 @@ enum Command {
     },
 }
 
+/// Makes a path absolute without resolving symlinks.
+///
+/// `File` keys and the workspace ancestor search require absolute paths. Symlink resolution is
+/// left out to match GCC and Clang, which keep include paths as spelled, as does the preprocessor.
+fn to_absolute(path: &Utf8Path) -> Result<Utf8PathBuf> {
+    camino::absolute_utf8(path).wrap_err_with(|| format!("Cannot make {path} absolute"))
+}
+
 fn main() -> Result<()> {
     color_eyre::install()?;
 
@@ -118,11 +126,7 @@ fn main() -> Result<()> {
         .with_env_filter(tracing_env_filter)
         .init();
 
-    let start = if let Some(start) = cli.workspace_start_dir {
-        start
-    } else {
-        Utf8Path::new(".").canonicalize_utf8()?
-    };
+    let start = to_absolute(&cli.workspace_start_dir)?;
 
     let res = dt_tools_workspace::Workspace::find_workspace_dir(&start);
     let workspace_dir = res.workspace_dir();
@@ -137,12 +141,20 @@ fn main() -> Result<()> {
         WorkspacePathFindResult::Fallback { .. } => None,
     };
 
+    let mut config = CombinedConfig::merge_cli(
+        Some(cli.config),
+        Some(EnvConfig::from_env()?),
+        toml_config.transpose()?,
+    );
+    // Include candidates must be absolute, so resolve relative entries against the cwd.
+    config.include_dirs = config
+        .include_dirs
+        .iter()
+        .map(|dir| to_absolute(dir))
+        .collect::<Result<Vec<_>>>()?;
+
     let workspace = Workspace {
-        config: CombinedConfig::merge_cli(
-            Some(cli.config),
-            Some(EnvConfig::from_env()?),
-            toml_config.transpose()?,
-        ),
+        config,
         path: workspace_dir.to_path_buf(),
     };
 
@@ -167,14 +179,13 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn cmd_parse(file: &Utf8Path) -> Result<()> {
-    let abs_path = file
-        .canonicalize_utf8()
-        .wrap_err_with(|| format!("File {file} doesn't exist"))?;
+fn cmd_parse(path: &Utf8Path) -> Result<()> {
+    let abs_path = to_absolute(path)?;
     let db = BaseDatabase::default();
     let file = db.get_files().get_file(&db, &abs_path);
 
-    let parse = parse_file(&db, file).ok_or_eyre("File does not exist or is not readable")?;
+    let parse = parse_file(&db, file)
+        .ok_or_else(|| eyre!("File {path} does not exist or is not readable"))?;
     let parse = parse.parse(&db);
 
     println!("{}", "  Parsed".green().bold());
@@ -198,19 +209,17 @@ fn init_preprocess_settings(db: &BaseDatabase, workspace: &Workspace) {
     );
 }
 
-fn cmd_preprocess(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
-    let abs_path = file
-        .canonicalize_utf8()
-        .wrap_err_with(|| format!("File {file} doesn't exist"))?;
+fn cmd_preprocess(path: &Utf8Path, workspace: &Workspace) -> Result<()> {
+    let abs_path = to_absolute(path)?;
     let db = BaseDatabase::default();
 
     init_preprocess_settings(&db, workspace);
 
     let root_file = db.get_files().get_file(&db, &abs_path);
-    let preprocessed =
-        preprocess_root(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
+    let preprocessed = preprocess_root(&db, root_file)
+        .ok_or_else(|| eyre!("File {path} does not exist or is not readable"))?;
 
-    eprintln!("{} {}", "Preprocessed".green().bold(), file);
+    eprintln!("{} {}", "Preprocessed".green().bold(), path);
     print!("{}", preprocessed.text(&db));
     std::io::stdout().flush()?;
 
@@ -224,17 +233,15 @@ fn cmd_preprocess(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
     Ok(())
 }
 
-fn cmd_mir(file: &Utf8Path, workspace: &Workspace) -> Result<()> {
-    let abs_path = file
-        .canonicalize_utf8()
-        .wrap_err_with(|| format!("File {file} doesn't exist"))?;
+fn cmd_mir(path: &Utf8Path, workspace: &Workspace) -> Result<()> {
+    let abs_path = to_absolute(path)?;
     let db = BaseDatabase::default();
 
     init_preprocess_settings(&db, workspace);
 
     let root_file = db.get_files().get_file(&db, &abs_path);
-    let result =
-        lower_root_file(&db, root_file).ok_or_eyre("File does not exist or is not readable")?;
+    let result = lower_root_file(&db, root_file)
+        .ok_or_else(|| eyre!("File {path} does not exist or is not readable"))?;
 
     let (diagnostics, _processed_files) = compute_diagnostics(&db, root_file);
 
@@ -284,9 +291,7 @@ fn cmd_check_many(
         .map_with(db, |db, file| {
             let db = &**db;
 
-            let abs_path = file
-                .canonicalize_utf8()
-                .wrap_err_with(|| format!("File {file} doesn't exist"))?;
+            let abs_path = to_absolute(file)?;
             let root_file = db.get_files().get_file(db, &abs_path);
 
             let (diagnostics, _processed_files) = compute_diagnostics(db, root_file);
