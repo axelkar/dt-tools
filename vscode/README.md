@@ -1,11 +1,11 @@
-# dt-tools LSP
+# dt-tools
 
-A VSCode extension providing a Language Server Protocol client for
-[dt-tools](https://github.com/axelkar/dt-tools)'s LSP server.
+A VS Code extension providing Devicetree support powered by
+[dt-tools](https://github.com/axelkar/dt-tools).
 
 ## Installation
 
-Look for the latest file named `dt-tools-lsp-no-server.vsix` in the
+Look for the latest file named `dt-tools-no-server.vsix` in the
 [GitHub releases](https://github.com/axelkar/dt-tools/releases) and install it
 with the `Extensions: Install from VSIX` command within VS Code.
 
@@ -29,13 +29,13 @@ with the `Extensions: Install from VSIX` command within VS Code.
 1. Make sure you have [vsce](https://github.com/microsoft/vscode-vsce) installed.
 2. Package the extension, while ignoring the warning about a missing license:
    ```console
-   $ vsce package -o dt-tools-lsp-no-server.vsix
+   $ vsce package -o dt-tools-no-server.vsix
    ```
 
 ## Features
 
-* User command: `dt-tools LSP: Restart dt-tools LSP server`
-* Setting: `Dt-tools-lsp › Server: Path`
+* User command: `dt-tools: Restart language server`
+* Setting: `Dt-tools › Path`
 
 ## Requirements
 
@@ -46,7 +46,7 @@ get the development version:
    ```console
    ~/dev/dt-tools $ cargo build -p dt-tools
    ```
-2. Make the extension find it by configuring the `Dt-tools-lsp › Server: Path`
+2. Make the extension find it by configuring the `Dt-tools › Path`
    setting to the path of the executable, which may be for example
    `/home/axel/dev/dt-tools/target/debug/dt-tools`
 

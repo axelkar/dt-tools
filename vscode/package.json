@@ -1,8 +1,8 @@
 {
-  "name": "dt-tools-lsp-vscode",
+  "name": "dt-tools-vscode",
   "version": "0.0.1",
-  "displayName": "dt-tools LSP",
-  "description": "A VSCode language server client for dt-tools's language server",
+  "displayName": "dt-tools",
+  "description": "VS Code support for Devicetree files, powered by dt-tools",
   "categories": ["Programming Languages"],
   "keywords": ["dts", "devicetree", "language-server"],
   "license": "(MIT OR Apache-2.0)",
@@ -36,20 +36,20 @@
     ],
     "commands": [
       {
-        "command": "dt-tools-lsp.restart",
-        "title": "dt-tools LSP: Restart dt-tools LSP server"
+        "command": "dt-tools.restart",
+        "title": "dt-tools: Restart language server"
       }
     ],
     "configuration": {
-      "title": "dt-tools LSP",
+      "title": "dt-tools",
       "properties": {
-        "dt-tools-lsp.server.path": {
+        "dt-tools.path": {
           "type": "string",
           "scope": "machine-overridable",
           "default": "dt-tools",
           "description": "Path to the dt-tools executable."
         },
-        "dt-tools-lsp.server.extraEnv": {
+        "dt-tools.extraEnv": {
           "type": [
             "null",
             "object"
@@ -63,7 +63,7 @@
           "default": null,
           "markdownDescription": "Extra environment variables that will be passed to the dt-tools executable. Useful for passing e.g. `RUST_BACKTRACE=1` for debugging."
         },
-        "dt-tools-lsp.trace.server": {
+        "dt-tools.trace.server": {
           "scope": "window",
           "type": "string",
           "enum": [
