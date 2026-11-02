@@ -54,6 +54,11 @@
 
             src = ./.;
 
+            nativeBuildInputs = [ pkgs.dtc ];
+
+            # don't build lsp-auto-runner development tool
+            cargoBuildFlags = [ "--package" "dt-tools" ];
+
             cargoLock.lockFile = ./Cargo.lock;
 
             env.DT_TOOLS_LINUX_BINDINGS = linuxBindings pkgs;
