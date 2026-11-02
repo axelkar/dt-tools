@@ -15,7 +15,14 @@ license.workspace = true
 [dependencies]
 dashmap.workspace = true
 ropey = "1.6.1"
-tokio = { version = "1.36.0", features = ["fs", "rt-multi-thread", "macros", "io-std", "net", "io-util"] }
+tokio = { version = "1.36.0", features = [
+  "fs",
+  "rt-multi-thread",
+  "macros",
+  "io-std",
+  "net",
+  "io-util",
+] }
 tower-lsp-server.workspace = true
 fluent-uri.workspace = true
 dt-tools-lowering.workspace = true

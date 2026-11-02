@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.1.0"
 authors = ["Axel Karjalainen <axel@axka.fi>"]
 # Note: Linux has the version of Debian stable's rustc (https://packages.debian.org/stable/rust/rustc) as its MSRV
-rust-version = "1.91" # Same as Nixpkgs 25.11, a sane default
+rust-version = "1.91"                              # Same as Nixpkgs 25.11, a sane default
 readme = "README.md"
 repository = "https://github.com/axelkar/dt-tools"
 license = "MIT OR Apache-2.0"
@@ -40,7 +40,7 @@ either = "1.15"
 serde = "1"
 fs-err = "3.1.0"
 salsa = "0.28.5"
-camino = "1.2.1" # UTF-8 paths
+camino = "1.2.1"                                      # UTF-8 paths
 tower-lsp-server = "0.23.0"
 fluent-uri = "0.4.1"
 codespan-reporting = "0.13.1"
