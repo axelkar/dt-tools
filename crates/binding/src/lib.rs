@@ -190,9 +190,10 @@ mod tests {
     #[test]
     fn test_example() {
         // https://github.com/mrcjkb/rustaceanvim/discussions/231
-        let schema =
-            BindingSchema::compile(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("example.yaml"))
-                .unwrap();
+        let schema = BindingSchema::compile(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/example.yaml"),
+        )
+        .unwrap();
         compile_example(schema.raw_schema["examples"][0].as_str().unwrap(), &schema);
     }
 

@@ -61,17 +61,26 @@
           };
         };
 
+        # Tests read test_data files that cleanCargoSource drops.
+        testSrc = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter = path: type:
+            craneLib.filterCargoSources path type
+            || (builtins.match ".*/test_data/.*" path != null);
+        };
+
         packageArgs = commonArgs // {
           # don't build lsp-auto-runner development tool
           cargoExtraArgs = "--package dt-tools";
         };
 
+        packageArtifacts = craneLib.buildDepsOnly packageArgs;
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
         dt-tools = craneLib.buildPackage (
           packageArgs
           // {
-            inherit cargoArtifacts;
+            cargoArtifacts = packageArtifacts;
 
             doCheck = false;
             meta = {
@@ -96,10 +105,8 @@
           tests = craneLib.cargoTest (
             commonArgs
             // {
-              # `cleanCargoSource` would drop test data such as crates/parser/test_data
-              src = ./.;
-
-              cargoArtifacts = cargoArtifacts;
+              src = testSrc;
+              inherit cargoArtifacts;
               nativeBuildInputs = [ pkgs.dtc ];
             }
           );
@@ -108,9 +115,6 @@
           clippy = craneLib.cargoClippy (
             commonArgs
             // {
-              # `--all-targets` compiles the tests, so include their test data
-              src = ./.;
-
               inherit cargoArtifacts;
               cargoClippyExtraArgs = "--all-targets -- --deny warnings";
             }
