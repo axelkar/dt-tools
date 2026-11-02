@@ -1,0 +1,16 @@
+# cargo-deny configuration
+
+[licenses]
+# Permissive licenses compatible with the project's MIT OR Apache-2.0.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSL-1.0",
+  "MIT",
+  "MIT-0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.9
