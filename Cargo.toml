@@ -22,9 +22,7 @@ dt-tools-preprocessor.path = "./crates/preprocessor"
 dt-tools-workspace.path = "./crates/workspace"
 
 tracing = "0.1.40"
-#dashmap = "7.0.0-rc2" # experimental version for entry_ref support
-# https://github.com/xacrimon/dashmap/pull/367
-dashmap = { git = "https://github.com/axelkar/dashmap" }
+dashmap = "7.0.0-rc2"
 rustc-hash = "2.0.0"
 itertools = "0.15.0"
 tracing-subscriber = "0.3.18"

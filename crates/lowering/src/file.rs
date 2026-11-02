@@ -63,12 +63,17 @@ impl Files {
     /// # Panics
     ///
     /// The path must be absolute.
-    // DashMap::entry requires the path to be owned...
+    // dashmap 7.0.0-rc2's `entry_ref` requires a sized key, so check by
+    // reference first and insert with an owned key on miss.
     #[must_use]
     pub fn get_file(&self, db: &dyn BaseDb, path: &Utf8Path) -> File {
         assert!(path.is_absolute());
 
-        *self.by_path.entry_ref(path).or_insert_with(|| {
+        if let Some(file) = self.by_path.get(path) {
+            return *file;
+        }
+
+        *self.by_path.entry(path.to_owned()).or_insert_with(|| {
             tracing::trace!("Adding file '{path}'");
 
             let contents = std::fs::read_to_string(path).ok();
