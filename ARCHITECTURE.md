@@ -38,9 +38,8 @@ It largely takes inspiration from rust-analyzer, C#'s Roslyn and
 because I want to keep node and token kinds separate and avoid unsafe code, but
 see <https://github.com/axelkar/dt-tools/issues/9>
 
-I recommend trying the commands below and reading through the
-[`test_data` folder](crates/parser/test_data) to get an idea of how source
-code is parsed.
+I recommend trying the commands below and reading through the test cases to get
+an idea of how source code is parsed.
 
 
 ```dts

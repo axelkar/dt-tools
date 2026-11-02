@@ -694,7 +694,7 @@ fn lex_char(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexError> {
 
 #[cfg(test)]
 mod tests {
-    use expect_test::{Expect, ExpectFile, expect, expect_file};
+    use expect_test::{Expect, expect};
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -733,45 +733,397 @@ mod tests {
         expect.assert_eq(&output);
     }
 
-    #[track_caller]
-    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
-    fn check_file(src: &str, expect: ExpectFile) {
-        use std::fmt::Write as _;
-
-        let mut output = String::new();
-
-        let mut lexer = TokenKind::lexer(src);
-        while let Some(token) = lexer.next() {
-            let slice = lexer.slice();
-            match token {
-                Ok(token) => writeln!(&mut output, "{token:?} {slice:?}").unwrap(),
-                Err(err) => writeln!(&mut output, "ERROR: {err:?} {slice:?}").unwrap(),
-            }
-        }
-        expect.assert_eq(&output);
-    }
-
     #[test]
-    fn lex_from_test_data_1() {
-        check_file(
-            include_str!("../test_data/1.dts"),
-            expect_file!["../test_data/1.lex.expected"],
+    #[expect(clippy::too_many_lines, reason = "inline fixture and snapshot")]
+    fn lex_1() {
+        check(
+            r#"/dts-v1/;
+
+/ {
+  model = "Qualcomm Technologies, Inc. Lagoon MTP Ebba";
+	compatible = "qcom,lagoon-mtp", "qcom,lagoon", "qcom,mtp";
+	qcom,msm-id = <434 0x10000>, <459 0x10000>;
+	interrupt-parent = <0x01>;
+	#address-cells = <0x02>;
+	#size-cells = <0x02>;
+	qcom,board-id = <8 0>;
+	oplus,dtsi_no = <20813>;
+
+	memory {
+		ddr_device_type = <0x07>;
+		device_type = "memory";
+		reg = <0x00 0x80000000 0x00 0x3bb00000 0x01 0x80000000 0x01 0x00 0x00 0xc0000000 0x00 0xc0000000>;
+	};
+
+  a: foo {
+    setting = <2>;
+  };
+
+  bar {
+    ref-to-foo = <&a>;
+    empty;
+  };
+
+  //foo
+  /* bar */
+};
+"#,
+            expect![[r##"
+                V1Directive "/dts-v1/"
+                Semicolon ";"
+                Whitespace "\n\n"
+                Slash "/"
+                Whitespace " "
+                LCurly "{"
+                Whitespace "\n  "
+                Ident "model"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                String "\"Qualcomm Technologies, Inc. Lagoon MTP Ebba\""
+                Semicolon ";"
+                Whitespace "\n\t"
+                Ident "compatible"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                String "\"qcom,lagoon-mtp\""
+                Comma ","
+                Whitespace " "
+                String "\"qcom,lagoon\""
+                Comma ","
+                Whitespace " "
+                String "\"qcom,mtp\""
+                Semicolon ";"
+                Whitespace "\n\t"
+                Ident "qcom"
+                Comma ","
+                Ident "msm"
+                Minus "-"
+                Ident "id"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Number "434"
+                Whitespace " "
+                Number "0x10000"
+                RAngle ">"
+                Comma ","
+                Whitespace " "
+                LAngle "<"
+                Number "459"
+                Whitespace " "
+                Number "0x10000"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n\t"
+                Ident "interrupt"
+                Minus "-"
+                Ident "parent"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Number "0x01"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n\t"
+                Ident "#address"
+                Minus "-"
+                Ident "cells"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Number "0x02"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n\t"
+                Ident "#size"
+                Minus "-"
+                Ident "cells"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Number "0x02"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n\t"
+                Ident "qcom"
+                Comma ","
+                Ident "board"
+                Minus "-"
+                Ident "id"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Number "8"
+                Whitespace " "
+                Number "0"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n\t"
+                Ident "oplus"
+                Comma ","
+                Ident "dtsi_no"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Number "20813"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n\n\t"
+                Ident "memory"
+                Whitespace " "
+                LCurly "{"
+                Whitespace "\n\t\t"
+                Ident "ddr_device_type"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Number "0x07"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n\t\t"
+                Ident "device_type"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                String "\"memory\""
+                Semicolon ";"
+                Whitespace "\n\t\t"
+                Ident "reg"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Number "0x00"
+                Whitespace " "
+                Number "0x80000000"
+                Whitespace " "
+                Number "0x00"
+                Whitespace " "
+                Number "0x3bb00000"
+                Whitespace " "
+                Number "0x01"
+                Whitespace " "
+                Number "0x80000000"
+                Whitespace " "
+                Number "0x01"
+                Whitespace " "
+                Number "0x00"
+                Whitespace " "
+                Number "0x00"
+                Whitespace " "
+                Number "0xc0000000"
+                Whitespace " "
+                Number "0x00"
+                Whitespace " "
+                Number "0xc0000000"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n\t"
+                RCurly "}"
+                Semicolon ";"
+                Whitespace "\n\n  "
+                Ident "a"
+                Colon ":"
+                Whitespace " "
+                Ident "foo"
+                Whitespace " "
+                LCurly "{"
+                Whitespace "\n    "
+                Ident "setting"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Number "2"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n  "
+                RCurly "}"
+                Semicolon ";"
+                Whitespace "\n\n  "
+                Ident "bar"
+                Whitespace " "
+                LCurly "{"
+                Whitespace "\n    "
+                Ident "ref"
+                Minus "-"
+                Ident "to"
+                Minus "-"
+                Ident "foo"
+                Whitespace " "
+                Equals "="
+                Whitespace " "
+                LAngle "<"
+                Ampersand "&"
+                Ident "a"
+                RAngle ">"
+                Semicolon ";"
+                Whitespace "\n    "
+                Ident "empty"
+                Semicolon ";"
+                Whitespace "\n  "
+                RCurly "}"
+                Semicolon ";"
+                Whitespace "\n\n  "
+                LineComment "//foo"
+                Whitespace "\n  "
+                BlockComment "/* bar */"
+                Whitespace "\n"
+                RCurly "}"
+                Semicolon ";"
+                Whitespace "\n"
+            "##]],
         );
     }
 
     #[test]
-    fn lex_from_test_data_2_macros() {
-        check_file(
-            include_str!("../test_data/2-macro-def.dts"),
-            expect_file!["../test_data/2-macro-def.lex.expected"],
+    fn lex_2_macros() {
+        check(
+            r#"/dts-v1/;
+
+// Try line comment
+#define SQUARE(x) ((x) * (x)) // This macro squares a number
+
+// Try block comment
+#define MULTIPLY(a, b) /* Multiplies two numbers */ \
+                       ((a) * (b))
+
+// Real macro from the Linux kernel, try multiline block comment
+#define KEY_SWITCHVIDEOMODE	227	/* Cycle between available video
+					   outputs (Monitor/LCD/TV-out/etc) */
+
+// This is invalid in GCC
+#define FOO "a
+b"
+// Try multiline strings
+#define FOO "a\
+b"
+#define FOO "a\\
+b"
+#define FOO "a\"b"
+#define FOO "a\\"b"
+// Try starting comments in literals
+#define FOO "/*"
+#define FOO "//"
+#define FOO '/*'
+#define FOO '//'
+"#,
+            expect![[r##"
+                V1Directive "/dts-v1/"
+                Semicolon ";"
+                Whitespace "\n\n"
+                LineComment "// Try line comment"
+                Whitespace "\n"
+                DefineDirective "#define SQUARE(x) ((x) * (x)) // This macro squares a number"
+                Whitespace "\n\n"
+                LineComment "// Try block comment"
+                Whitespace "\n"
+                DefineDirective "#define MULTIPLY(a, b) /* Multiplies two numbers */ \\\n                       ((a) * (b))\n"
+                Whitespace "\n"
+                LineComment "// Real macro from the Linux kernel, try multiline block comment"
+                Whitespace "\n"
+                DefineDirective "#define KEY_SWITCHVIDEOMODE\t227\t/* Cycle between available video\n\t\t\t\t\t   outputs (Monitor/LCD/TV-out/etc) */"
+                Whitespace "\n\n"
+                LineComment "// This is invalid in GCC"
+                Whitespace "\n"
+                DefineDirective "#define FOO \"a\nb\""
+                Whitespace "\n"
+                LineComment "// Try multiline strings"
+                Whitespace "\n"
+                DefineDirective "#define FOO \"a\\\nb\""
+                Whitespace "\n"
+                DefineDirective "#define FOO \"a\\\\\nb\""
+                Whitespace "\n"
+                DefineDirective "#define FOO \"a\\\"b\""
+                Whitespace "\n"
+                DefineDirective "#define FOO \"a\\\\\"b\""
+                Whitespace "\n"
+                LineComment "// Try starting comments in literals"
+                Whitespace "\n"
+                DefineDirective "#define FOO \"/*\""
+                Whitespace "\n"
+                DefineDirective "#define FOO \"//\""
+                Whitespace "\n"
+                DefineDirective "#define FOO '/*'"
+                Whitespace "\n"
+                DefineDirective "#define FOO '//'"
+                Whitespace "\n"
+            "##]],
         );
     }
 
     #[test]
-    fn lex_from_test_data_3_preproc() {
-        check_file(
-            include_str!("../test_data/3-preproc-dir.dts"),
-            expect_file!["../test_data/3-preproc-dir.lex.expected"],
+    fn lex_3_preproc() {
+        check(
+            r#"/dts-v1/;
+
+// Try line comment
+#if 1 // This macro squares a number
+/ {};
+#elif FOO
+#else BAR
+&do_something {};
+#endif
+
+// Try block comment
+#if /* Multiplies
+two numbers */ \
+  ((a) * (b))
+/ {};
+#endif
+
+#include \
+  "filename"
+"#,
+            expect![[r##"
+                V1Directive "/dts-v1/"
+                Semicolon ";"
+                Whitespace "\n\n"
+                LineComment "// Try line comment"
+                Whitespace "\n"
+                IfDirective "#if 1 // This macro squares a number"
+                Whitespace "\n"
+                Slash "/"
+                Whitespace " "
+                LCurly "{"
+                RCurly "}"
+                Semicolon ";"
+                Whitespace "\n"
+                ElifDirective "#elif FOO"
+                Whitespace "\n"
+                ElseDirective "#else BAR"
+                Whitespace "\n"
+                Ampersand "&"
+                Ident "do_something"
+                Whitespace " "
+                LCurly "{"
+                RCurly "}"
+                Semicolon ";"
+                Whitespace "\n"
+                EndifDirective "#endif"
+                Whitespace "\n\n"
+                LineComment "// Try block comment"
+                Whitespace "\n"
+                IfDirective "#if /* Multiplies\ntwo numbers */ \\\n  ((a) * (b))\n"
+                Slash "/"
+                Whitespace " "
+                LCurly "{"
+                RCurly "}"
+                Semicolon ";"
+                Whitespace "\n"
+                EndifDirective "#endif"
+                Whitespace "\n\n"
+                IncludeDirective "#include \\\n  \"filename\"\n"
+            "##]],
         );
     }
 

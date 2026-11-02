@@ -616,23 +616,9 @@ pub(super) fn entry_name(p: &mut Parser) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use expect_test::{Expect, ExpectFile, expect, expect_file};
+    use expect_test::{Expect, expect};
 
     use crate::parser::{Entrypoint, parse};
-
-    #[track_caller]
-    #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
-    fn check_file(src: &str, expect: ExpectFile) {
-        let parse_output = parse(src);
-        expect.assert_eq(&format!(
-            "Errors: {:#?}
-
-Tree:
-{}",
-            parse_output.errors,
-            parse_output.green_node.print_tree()
-        ));
-    }
 
     #[track_caller]
     #[expect(clippy::needless_pass_by_value, reason = "ergonomics")]
@@ -663,26 +649,445 @@ Tree:
     }
 
     #[test]
-    fn parse_from_test_data_1() {
-        check_file(
-            include_str!("../test_data/1.dts"),
-            expect_file!["../test_data/1.dts.expect"],
+    #[expect(clippy::too_many_lines, reason = "inline fixture and snapshot")]
+    fn parse_1() {
+        check(
+            r#"/dts-v1/;
+
+/ {
+  model = "Qualcomm Technologies, Inc. Lagoon MTP Ebba";
+	compatible = "qcom,lagoon-mtp", "qcom,lagoon", "qcom,mtp";
+	qcom,msm-id = <434 0x10000>, <459 0x10000>;
+	interrupt-parent = <0x01>;
+	#address-cells = <0x02>;
+	#size-cells = <0x02>;
+	qcom,board-id = <8 0>;
+	oplus,dtsi_no = <20813>;
+
+	memory {
+		ddr_device_type = <0x07>;
+		device_type = "memory";
+		reg = <0x00 0x80000000 0x00 0x3bb00000 0x01 0x80000000 0x01 0x00 0x00 0xc0000000 0x00 0xc0000000>;
+	};
+
+  a: foo {
+    setting = <2>;
+  };
+
+  bar {
+    ref-to-foo = <&a>;
+    empty;
+  };
+
+  //foo
+  /* bar */
+};
+"#,
+            expect![[r##"
+                Errors: []
+
+                Tree:
+                SourceFile@0..582
+                  DtsDirective@0..9
+                    V1Directive@0..8 "/dts-v1/"
+                    Semicolon@8..9 ";"
+                  Whitespace@9..11 "\n\n"
+                  DtNode@11..581
+                    Slash@11..12 "/"
+                    Whitespace@12..13 " "
+                    LCurly@13..14 "{"
+                    Whitespace@14..17 "\n  "
+                    DtProperty@17..71
+                      Name@17..22 "model"
+                      Whitespace@22..23 " "
+                      Equals@23..24 "="
+                      Whitespace@24..25 " "
+                      PropValueList@25..70
+                        String@25..70 "\"Qualcomm Technologies, Inc. Lagoon MTP Ebba\""
+                      Semicolon@70..71 ";"
+                    Whitespace@71..73 "\n\t"
+                    DtProperty@73..131
+                      Name@73..83 "compatible"
+                      Whitespace@83..84 " "
+                      Equals@84..85 "="
+                      Whitespace@85..86 " "
+                      PropValueList@86..130
+                        String@86..103 "\"qcom,lagoon-mtp\""
+                        Comma@103..104 ","
+                        Whitespace@104..105 " "
+                        String@105..118 "\"qcom,lagoon\""
+                        Comma@118..119 ","
+                        Whitespace@119..120 " "
+                        String@120..130 "\"qcom,mtp\""
+                      Semicolon@130..131 ";"
+                    Whitespace@131..133 "\n\t"
+                    DtProperty@133..176
+                      Name@133..144 "qcom,msm-id"
+                      Whitespace@144..145 " "
+                      Equals@145..146 "="
+                      Whitespace@146..147 " "
+                      PropValueList@147..175
+                        DtCellList@147..160
+                          LAngle@147..148 "<"
+                          Number@148..151 "434"
+                          Whitespace@151..152 " "
+                          Number@152..159 "0x10000"
+                          RAngle@159..160 ">"
+                        Comma@160..161 ","
+                        Whitespace@161..162 " "
+                        DtCellList@162..175
+                          LAngle@162..163 "<"
+                          Number@163..166 "459"
+                          Whitespace@166..167 " "
+                          Number@167..174 "0x10000"
+                          RAngle@174..175 ">"
+                      Semicolon@175..176 ";"
+                    Whitespace@176..178 "\n\t"
+                    DtProperty@178..204
+                      Name@178..194 "interrupt-parent"
+                      Whitespace@194..195 " "
+                      Equals@195..196 "="
+                      Whitespace@196..197 " "
+                      PropValueList@197..203
+                        DtCellList@197..203
+                          LAngle@197..198 "<"
+                          Number@198..202 "0x01"
+                          RAngle@202..203 ">"
+                      Semicolon@203..204 ";"
+                    Whitespace@204..206 "\n\t"
+                    DtProperty@206..230
+                      Name@206..220 "#address-cells"
+                      Whitespace@220..221 " "
+                      Equals@221..222 "="
+                      Whitespace@222..223 " "
+                      PropValueList@223..229
+                        DtCellList@223..229
+                          LAngle@223..224 "<"
+                          Number@224..228 "0x02"
+                          RAngle@228..229 ">"
+                      Semicolon@229..230 ";"
+                    Whitespace@230..232 "\n\t"
+                    DtProperty@232..253
+                      Name@232..243 "#size-cells"
+                      Whitespace@243..244 " "
+                      Equals@244..245 "="
+                      Whitespace@245..246 " "
+                      PropValueList@246..252
+                        DtCellList@246..252
+                          LAngle@246..247 "<"
+                          Number@247..251 "0x02"
+                          RAngle@251..252 ">"
+                      Semicolon@252..253 ";"
+                    Whitespace@253..255 "\n\t"
+                    DtProperty@255..277
+                      Name@255..268 "qcom,board-id"
+                      Whitespace@268..269 " "
+                      Equals@269..270 "="
+                      Whitespace@270..271 " "
+                      PropValueList@271..276
+                        DtCellList@271..276
+                          LAngle@271..272 "<"
+                          Number@272..273 "8"
+                          Whitespace@273..274 " "
+                          Number@274..275 "0"
+                          RAngle@275..276 ">"
+                      Semicolon@276..277 ";"
+                    Whitespace@277..279 "\n\t"
+                    DtProperty@279..303
+                      Name@279..292 "oplus,dtsi_no"
+                      Whitespace@292..293 " "
+                      Equals@293..294 "="
+                      Whitespace@294..295 " "
+                      PropValueList@295..302
+                        DtCellList@295..302
+                          LAngle@295..296 "<"
+                          Number@296..301 "20813"
+                          RAngle@301..302 ">"
+                      Semicolon@302..303 ";"
+                    Whitespace@303..306 "\n\n\t"
+                    DtNode@306..473
+                      Name@306..312 "memory"
+                      Whitespace@312..313 " "
+                      LCurly@313..314 "{"
+                      Whitespace@314..317 "\n\t\t"
+                      DtProperty@317..342
+                        Name@317..332 "ddr_device_type"
+                        Whitespace@332..333 " "
+                        Equals@333..334 "="
+                        Whitespace@334..335 " "
+                        PropValueList@335..341
+                          DtCellList@335..341
+                            LAngle@335..336 "<"
+                            Number@336..340 "0x07"
+                            RAngle@340..341 ">"
+                        Semicolon@341..342 ";"
+                      Whitespace@342..345 "\n\t\t"
+                      DtProperty@345..368
+                        Name@345..356 "device_type"
+                        Whitespace@356..357 " "
+                        Equals@357..358 "="
+                        Whitespace@358..359 " "
+                        PropValueList@359..367
+                          String@359..367 "\"memory\""
+                        Semicolon@367..368 ";"
+                      Whitespace@368..371 "\n\t\t"
+                      DtProperty@371..469
+                        Name@371..374 "reg"
+                        Whitespace@374..375 " "
+                        Equals@375..376 "="
+                        Whitespace@376..377 " "
+                        PropValueList@377..468
+                          DtCellList@377..468
+                            LAngle@377..378 "<"
+                            Number@378..382 "0x00"
+                            Whitespace@382..383 " "
+                            Number@383..393 "0x80000000"
+                            Whitespace@393..394 " "
+                            Number@394..398 "0x00"
+                            Whitespace@398..399 " "
+                            Number@399..409 "0x3bb00000"
+                            Whitespace@409..410 " "
+                            Number@410..414 "0x01"
+                            Whitespace@414..415 " "
+                            Number@415..425 "0x80000000"
+                            Whitespace@425..426 " "
+                            Number@426..430 "0x01"
+                            Whitespace@430..431 " "
+                            Number@431..435 "0x00"
+                            Whitespace@435..436 " "
+                            Number@436..440 "0x00"
+                            Whitespace@440..441 " "
+                            Number@441..451 "0xc0000000"
+                            Whitespace@451..452 " "
+                            Number@452..456 "0x00"
+                            Whitespace@456..457 " "
+                            Number@457..467 "0xc0000000"
+                            RAngle@467..468 ">"
+                        Semicolon@468..469 ";"
+                      Whitespace@469..471 "\n\t"
+                      RCurly@471..472 "}"
+                      Semicolon@472..473 ";"
+                    Whitespace@473..477 "\n\n  "
+                    DtNode@477..509
+                      DtLabel@477..479
+                        Name@477..478 "a"
+                        Colon@478..479 ":"
+                      Whitespace@479..480 " "
+                      Name@480..483 "foo"
+                      Whitespace@483..484 " "
+                      LCurly@484..485 "{"
+                      Whitespace@485..490 "\n    "
+                      DtProperty@490..504
+                        Name@490..497 "setting"
+                        Whitespace@497..498 " "
+                        Equals@498..499 "="
+                        Whitespace@499..500 " "
+                        PropValueList@500..503
+                          DtCellList@500..503
+                            LAngle@500..501 "<"
+                            Number@501..502 "2"
+                            RAngle@502..503 ">"
+                        Semicolon@503..504 ";"
+                      Whitespace@504..507 "\n  "
+                      RCurly@507..508 "}"
+                      Semicolon@508..509 ";"
+                    Whitespace@509..513 "\n\n  "
+                    DtNode@513..557
+                      Name@513..516 "bar"
+                      Whitespace@516..517 " "
+                      LCurly@517..518 "{"
+                      Whitespace@518..523 "\n    "
+                      DtProperty@523..541
+                        Name@523..533 "ref-to-foo"
+                        Whitespace@533..534 " "
+                        Equals@534..535 "="
+                        Whitespace@535..536 " "
+                        PropValueList@536..540
+                          DtCellList@536..540
+                            LAngle@536..537 "<"
+                            DtPhandle@537..539
+                              Ampersand@537..538 "&"
+                              Name@538..539 "a"
+                            RAngle@539..540 ">"
+                        Semicolon@540..541 ";"
+                      Whitespace@541..546 "\n    "
+                      DtProperty@546..552
+                        Name@546..551 "empty"
+                        Semicolon@551..552 ";"
+                      Whitespace@552..555 "\n  "
+                      RCurly@555..556 "}"
+                      Semicolon@556..557 ";"
+                    Whitespace@557..561 "\n\n  "
+                    LineComment@561..566 "//foo"
+                    Whitespace@566..569 "\n  "
+                    BlockComment@569..578 "/* bar */"
+                    Whitespace@578..579 "\n"
+                    RCurly@579..580 "}"
+                    Semicolon@580..581 ";"
+                  Whitespace@581..582 "\n"
+            "##]],
         );
     }
 
     #[test]
-    fn parse_from_test_data_2_macros() {
-        check_file(
-            include_str!("../test_data/2-macro-def.dts"),
-            expect_file!["../test_data/2-macro-def.dts.expect"],
+    fn parse_2_macros() {
+        check(
+            r#"/dts-v1/;
+
+// Try line comment
+#define SQUARE(x) ((x) * (x)) // This macro squares a number
+
+// Try block comment
+#define MULTIPLY(a, b) /* Multiplies two numbers */ \
+                       ((a) * (b))
+
+// Real macro from the Linux kernel, try multiline block comment
+#define KEY_SWITCHVIDEOMODE	227	/* Cycle between available video
+					   outputs (Monitor/LCD/TV-out/etc) */
+
+// This is invalid in GCC
+#define FOO "a
+b"
+// Try multiline strings
+#define FOO "a\
+b"
+#define FOO "a\\
+b"
+#define FOO "a\"b"
+#define FOO "a\\"b"
+// Try starting comments in literals
+#define FOO "/*"
+#define FOO "//"
+#define FOO '/*'
+#define FOO '//'
+"#,
+            expect![[r##"
+                Errors: []
+
+                Tree:
+                SourceFile@0..631
+                  DtsDirective@0..9
+                    V1Directive@0..8 "/dts-v1/"
+                    Semicolon@8..9 ";"
+                  Whitespace@9..11 "\n\n"
+                  LineComment@11..30 "// Try line comment"
+                  Whitespace@30..31 "\n"
+                  DefineDirective@31..91 "#define SQUARE(x) ((x) * (x)) // This macro squares a number"
+                  Whitespace@91..93 "\n\n"
+                  LineComment@93..113 "// Try block comment"
+                  Whitespace@113..114 "\n"
+                  DefineDirective@114..203 "#define MULTIPLY(a, b) /* Multiplies two numbers */ \\\n                       ((a) * (b))\n"
+                  Whitespace@203..204 "\n"
+                  LineComment@204..268 "// Real macro from the Linux kernel, try multiline block comment"
+                  Whitespace@268..269 "\n"
+                  DefineDirective@269..377 "#define KEY_SWITCHVIDEOMODE\t227\t/* Cycle between available video\n\t\t\t\t\t   outputs (Monitor/LCD/TV-out/etc) */"
+                  Whitespace@377..379 "\n\n"
+                  LineComment@379..404 "// This is invalid in GCC"
+                  Whitespace@404..405 "\n"
+                  DefineDirective@405..422 "#define FOO \"a\nb\""
+                  Whitespace@422..423 "\n"
+                  LineComment@423..447 "// Try multiline strings"
+                  Whitespace@447..448 "\n"
+                  DefineDirective@448..466 "#define FOO \"a\\\nb\""
+                  Whitespace@466..467 "\n"
+                  DefineDirective@467..486 "#define FOO \"a\\\\\nb\""
+                  Whitespace@486..487 "\n"
+                  DefineDirective@487..505 "#define FOO \"a\\\"b\""
+                  Whitespace@505..506 "\n"
+                  DefineDirective@506..525 "#define FOO \"a\\\\\"b\""
+                  Whitespace@525..526 "\n"
+                  LineComment@526..562 "// Try starting comments in literals"
+                  Whitespace@562..563 "\n"
+                  DefineDirective@563..579 "#define FOO \"/*\""
+                  Whitespace@579..580 "\n"
+                  DefineDirective@580..596 "#define FOO \"//\""
+                  Whitespace@596..597 "\n"
+                  DefineDirective@597..613 "#define FOO '/*'"
+                  Whitespace@613..614 "\n"
+                  DefineDirective@614..630 "#define FOO '//'"
+                  Whitespace@630..631 "\n"
+            "##]],
         );
     }
 
     #[test]
-    fn parse_from_test_data_3_preproc() {
-        check_file(
-            include_str!("../test_data/3-preproc-dir.dts"),
-            expect_file!["../test_data/3-preproc-dir.dts.expect"],
+    fn parse_3_preproc() {
+        check(
+            r#"/dts-v1/;
+
+// Try line comment
+#if 1 // This macro squares a number
+/ {};
+#elif FOO
+#else BAR
+&do_something {};
+#endif
+
+// Try block comment
+#if /* Multiplies
+two numbers */ \
+  ((a) * (b))
+/ {};
+#endif
+
+#include \
+  "filename"
+"#,
+            expect![[r##"
+                Errors: []
+
+                Tree:
+                SourceFile@0..228
+                  DtsDirective@0..9
+                    V1Directive@0..8 "/dts-v1/"
+                    Semicolon@8..9 ";"
+                  Whitespace@9..11 "\n\n"
+                  LineComment@11..30 "// Try line comment"
+                  Whitespace@30..31 "\n"
+                  PreprocessorConditional@31..118
+                    IfDirective@31..67 "#if 1 // This macro squares a number"
+                    Whitespace@67..68 "\n"
+                    PreprocessorBranch@68..73
+                      DtNode@68..73
+                        Slash@68..69 "/"
+                        Whitespace@69..70 " "
+                        LCurly@70..71 "{"
+                        RCurly@71..72 "}"
+                        Semicolon@72..73 ";"
+                    Whitespace@73..74 "\n"
+                    ElifDirective@74..83 "#elif FOO"
+                    Whitespace@83..84 "\n"
+                    PreprocessorBranch@84..84
+                    ElseDirective@84..93 "#else BAR"
+                    Whitespace@93..94 "\n"
+                    PreprocessorBranch@94..111
+                      DtNode@94..111
+                        DtPhandle@94..107
+                          Ampersand@94..95 "&"
+                          Name@95..107 "do_something"
+                        Whitespace@107..108 " "
+                        LCurly@108..109 "{"
+                        RCurly@109..110 "}"
+                        Semicolon@110..111 ";"
+                    Whitespace@111..112 "\n"
+                    EndifDirective@112..118 "#endif"
+                  Whitespace@118..120 "\n\n"
+                  LineComment@120..140 "// Try block comment"
+                  Whitespace@140..141 "\n"
+                  PreprocessorConditional@141..202
+                    IfDirective@141..190 "#if /* Multiplies\ntwo numbers */ \\\n  ((a) * (b))\n"
+                    PreprocessorBranch@190..195
+                      DtNode@190..195
+                        Slash@190..191 "/"
+                        Whitespace@191..192 " "
+                        LCurly@192..193 "{"
+                        RCurly@193..194 "}"
+                        Semicolon@194..195 ";"
+                    Whitespace@195..196 "\n"
+                    EndifDirective@196..202 "#endif"
+                  Whitespace@202..204 "\n\n"
+                  IncludeDirective@204..228 "#include \\\n  \"filename\"\n"
+            "##]],
         );
     }
 
