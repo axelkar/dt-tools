@@ -11,84 +11,153 @@
     flake = false;
   };
 
+  inputs.crane.url = "github:ipetkov/crane";
+
+  inputs.advisory-db = {
+    url = "github:rustsec/advisory-db";
+    flake = false;
+  };
+
+  inputs.flake-utils.url = "github:numtide/flake-utils";
+
   outputs =
-    { nixpkgs, dt-schema, ... }:
-    let
-      # System types to support.
-      targetSystems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "x86_64-darwin"
-        "aarch64-darwin"
-      ];
-
-      # Helper function to generate an attrset '{ x86_64-linux = f "x86_64-linux"; ... }'.
-      forAllSystems = nixpkgs.lib.genAttrs targetSystems;
-
-      linuxSrc =
-        pkgs:
-        let
-          linuxVersion = "7.3";
-          linuxSrcRaw = pkgs.fetchurl {
-            url = "mirror://kernel/linux/kernel/v${nixpkgs.lib.versions.major linuxVersion}.x/linux-${linuxVersion}.tar.xz";
-            hash = "sha256-hzY8JPEOBjIes2J2VSEJTpRHH2v/i84taz5A858ASVM=";
-          };
-        in
-        pkgs.runCommand "linux-${linuxVersion}-src" { } ''
-          mkdir "$out"
-          tar -xf "${linuxSrcRaw}" --strip-components=1 -C "$out"
-        '';
-
-      linuxBindings = pkgs: "${linuxSrc pkgs}/Documentation/devicetree/bindings";
-    in
     {
-      packages = forAllSystems (
-        system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-        in
-        {
-          default = pkgs.rustPlatform.buildRustPackage {
-            pname = "dt-tools";
-            version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+      self,
+      nixpkgs,
+      dt-schema,
+      crane,
+      advisory-db,
+      flake-utils,
+      ...
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
+        linuxSrc =
+          let
+            linuxVersion = "7.3";
+            linuxSrcRaw = pkgs.fetchurl {
+              url = "mirror://kernel/linux/kernel/v${nixpkgs.lib.versions.major linuxVersion}.x/linux-${linuxVersion}.tar.xz";
+              hash = "sha256-hzY8JPEOBjIes2J2VSEJTpRHH2v/i84taz5A858ASVM=";
+            };
+          in
+          pkgs.runCommand "linux-${linuxVersion}-src" { } ''
+            mkdir "$out"
+            tar -xf "${linuxSrcRaw}" --strip-components=1 -C "$out"
+          '';
 
-            src = ./.;
+        linuxBindings = "${linuxSrc}/Documentation/devicetree/bindings";
 
-            nativeBuildInputs = [ pkgs.dtc ];
+        craneLib = crane.mkLib pkgs;
 
-            # don't build lsp-auto-runner development tool
-            cargoBuildFlags = [ "--package" "dt-tools" ];
+        commonArgs = {
+          pname = "dt-tools";
+          src = craneLib.cleanCargoSource ./.;
+          strictDeps = true;
+          env = {
+            DT_TOOLS_LINUX_BINDINGS = linuxBindings;
+            DT_TOOLS_DT_SCHEMA_REPO = dt-schema.outPath;
+          };
+        };
 
-            cargoLock.lockFile = ./Cargo.lock;
+        packageArgs = commonArgs // {
+          # don't build lsp-auto-runner development tool
+          cargoExtraArgs = "--package dt-tools";
+        };
 
-            env.DT_TOOLS_LINUX_BINDINGS = linuxBindings pkgs;
-            env.DT_TOOLS_DT_SCHEMA_REPO = dt-schema.outPath;
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
+        dt-tools = craneLib.buildPackage (
+          packageArgs
+          // {
+            inherit cargoArtifacts;
+
+            doCheck = false;
             meta = {
               description = "Modern devicetree tools in Rust";
               homepage = "https://github.com/axelkar/dt-tools";
             };
-          };
-        }
-      );
-      devShells = forAllSystems (
-        system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-        in
-        {
-          default = pkgs.mkShell {
-            strictDeps = true;
-            RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
-            RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
+          }
+        );
+      in
+      {
+        packages = {
+          default = dt-tools;
 
-            nativeBuildInputs = with pkgs; [
-              cargo
-              rustc
+          # TODO: VS Code extension
+          # TODO: static musl executable for releases
+        };
+
+        checks = {
+          inherit dt-tools;
+
+          # Run tests
+          tests = craneLib.cargoTest (
+            commonArgs
+            // {
+              # `cleanCargoSource` would drop test data such as crates/parser/test_data
+              src = ./.;
+
+              cargoArtifacts = cargoArtifacts;
+              nativeBuildInputs = [ pkgs.dtc ];
+            }
+          );
+
+          # Check code using Clippy
+          clippy = craneLib.cargoClippy (
+            commonArgs
+            // {
+              # `--all-targets` compiles the tests, so include their test data
+              src = ./.;
+
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+            }
+          );
+
+          # Check and build documentation
+          doc = craneLib.cargoDoc (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              # This can be commented out or tweaked as necessary, e.g. set to
+              # `--deny rustdoc::broken-intra-doc-links` to only enforce that lint
+              env.RUSTDOCFLAGS = "--deny warnings";
+            }
+          );
+
+          # Check formatting
+          fmt = craneLib.cargoFmt {
+            inherit (commonArgs) pname src;
+          };
+
+          # Check TOML formatting
+          toml-fmt = craneLib.taploFmt {
+            inherit (commonArgs) pname;
+            src = pkgs.lib.sources.sourceFilesBySuffices commonArgs.src [ ".toml" ];
+          };
+
+          # Audit dependencies
+          audit = craneLib.cargoAudit {
+            inherit (commonArgs) pname src;
+            inherit advisory-db;
+          };
+
+          # Audit licenses
+          deny = craneLib.cargoDeny {
+            inherit (commonArgs) pname src;
+          };
+        };
+        devShells = {
+          default = craneLib.devShell {
+            strictDeps = true;
+
+            # Inherit inputs from checks.
+            checks = self.checks.${system};
+            packages = with pkgs; [
               llvmPackages.bintools # LLD
 
-              rustfmt
-              clippy
               rust-analyzer
 
               cargo-release
@@ -100,19 +169,19 @@
               (writeShellScriptBin "grcov" ''
                 exec ${grcov}/bin/grcov --llvm-path ${llvmPackages.llvm}/bin "$@"
               '')
-              fd
 
-              # For testing
+              # For tests and scripts
               dtc
-
-              # For the preprocessing differential suite and benchmarks
               gcc
               clang
               hyperfine
+              fd
             ];
 
-            env.LINUX = linuxSrc pkgs;
-            env.DT_TOOLS_LINUX_BINDINGS = linuxBindings pkgs;
+            env.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}"; # For rust-analyzer
+            env.RUSTFLAGS = "-C link-arg=-fuse-ld=lld"; # Faster linker
+            env.LINUX = linuxSrc;
+            env.DT_TOOLS_LINUX_BINDINGS = linuxBindings;
             env.DT_TOOLS_DT_SCHEMA_REPO = dt-schema.outPath;
           };
           vscode = pkgs.mkShellNoCC {
@@ -123,7 +192,7 @@
               vsce
             ];
           };
-        }
-      );
-    };
+        };
+      }
+    );
 }
