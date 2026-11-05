@@ -168,8 +168,6 @@ impl<'t, 'input> Source<'t, 'input> {
     }
 
     pub(super) fn skip_trivia(&mut self) {
-        profiling::scope!("parser::Source::skip_trivia");
-
         self.cached_peek = CachedPeek::Missing;
 
         while self
@@ -190,8 +188,6 @@ impl<'t, 'input> Source<'t, 'input> {
     /// Returns None at end of input.
     #[inline]
     pub(super) fn peek_kind_immediate(&mut self) -> Option<TokenKind> {
-        profiling::scope!("parser::Source::peek_kind_immediate");
-
         self.steps += 1;
 
         // We can ignore the error when peeking

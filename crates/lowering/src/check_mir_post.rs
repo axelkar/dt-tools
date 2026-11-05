@@ -76,7 +76,6 @@ fn check_phandles(
     }
     // Labels are resolved at the end because forward references are valid.
     for def in mir.iter_live_defs_under("") {
-        profiling::scope!("lowering::check_mir_post::check_phandles::in_loop");
         if let mir::MirDefinitionValue::Property(mir_property_data) = &def.value {
             for value in &mir_property_data.values {
                 match value {

@@ -387,8 +387,6 @@ impl<'t, 'input> Parser<'t, 'input> {
 
     #[inline]
     fn bump_name_generic(&mut self, set: &[TokenKind]) {
-        profiling::scope!("parser::Parser::bump_name_generic");
-
         assert!(self.check(set).silent().at());
 
         // Make sure no trivia tokens get into the combined token
@@ -421,8 +419,6 @@ impl<'t, 'input> Parser<'t, 'input> {
     ///
     /// This equals the result of any previous `peek_*` calls
     pub fn bump(&mut self) {
-        profiling::scope!("parser::Parser::bump");
-
         self.expected.clear();
 
         assert!(
@@ -501,8 +497,6 @@ impl<'p, 't, 'input, M: TokenMatcher> Check<'p, 't, 'input, M, false> {
 impl<M: TokenMatcher, const SILENT: bool> Check<'_, '_, '_, M, SILENT> {
     /// Tests whether the matcher matches.
     pub fn at(&mut self) -> bool {
-        profiling::scope!("parser::Check::at");
-
         if !SILENT {
             self.matcher.push_expected(self.p);
         }
@@ -511,8 +505,6 @@ impl<M: TokenMatcher, const SILENT: bool> Check<'_, '_, '_, M, SILENT> {
 
     /// Tests and consumes.
     pub fn eat(&mut self) -> bool {
-        profiling::scope!("parser::Check::eat");
-
         if self.matcher.matches(self.p) {
             self.matcher.consume(self.p);
             true

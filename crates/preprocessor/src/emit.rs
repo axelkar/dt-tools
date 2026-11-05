@@ -76,8 +76,6 @@ pub(crate) fn emit(tokens: &[MacroToken], cleaned: &str) -> (String, ProvenanceM
 ///
 /// `scratch` is reused between calls to avoid allocating the concatenated text.
 fn can_follow(run: &[&MacroToken], next: &MacroToken, cleaned: &str, scratch: &mut String) -> bool {
-    profiling::scope!("preprocessor::emit::can_follow");
-
     if run.is_empty() {
         return true;
     }

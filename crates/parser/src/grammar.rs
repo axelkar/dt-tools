@@ -400,8 +400,6 @@ fn dt_node_body(p: &mut Parser, m: Marker) {
 }
 
 fn item(p: &mut Parser) {
-    profiling::scope!("grammar::item");
-
     if eat_node_or_prop(p) {
     } else if p.check(TokenKind::Equals).silent().at() {
         let m = p.start();
