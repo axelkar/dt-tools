@@ -1,4 +1,4 @@
-use std::{num::ParseIntError, str::FromStr, sync::Arc};
+use std::{num::ParseIntError, str::FromStr};
 
 use dt_tools_analyzer::string::interpret_escaped_string;
 use dt_tools_diagnostic::Severity;
@@ -108,10 +108,7 @@ pub(crate) fn lower_prop_value(
 }
 
 /// Wraps [`interpret_escaped_string`], handling errors.
-pub fn interpret_escaped_string_tok(
-    tok: &Arc<RedToken>,
-    diag: &mut Diag<'_>,
-) -> Result<String, ()> {
+pub fn interpret_escaped_string_tok(tok: &RedToken, diag: &mut Diag<'_>) -> Result<String, ()> {
     match interpret_escaped_string(tok.text()) {
         Ok(path) => Ok(path),
         Err(err) => {
@@ -125,7 +122,7 @@ pub fn interpret_escaped_string_tok(
     }
 }
 
-fn lower_bytestring(diag: &mut Diag<'_>, tok: &Arc<RedToken>) -> Result<Vec<u8>, ()> {
+fn lower_bytestring(diag: &mut Diag<'_>, tok: &RedToken) -> Result<Vec<u8>, ()> {
     let mut bytes = Vec::new();
     let mut first_nibble = None;
     for ch in tok.text().chars() {
@@ -170,10 +167,7 @@ impl BitsSize {
     /// Parse a number token after `/bits/` into a [`BitsSize`], defaulting to 32-bit.
     ///
     /// Returns `Err(())` on unrecoverable parse errors (invalid number, unsupported bits).
-    fn from_token(
-        bits_number_tok: Option<&Arc<RedToken>>,
-        diag: &mut Diag<'_>,
-    ) -> Result<Self, ()> {
+    fn from_token(bits_number_tok: Option<&RedToken>, diag: &mut Diag<'_>) -> Result<Self, ()> {
         let Some(bits_number_tok) = bits_number_tok else {
             return Ok(Self::default());
         };

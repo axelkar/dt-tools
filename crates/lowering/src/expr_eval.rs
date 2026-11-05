@@ -1,4 +1,4 @@
-use std::{num::ParseIntError, str::FromStr, sync::Arc};
+use std::{num::ParseIntError, str::FromStr};
 
 use dt_tools_analyzer::string::interpret_escaped_char;
 use dt_tools_diagnostic::Severity;
@@ -19,14 +19,14 @@ use crate::{
 pub fn parse_int_tok<
     T: FromStr<Err = ParseIntError> + Num<FromStrRadixErr = ParseIntError> + Bits + Signedness,
 >(
-    tok: &Arc<RedToken>,
+    tok: &RedToken,
     diag: &mut Diag<'_>,
 ) -> Result<T, ()> {
     /// Helper function that isn't monomorphized
     fn emit_err(
         err: &ParseIntError,
         diag: &mut Diag<'_>,
-        tok: &Arc<RedToken>,
+        tok: &RedToken,
         bits: u32,
         signedness: &'static str,
     ) {
@@ -56,7 +56,7 @@ pub fn parse_int_tok<
 }
 
 /// Wraps [`interpret_escaped_char`], handling errors.
-pub fn interpret_escaped_char_tok(tok: &Arc<RedToken>, diag: &mut Diag<'_>) -> Result<char, ()> {
+pub fn interpret_escaped_char_tok(tok: &RedToken, diag: &mut Diag<'_>) -> Result<char, ()> {
     interpret_escaped_char(tok.text()).map_err(|err| {
         diag.emit(tok.text_range(), err.to_string(), Severity::Error);
     })

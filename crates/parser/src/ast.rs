@@ -71,10 +71,10 @@ pub trait AstToken: Sized {
     /// Try to cast a [`RedToken`] to an AST token.
     ///
     /// The implementor must check [`GreenToken::kind`](crate::cst::GreenToken::kind)!
-    fn cast(syntax: Arc<RedToken>) -> Option<Self>;
+    fn cast(syntax: RedToken) -> Option<Self>;
 
     /// Returns a reference to the syntax token.
-    fn syntax(&self) -> &Arc<RedToken>;
+    fn syntax(&self) -> &RedToken;
 
     /// Returns the green token's kind.
     fn kind(&self) -> TokenKind {
@@ -106,7 +106,7 @@ pub trait AstNodeOrToken: Sized {
     /// Try to cast a [`RedToken`] to an AST token.
     ///
     /// The implementor must check [`GreenToken::kind`](crate::cst::GreenToken::kind)!
-    fn cast_token(syntax: Arc<RedToken>) -> Option<Self>;
+    fn cast_token(syntax: RedToken) -> Option<Self>;
 
     /// Returns a reference to the syntax node or token.
     fn syntax_item(&self) -> RedItemRef<'_>;
@@ -120,7 +120,7 @@ where
         Self::cast(syntax)
     }
 
-    fn cast_token(_syntax: Arc<RedToken>) -> Option<Self> {
+    fn cast_token(_syntax: RedToken) -> Option<Self> {
         None
     }
 
@@ -160,17 +160,17 @@ macro_rules! define_ast_token {
             $(#[$attr])*
             #[derive(Debug, Clone, PartialEq, Eq, Hash)]
             pub struct $name {
-                syntax: Arc<RedToken>
+                syntax: RedToken
             }
 
             impl AstToken for $name {
-                fn cast(syntax: Arc<RedToken>) -> Option<Self> {
+                fn cast(syntax: RedToken) -> Option<Self> {
                     match syntax.green.kind {
                         TokenKind::$kind => Some(Self { syntax }),
                         _ => None,
                     }
                 }
-                fn syntax(&self) -> &Arc<RedToken> {
+                fn syntax(&self) -> &RedToken {
                     &self.syntax
                 }
             }
@@ -411,11 +411,11 @@ impl HasMacroInvocation for UnitAddress {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum PropValue {
-    String(Arc<RedToken>),
+    String(RedToken),
     CellList(DtCellList),
     /// String-based reference
     Phandle(DtPhandle),
-    Bytestring(Arc<RedToken>),
+    Bytestring(RedToken),
     Macro(MacroInvocation),
     DtsDirective(DtsDirective),
     PreprocessorConditional(PreprocessorConditional),
@@ -436,7 +436,7 @@ impl AstNodeOrToken for PropValue {
             _ => None,
         }
     }
-    fn cast_token(syntax: Arc<RedToken>) -> Option<Self> {
+    fn cast_token(syntax: RedToken) -> Option<Self> {
         match syntax.green.kind {
             TokenKind::String => Some(Self::String(syntax)),
             TokenKind::DtBytestring => Some(Self::Bytestring(syntax)),
@@ -459,8 +459,8 @@ impl AstNodeOrToken for PropValue {
 /// A Devicetree cell, compiled to a 32-bit integer
 #[derive(Debug, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 pub enum Cell {
-    Number(Arc<RedToken>),
-    Char(Arc<RedToken>),
+    Number(RedToken),
+    Char(RedToken),
     Phandle(DtPhandle),
     Macro(MacroInvocation),
     DtExpr(DtExpr),
@@ -482,7 +482,7 @@ impl AstNodeOrToken for Cell {
             _ => None,
         }
     }
-    fn cast_token(syntax: Arc<RedToken>) -> Option<Self> {
+    fn cast_token(syntax: RedToken) -> Option<Self> {
         match syntax.green.kind {
             TokenKind::Number => Some(Self::Number(syntax)),
             TokenKind::Char => Some(Self::Char(syntax)),
@@ -538,7 +538,7 @@ define_ast_node! {
 impl MacroInvocation {
     /// Returns the macro's identifier
     #[must_use]
-    pub fn ident(&self) -> Option<Arc<RedToken>> {
+    pub fn ident(&self) -> Option<RedToken> {
         self.syntax
             .child_tokens()
             .find(|tok| tok.green.kind == TokenKind::Ident)
@@ -570,7 +570,7 @@ define_ast_node! {
 impl DtCellList {
     /// Returns the number token of a `/bits/` directive.
     #[must_use]
-    pub fn bits_number(&self) -> Option<Arc<RedToken>> {
+    pub fn bits_number(&self) -> Option<RedToken> {
         self.syntax.child_nodes().find_map(|node| {
             let dir = DtsDirective::cast(node)?;
             if dir.kind() == Some(TokenKind::BitsDirective)
@@ -931,16 +931,16 @@ impl PreprocessorBranch {
 /// e.g. `#include file.dts`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PreprocessorDirective {
-    syntax: Arc<RedToken>,
+    syntax: RedToken,
 }
 impl AstToken for PreprocessorDirective {
-    fn cast(syntax: Arc<RedToken>) -> Option<Self> {
+    fn cast(syntax: RedToken) -> Option<Self> {
         match syntax.green.kind {
             kind if kind.is_preprocessor_directive() => Some(Self { syntax }),
             _ => None,
         }
     }
-    fn syntax(&self) -> &Arc<RedToken> {
+    fn syntax(&self) -> &RedToken {
         &self.syntax
     }
 }
@@ -968,7 +968,7 @@ impl AstNodeOrToken for Item {
             _ => None,
         }
     }
-    fn cast_token(syntax: Arc<RedToken>) -> Option<Self> {
+    fn cast_token(syntax: RedToken) -> Option<Self> {
         Some(Self::PreprocessorDirective(PreprocessorDirective::cast(
             syntax,
         )?))

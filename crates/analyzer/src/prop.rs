@@ -1,4 +1,4 @@
-use std::{num::ParseIntError, sync::Arc};
+use std::num::ParseIntError;
 
 use dt_tools_parser::{
     ast::{self, AstToken, DtNode, HasName},
@@ -344,7 +344,7 @@ pub(crate) fn parse_u32(src: &str) -> Result<u32, ValueFromAstError> {
     })
 }
 
-fn common_string(tok: &Arc<RedToken>) -> Result<String, ValueFromAstError> {
+fn common_string(tok: &RedToken) -> Result<String, ValueFromAstError> {
     // TODO: fix it!
     Ok(crate::string::interpret_escaped_string(tok.text())?)
 }

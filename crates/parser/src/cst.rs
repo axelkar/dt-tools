@@ -345,7 +345,7 @@ impl RedNode {
 
     /// Returns the token at the specified byte offset if found.
     #[must_use]
-    pub fn token_at_offset(self: &Arc<RedNode>, offset: usize) -> Option<Arc<RedToken>> {
+    pub fn token_at_offset(self: &Arc<RedNode>, offset: usize) -> Option<RedToken> {
         // TODO: non recursing algorithm? binary search?
         self.child_nodes()
             .find(|node| node.text_range().byte_range().contains(&offset))
@@ -378,11 +378,11 @@ impl RedNode {
                 let text_offset = current_text_offset;
                 current_text_offset += token.text.len();
 
-                RedItem::Token(Arc::new(RedToken {
+                RedItem::Token(RedToken {
                     parent: Arc::clone(&self),
                     green: token.clone(),
                     text_offset,
-                }))
+                })
             }
         })
     }
@@ -409,11 +409,11 @@ impl RedNode {
                     let text_offset = current_text_offset;
                     current_text_offset += token.text.len();
 
-                    RedItem::Token(Arc::new(RedToken {
+                    RedItem::Token(RedToken {
                         parent: Arc::clone(self),
                         green: token.clone(),
                         text_offset,
-                    }))
+                    })
                 }
             })
     }
@@ -424,7 +424,7 @@ impl RedNode {
     }
 
     /// Returns an iterator over immediate child tokens.
-    pub fn child_tokens(self: &Arc<RedNode>) -> impl Iterator<Item = Arc<RedToken>> + '_ {
+    pub fn child_tokens(self: &Arc<RedNode>) -> impl Iterator<Item = RedToken> + '_ {
         // FIXME: RedToken doesn't need Arc wrapping it
         self.children().filter_map(RedItem::into_token)
     }
@@ -491,10 +491,10 @@ pub type GreenItem = TreeItem<Arc<GreenNode>, GreenToken>;
 /// A red item on top of a green item. It can traverse its parents.
 ///
 /// See the [crate documentation](crate) for more info.
-pub type RedItem = TreeItem<Arc<RedNode>, Arc<RedToken>>;
+pub type RedItem = TreeItem<Arc<RedNode>, RedToken>;
 
 /// Similar to [`RedItem`], but with only references to the red items.
-pub type RedItemRef<'a> = TreeItem<&'a Arc<RedNode>, &'a Arc<RedToken>>;
+pub type RedItemRef<'a> = TreeItem<&'a Arc<RedNode>, &'a RedToken>;
 
 impl GreenItem {
     /// Returns the length of the textual contents.
