@@ -1,4 +1,4 @@
-use std::{io::Write as _, mem::ManuallyDrop, sync::Mutex, time::Instant};
+use std::{io::Write as _, sync::Mutex, time::Instant};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{
@@ -26,7 +26,8 @@ use dt_tools_workspace::{
     },
 };
 use owo_colors::OwoColorize;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::ParallelIterator;
+use rayon::slice::ParallelSlice;
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 fn styles() -> Styles {
@@ -83,7 +84,7 @@ enum Command {
         workspace: WorkspaceArgs,
         file: Utf8PathBuf,
     },
-    /// Check many DTS files for errors with a single Salsa database for reuse
+    /// Check many DTS files for errors in batches
     CheckMany {
         #[command(flatten)]
         workspace: WorkspaceArgs,
@@ -333,6 +334,11 @@ fn cmd_mir(path: &Utf8Path, workspace: &Workspace) -> Result<()> {
     Ok(())
 }
 
+/// Number of roots processed per Salsa database in `check-many`.
+///
+/// 2 roots per batch measured best on the arm64 DTS corpus.
+const CHECK_MANY_ROOTS_PER_BATCH: usize = 2;
+
 fn cmd_check_many(
     files: &[Utf8PathBuf],
     do_print_diagnostics: bool,
@@ -344,51 +350,53 @@ fn cmd_check_many(
         passed: bool,
     }
 
-    // One Salsa database for all files
-    let db = BaseDatabase::default();
-
-    init_preprocess_settings(&db, workspace);
-
     let start = Instant::now();
-
-    // Leak the database because the OS frees the memory faster when the process exits than we can
-    let db = ManuallyDrop::new(db);
 
     // Lock output so a single file's status gets printed independently
     let print_lock = Mutex::new(());
 
-    let results = files
-        .into_par_iter()
-        .map_with(db, |db, file| {
-            let db = &**db;
+    // A short database lifetime bounds the per-root tracked outputs Salsa retains.
+    // It can't evict tracked structs: https://github.com/salsa-rs/salsa/issues/438
+    let batch_results = files
+        .par_chunks(CHECK_MANY_ROOTS_PER_BATCH)
+        .map(|chunk| {
+            let db = BaseDatabase::default();
+            init_preprocess_settings(&db, workspace);
 
-            let abs_path = to_absolute(file)?;
-            let root_file = db.get_files().get_file(db, &abs_path);
-
-            let (diagnostics, _processed_files) = compute_diagnostics(db, root_file);
-
-            let has_errors = diagnostics
+            chunk
                 .iter()
-                .any(|d| d.severity == dt_tools_diagnostic::Severity::Error);
-            let passed = !has_errors;
+                .map(|file| {
+                    let abs_path = to_absolute(file)?;
+                    let root_file = db.get_files().get_file(&db, &abs_path);
 
-            if !only_summary {
-                let _guard = print_lock.lock();
-                if passed {
-                    if !only_fail {
-                        println!("{} ... {}", file, "PASS".green().bold());
-                    }
-                } else {
-                    println!("{} ... {}", file, "FAIL".red().bold());
-                    if do_print_diagnostics {
-                        print_diagnostics(diagnostics.clone(), db)?;
-                    }
-                }
-            }
+                    let (diagnostics, _processed_files) = compute_diagnostics(&db, root_file);
 
-            Ok(FileResult { passed })
+                    let has_errors = diagnostics
+                        .iter()
+                        .any(|d| d.severity == dt_tools_diagnostic::Severity::Error);
+                    let passed = !has_errors;
+
+                    if !only_summary {
+                        let _guard = print_lock.lock();
+                        if passed {
+                            if !only_fail {
+                                println!("{} ... {}", file, "PASS".green().bold());
+                            }
+                        } else {
+                            println!("{} ... {}", file, "FAIL".red().bold());
+                            if do_print_diagnostics {
+                                print_diagnostics(diagnostics.clone(), &db)?;
+                            }
+                        }
+                    }
+
+                    Ok(FileResult { passed })
+                })
+                .collect::<Result<Vec<_>>>()
         })
         .collect::<Result<Vec<_>>>()?;
+
+    let results: Vec<FileResult> = batch_results.into_iter().flatten().collect();
 
     let elapsed = start.elapsed();
 

@@ -33,8 +33,8 @@ include=(-I "$linux/include" -I "$linux/scripts/dtc/include-prefixes")
 cpp_flags=(-E -nostdinc -undef -D__DTS__ -x assembler-with-cpp -P)
 
 our_cmd="$preprocess $(quote "${include[@]}") -D __DTS__"
-preprocess_cmd="$cli $(quote "${include[@]}") -D __DTS__ preprocess"
-mir_cmd="$cli $(quote "${include[@]}") -D __DTS__ mir"
+preprocess_cmd="$cli preprocess $(quote "${include[@]}") -D __DTS__"
+mir_cmd="$cli mir $(quote "${include[@]}") -D __DTS__"
 gcc_cmd="gcc $(quote "${cpp_flags[@]}") $(quote "${include[@]}")"
 clang_cmd="clang $(quote "${cpp_flags[@]}") $(quote "${include[@]}")"
 
@@ -64,7 +64,7 @@ fd_cmd="fd -e dts . $(quote "$corpus") -x"
   -n clang "$fd_cmd $clang_cmd"
 
 fd_cmd_batch="fd -e dts . $(quote "$corpus") -X"
-check_many_cmd="$fd_cmd_batch $(quote "$cli") $(quote "${include[@]}") -D __DTS__ check-many --only-summary"
+check_many_cmd="$fd_cmd_batch $(quote "$cli") check-many $(quote "${include[@]}") -D __DTS__ --only-summary"
 
 echo
 echo "== corpus: pipelines"
