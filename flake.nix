@@ -33,12 +33,13 @@
     flake-utils.lib.eachDefaultSystem (
       system:
       let
+        inherit (nixpkgs) lib;
         pkgs = nixpkgs.legacyPackages.${system};
         linuxSrc =
           let
             linuxVersion = "7.3";
             linuxSrcRaw = pkgs.fetchurl {
-              url = "mirror://kernel/linux/kernel/v${nixpkgs.lib.versions.major linuxVersion}.x/linux-${linuxVersion}.tar.xz";
+              url = "mirror://kernel/linux/kernel/v${lib.versions.major linuxVersion}.x/linux-${linuxVersion}.tar.xz";
               hash = "sha256-hzY8JPEOBjIes2J2VSEJTpRHH2v/i84taz5A858ASVM=";
             };
           in
@@ -52,7 +53,7 @@
         craneLib = crane.mkLib pkgs;
 
         commonArgs = {
-          pname = "dt-tools";
+          pname = "dt-tools"; # no package.name in Cargo.toml to default to
           src = craneLib.cleanCargoSource ./.;
           strictDeps = true;
           env = {
@@ -62,21 +63,25 @@
         };
 
         # Tests read test_data files that cleanCargoSource drops.
-        testSrc = pkgs.lib.cleanSourceWith {
+        testSrc = lib.cleanSourceWith {
           src = ./.;
-          filter = path: type:
-            craneLib.filterCargoSources path type
-            || (builtins.match ".*/test_data/.*" path != null);
+          filter =
+            path: type:
+            craneLib.filterCargoSources path type || (builtins.match ".*/test_data/.*" path != null);
         };
 
         packageArgs = commonArgs // {
-          # don't build lsp-auto-runner development tool
+          # don't build the lsp-auto-runner executable
+          # nor any other packages unused by dt-tools
           cargoExtraArgs = "--package dt-tools";
         };
 
+        # Cargo's feature unification resolves different features, which makes
+        # these caches incompatible (not a hard fail, but slower builds)
         packageArtifacts = craneLib.buildDepsOnly packageArgs;
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
+        # main executable
         dt-tools = craneLib.buildPackage (
           packageArgs
           // {
@@ -86,17 +91,44 @@
             meta = {
               description = "Modern devicetree tools in Rust";
               homepage = "https://github.com/axelkar/dt-tools";
+              license = [
+                lib.licenses.mit
+                lib.licenses.asl20
+              ];
+              mainProgram = "dt-tools";
             };
           }
         );
+
+        dt-tools-vscode-no-server = pkgs.callPackage ./vscode/package.nix { };
+
+        staticPackages = lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+          let
+            staticCraneLib = crane.mkLib pkgs.pkgsStatic;
+            staticPackageArtifacts = staticCraneLib.buildDepsOnly packageArgs;
+          in
+          rec {
+            dt-tools-static = staticCraneLib.buildPackage (
+              packageArgs
+              // {
+                cargoArtifacts = staticPackageArtifacts;
+                inherit (dt-tools) doCheck meta;
+              }
+            );
+
+            dt-tools-vscode = pkgs.callPackage ./vscode/package.nix {
+              executable = dt-tools-static;
+            };
+          }
+        );
+
       in
       {
         packages = {
           default = dt-tools;
-
-          # TODO: VS Code extension
-          # TODO: static musl executable for releases
-        };
+          inherit dt-tools-vscode-no-server;
+        }
+        // staticPackages;
 
         checks = {
           inherit dt-tools;
@@ -139,7 +171,7 @@
           # Check TOML formatting
           toml-fmt = craneLib.taploFmt {
             inherit (commonArgs) pname;
-            src = pkgs.lib.sources.sourceFilesBySuffices commonArgs.src [ ".toml" ];
+            src = lib.sources.sourceFilesBySuffices commonArgs.src [ ".toml" ];
           };
 
           # Audit dependencies

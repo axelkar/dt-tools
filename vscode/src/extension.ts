@@ -1,5 +1,7 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 
 import {
@@ -8,26 +10,52 @@ import {
 	ServerOptions
 } from 'vscode-languageclient/node';
 
+const SERVER_NAME = 'dt-tools';
+const SERVER_ARGS = ['lsp'];
+const BUNDLED_SERVER = path.join('bin', SERVER_NAME);
+
 let client: LanguageClient | undefined;
 
-function createClient(): LanguageClient {
+function serverCommand(context: vscode.ExtensionContext): string {
+	const config = vscode.workspace.getConfiguration('dt-tools');
+	const configured = config.get<string>('path');
+	if (configured) {
+		return configured;
+	}
+
+	const bundled = context.asAbsolutePath(BUNDLED_SERVER);
+	if (process.platform === 'linux' && fs.existsSync(bundled)) {
+		// VSIX does not always preserve the executable bit.
+		// https://github.com/microsoft/vscode-arduino/commit/3649e62c52e46d9df3402340a6217eb3699ca451
+		try {
+			fs.accessSync(bundled, fs.constants.X_OK);
+		} catch {
+			fs.chmodSync(bundled, 0o755);
+		}
+		return bundled;
+	}
+
+	return SERVER_NAME;
+}
+
+function createClient(context: vscode.ExtensionContext): LanguageClient {
 	console.log('createClient');
 	const config = vscode.workspace.getConfiguration('dt-tools');
-	const path = config.get('path') as string;
+	const command = serverCommand(context);
 	const extraEnv = config.get('extraEnv');
 	// If the extension is launched in debug mode then the debug server options are used
 	// Otherwise the run options are used
 	const serverOptions: ServerOptions = {
 		run: {
-			command: path,
-			args: ['lsp'],
+			command,
+			args: SERVER_ARGS,
 			options: {
 				env: extraEnv
 			}
 		},
 		debug: {
-			command: path,
-			args: ['lsp'],
+			command,
+			args: SERVER_ARGS,
 			options: {
 				env: extraEnv
 			}
@@ -67,7 +95,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			console.log('stopped');
 		}
 
-		client = createClient();
+		client = createClient(context);
 		await client.start();
 	});
 	context.subscriptions.push(disposable1);
@@ -83,7 +111,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(disposable2);
 
-	client = createClient();
+	client = createClient(context);
 
 	// Start the client. This will also launch the server
 	await client.start();

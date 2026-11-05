@@ -4,6 +4,7 @@
 # Nix
 /.direnv
 /result
+/result-*
 
 # Code coverage files
 *.profraw

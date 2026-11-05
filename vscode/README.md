@@ -5,9 +5,12 @@ A VS Code extension providing Devicetree support powered by
 
 ## Installation
 
-Look for the latest file named `dt-tools-no-server.vsix` in the
-[GitHub releases](https://github.com/axelkar/dt-tools/releases) and install it
-with the `Extensions: Install from VSIX` command within VS Code.
+Install `dt-tools-linux-x64.vsix` or `dt-tools-linux-arm64.vsix` from the
+[GitHub releases](https://github.com/axelkar/dt-tools/releases) with the
+`Extensions: Install from VSIX` command. The Linux VSIX bundles a statically
+linked executable, so no separate installation is needed.
+
+Alternatively, install `dt-tools-no-server.vsix` and put `dt-tools` in PATH.
 
 ## Development
 
@@ -26,6 +29,16 @@ with the `Extensions: Install from VSIX` command within VS Code.
 
 ## Packaging
 
+Build the VSIXs with Nix:
+
+```console
+$ cd ..
+$ nix build .#dt-tools-vscode .#dt-tools-vscode-no-server
+$ ls result/ result-1/
+```
+
+To package the extension without an executable manually:
+
 1. Make sure you have [vsce](https://github.com/microsoft/vscode-vsce) installed.
 2. Package the extension, while ignoring the warning about a missing license:
    ```console
@@ -35,12 +48,15 @@ with the `Extensions: Install from VSIX` command within VS Code.
 ## Features
 
 * User command: `dt-tools: Restart language server`
-* Setting: `Dt-tools › Path`
+* Setting: `Dt-tools › Path` (empty uses the bundled executable or PATH)
 
 ## Requirements
 
-By default the extension will look for `dt-tools` in the PATH, but here's how you
-get the development version:
+The Linux VSIX uses its bundled `dt-tools` by default. Set `Dt-tools › Path` to
+override it. Without a bundled executable, the extension falls back to
+`dt-tools` in PATH.
+
+To use a development build:
 
 1. Build `dt-tools` to get its executable. Here's how you build and use the debug version.
    ```console
