@@ -126,7 +126,7 @@
       {
         packages = {
           default = dt-tools;
-          inherit dt-tools-vscode-no-server;
+          inherit dt-tools dt-tools-vscode-no-server;
         }
         // staticPackages;
 
